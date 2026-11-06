@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+/* Custom styles for Swarm Protocol */
+@theme {
+  --color-slate-carbon: #0B0F19;
+  --color-cyan-accent: #00F0FF;
+  --color-hazard-gold: #FFD700;
+  --color-alert-red: #FF0055;
+}
+
+/* Custom color classes */
+@layer utilities {
+  .bg-slate-carbon { background-color: var(--color-slate-carbon); }
+  .text-cyan-accent { color: var(--color-cyan-accent); }
+  .bg-cyan-accent { background-color: var(--color-cyan-accent); }
+  .text-hazard-gold { color: var(--color-hazard-gold); }
+  .bg-hazard-gold { background-color: var(--color-hazard-gold); }
+  .text-alert-red { color: var(--color-alert-red); }
+  .bg-alert-red { background-color: var(--color-alert-red); }
+  
+  /* High contrast theme */
+  .high-contrast {
+    background-color: #000000;
+    color: #FFFFFF;
+  }
+  
+  .high-contrast .bg-slate-carbon { background-color: #000000; }
+  .high-contrast .text-cyan-accent { color: #00FFFF; }
+  .high-contrast .text-hazard-gold { color: #FFFF00; }
+  .high-contrast .text-alert-red { color: #FF0000; }
+}

@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+/* Minimal styles - using Tailwind CSS for most styling */
+@theme {
+  --color-slate-carbon: #0B0F19;
+  --color-cyan-accent: #00F0FF;
+  --color-hazard-gold: #FFD700;
+  --color-alert-red: #FF0055;
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(90deg, var(--color-cyan-accent) 0%, var(--color-hazard-gold) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .pulse-glow {
+    animation: pulse-glow 2s infinite;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.5);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(0, 240, 255, 0.8);
+    }
+  }
+}

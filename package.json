@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "db:seed": "tsx src/db/seed.ts",
-    "db:reset": "tsx src/db/reset.ts"
+    "db:reset": "tsx src/db/reset.ts",
+    "db:validate": "tsx src/db/validateSeed.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

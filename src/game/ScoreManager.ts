@@ -23,8 +23,8 @@ export class ScoreManager {
   private isRunning: boolean = false
   
   // Callbacks
-  private onScoreChanged: ((score: number, breakdown: ScoreBreakdown) => void) | null = null
-  private onCoinCollected: ((amount: number, total: number) => void) | null = null
+  private onScoreChangedCallback: ((score: number, breakdown: ScoreBreakdown) => void) | null = null
+  private onCoinCollectedCallback: ((amount: number, total: number) => void) | null = null
   
   constructor() {
     this.reset()
@@ -130,11 +130,11 @@ export class ScoreManager {
   // ============================================
   
   onScoreChanged(callback: (score: number, breakdown: ScoreBreakdown) => void): void {
-    this.onScoreChanged = callback
+    this.onScoreChangedCallback = callback
   }
   
   onCoinCollected(callback: (amount: number, total: number) => void): void {
-    this.onCoinCollected = callback
+    this.onCoinCollectedCallback = callback
   }
   
   // ============================================
@@ -144,7 +144,7 @@ export class ScoreManager {
   addCoins(amount: number): void {
     this.coinsCollected += amount
     this.triggerScoreChanged()
-    this.onCoinCollected?.(amount, this.coinsCollected)
+    this.onCoinCollectedCallback?.(amount, this.coinsCollected)
     console.log(`💰 +${amount} coins (Total: ${this.coinsCollected})`)
   }
   
@@ -224,7 +224,7 @@ export class ScoreManager {
   private triggerScoreChanged(): void {
     const score = this.getCurrentScore()
     const breakdown = this.getScoreBreakdown()
-    this.onScoreChanged?.(score, breakdown)
+    this.onScoreChangedCallback?.(score, breakdown)
   }
   
   // ============================================

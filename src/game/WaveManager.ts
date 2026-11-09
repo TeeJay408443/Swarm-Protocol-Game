@@ -49,11 +49,11 @@ export class WaveManager {
   private waveTimer: NodeJS.Timeout | null = null
   
   // Callbacks
-  private onWaveStart: ((wave: number) => void) | null = null
-  private onWaveComplete: ((wave: number, allDefeated: boolean) => void) | null = null
-  private onBossSpawn: ((wave: number) => void) | null = null
-  private onBreatherStart: ((wave: number) => void) | null = null
-  private onLevelUp: ((wave: number) => void) | null = null
+  private onWaveStartCallback: ((wave: number) => void) | null = null
+  private onWaveCompleteCallback: ((wave: number, allDefeated: boolean) => void) | null = null
+  private onBossSpawnCallback: ((wave: number) => void) | null = null
+  private onBreatherStartCallback: ((wave: number) => void) | null = null
+  private onLevelUpCallback: ((wave: number) => void) | null = null
   
   constructor(canvasWidth: number, canvasHeight: number) {
     // Initialize spawn points around the edges of the canvas
@@ -142,23 +142,23 @@ export class WaveManager {
   // ============================================
   
   onWaveStart(callback: (wave: number) => void): void {
-    this.onWaveStart = callback
+    this.onWaveStartCallback = callback
   }
   
   onWaveComplete(callback: (wave: number, allDefeated: boolean) => void): void {
-    this.onWaveComplete = callback
+    this.onWaveCompleteCallback = callback
   }
   
   onBossSpawn(callback: (wave: number) => void): void {
-    this.onBossSpawn = callback
+    this.onBossSpawnCallback = callback
   }
   
   onBreatherStart(callback: (wave: number) => void): void {
-    this.onBreatherStart = callback
+    this.onBreatherStartCallback = callback
   }
   
   onLevelUp(callback: (wave: number) => void): void {
-    this.onLevelUp = callback
+    this.onLevelUpCallback = callback
   }
   
   // ============================================
@@ -177,7 +177,7 @@ export class WaveManager {
     this.startWaveTimer()
     
     // Trigger wave start callback
-    this.onWaveStart?.(waveNumber)
+    this.onWaveStartCallback?.(waveNumber)
     
     console.log(`🌊 Wave ${waveNumber} started`)
   }
@@ -265,7 +265,7 @@ export class WaveManager {
     // Check if this is a boss wave and we haven't spawned the boss yet
     if (this.currentWave.isBossWave && !this.currentWave.bossSpawned && enemyData.category === 'Mini-Boss') {
       this.currentWave.bossSpawned = true
-      this.onBossSpawn?.(this.currentWave.number)
+      this.onBossSpawnCallback?.(this.currentWave.number)
       console.log(`👑 Boss spawned for wave ${this.currentWave.number}`)
     }
     
@@ -320,11 +320,11 @@ export class WaveManager {
     this.currentWave.isBreather = false
     
     // Trigger wave complete callback
-    this.onWaveComplete?.(this.currentWave.number, allDefeated)
+    this.onWaveCompleteCallback?.(this.currentWave.number, allDefeated)
     
     // If wave was cleared, trigger level up
     if (allDefeated) {
-      this.onLevelUp?.(this.currentWave.number)
+      this.onLevelUpCallback?.(this.currentWave.number)
       console.log(`⬆️ Level up triggered after wave ${this.currentWave.number}`)
     }
     

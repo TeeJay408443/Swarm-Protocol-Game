@@ -17,8 +17,8 @@ export class XPManager {
   private totalXPEarned: number = 0
   
   // Callbacks
-  private onLevelUp: ((level: number, cards: LevelUpCard[]) => void) | null = null
-  private onXPGained: ((amount: number, total: number) => void) | null = null
+  private onLevelUpCallback: ((level: number, cards: LevelUpCard[]) => void) | null = null
+  private onXPGainedCallback: ((amount: number, total: number) => void) | null = null
   
   constructor() {
     this.xp = 0
@@ -37,7 +37,7 @@ export class XPManager {
     this.totalXPEarned += amount
     
     // Trigger XP gained callback
-    this.onXPGained?.(amount, this.totalXPEarned)
+    this.onXPGainedCallback?.(amount, this.totalXPEarned)
     
     console.log(`✨ +${amount} XP from ${source} (Total: ${this.totalXPEarned})`)
     
@@ -85,11 +85,11 @@ export class XPManager {
   // ============================================
   
   onLevelUp(callback: (level: number, cards: LevelUpCard[]) => void): void {
-    this.onLevelUp = callback
+    this.onLevelUpCallback = callback
   }
   
   onXPGained(callback: (amount: number, total: number) => void): void {
-    this.onXPGained = callback
+    this.onXPGainedCallback = callback
   }
   
   // ============================================
@@ -106,7 +106,7 @@ export class XPManager {
     const cards = this.generateLevelUpCards()
     
     // Trigger level up callback
-    this.onLevelUp?.(this.level, cards)
+    this.onLevelUpCallback?.(this.level, cards)
   }
   
   generateLevelUpCards(): LevelUpCard[] {

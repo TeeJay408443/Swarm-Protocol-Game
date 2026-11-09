@@ -176,7 +176,15 @@ export const GAMEPAD_CONTROLS = {
 
 export type ControlScheme = 'DEFAULT' | 'LEFT_HANDED' | 'CUSTOM'
 
-export const CONTROL_SCHEMES: Record<ControlScheme, typeof KEYBOARD_CONTROLS> = {
+type WidenStringArrays<T> = {
+  [K in keyof T]: T[K] extends readonly string[]
+    ? readonly string[]
+    : T[K] extends object
+      ? WidenStringArrays<T[K]>
+      : T[K]
+}
+
+export const CONTROL_SCHEMES: Record<ControlScheme, WidenStringArrays<typeof KEYBOARD_CONTROLS>> = {
   DEFAULT: KEYBOARD_CONTROLS,
   LEFT_HANDED: {
     ...KEYBOARD_CONTROLS,

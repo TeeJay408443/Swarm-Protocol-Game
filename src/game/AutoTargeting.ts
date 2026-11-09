@@ -4,7 +4,6 @@
  */
 
 import type { Enemy, Player, Position, Vector } from '../types/game'
-import { COLLISION_CONFIG } from '../config/gameConstants'
 
 // ============================================
 // TARGETING TYPES
@@ -28,7 +27,7 @@ export class AutoTargeting {
   private currentTarget: Enemy | null = null
   
   // Callbacks
-  private onTargetChanged: ((target: Enemy | null) => void) | null = null
+  private onTargetChangedCallback: ((target: Enemy | null) => void) | null = null
   
   constructor(maxDistance: number = 500) {
     this.maxTargetDistance = maxDistance
@@ -64,7 +63,7 @@ export class AutoTargeting {
   // ============================================
   
   onTargetChanged(callback: (target: Enemy | null) => void): void {
-    this.onTargetChanged = callback
+    this.onTargetChangedCallback = callback
   }
   
   // ============================================
@@ -200,7 +199,7 @@ export class AutoTargeting {
     score += enemy.speed * 50
     
     // HP factor (higher HP = more dangerous for boss)
-    if (enemy.category === 'Mini-Boss') {
+    if (enemy.category === 'mini_boss') {
       score += enemy.hp
     }
     
@@ -253,7 +252,7 @@ export class AutoTargeting {
   private setTarget(target: Enemy | null): void {
     if (this.currentTarget !== target) {
       this.currentTarget = target
-      this.onTargetChanged?.(target)
+      this.onTargetChangedCallback?.(target)
     }
   }
   

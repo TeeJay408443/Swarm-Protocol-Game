@@ -54,7 +54,7 @@ export interface VisualProperties {
 // ============================================
 
 export interface AudioProperties {
-  attackSound: string
+  attackSound: string | null
   specialSound: string | null
   spawnSound: string | null
   deathSound: string | null
@@ -833,7 +833,6 @@ export const enhancedUpgrades: EnhancedUpgrade[] = [
     quote: '"Shield engaged!"',
   },
 ]
-
 // ============================================
 // ENHANCED ENEMY DEFINITIONS
 // ============================================
@@ -1387,10 +1386,3 @@ export const enhancedAchievements: EnhancedAchievement[] = [
   },
 ]
 
-// ============================================
-// EXPORT ALL
-// ============================================
-
-export {
-  RARITY_COLORS,
-}

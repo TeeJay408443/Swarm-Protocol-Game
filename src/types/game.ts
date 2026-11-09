@@ -301,6 +301,14 @@ export interface LevelUpCard {
   isHovered: boolean
 }
 
+export interface ScoreBreakdown {
+  survivalScore: number
+  coinScore: number
+  totalScore: number
+  survivalSeconds: number
+  coinsCollected: number
+}
+
 // ============================================
 // GAME STATE TYPES
 // ============================================

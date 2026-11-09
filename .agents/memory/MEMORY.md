@@ -1,0 +1,1 @@
+- [Manager callbacks](manager-callbacks.md) — keep callback storage fields distinct from public registration method names to prevent runtime method shadowing.

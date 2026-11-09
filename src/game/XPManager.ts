@@ -3,8 +3,9 @@
  * Phase 3: Game Design - Manages XP, leveling, and level-up cards
  */
 
-import type { Upgrade, LevelUpCard } from '../types/game'
-import { LEVEL_UP_CONFIG } from '../config/gameConstants'
+import type { LevelUpCard } from '../types/game'
+import type { Upgrade } from '../types/database'
+import { LEVEL_UP_CONFIG, UPGRADE_CONFIG } from '../config/gameConstants'
 import { upgrades } from '../db/seedData'
 
 // ============================================
@@ -30,7 +31,7 @@ export class XPManager {
   // PUBLIC METHODS
   // ============================================
   
-  addXP(amount: number, source: string = 'unknown'): void {
+  addXP(amount: number, source: string = 'unknown'): boolean {
     const oldLevel = this.level
     
     this.xp += amount
@@ -114,7 +115,7 @@ export class XPManager {
     const cards: LevelUpCard[] = []
     
     // Select 3 random upgrades
-    for (let i = 0; i < LEVEL_UP_CONFIG.LEVEL_UP_OPTIONS; i++) {
+    for (let i = 0; i < UPGRADE_CONFIG.LEVEL_UP_OPTIONS; i++) {
       const upgrade = this.selectRandomUpgrade(availableUpgrades)
       if (upgrade) {
         cards.push(this.createLevelUpCard(upgrade))

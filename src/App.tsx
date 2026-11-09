@@ -40,7 +40,7 @@ function App() {
       setEnemiesInWave(generateWaveEnemies(wave))
     })
     
-    waveManagerRef.current.onWaveComplete((wave, allDefeated) => {
+    waveManagerRef.current.onWaveComplete((_wave, allDefeated) => {
       if (allDefeated) {
         xpManagerRef.current?.addWaveClearXP()
         scoreManagerRef.current?.addWaveClearBonus()
@@ -52,7 +52,7 @@ function App() {
       console.log(`Boss spawned in wave ${wave}!`)
     })
     
-    waveManagerRef.current.onLevelUp((wave) => {
+    waveManagerRef.current.onLevelUp((_wave) => {
       setShowLevelUp(true)
       const cards = xpManagerRef.current?.generateLevelUpCards() || []
       setLevelUpCards(cards)
@@ -64,7 +64,7 @@ function App() {
       setShowLevelUp(true)
     })
     
-    xpManagerRef.current.onXPGained((amount, total) => {
+    xpManagerRef.current.onXPGained((_amount, total) => {
       setXp(total)
     })
     
@@ -161,7 +161,7 @@ function App() {
   const getHero = (id: string) => heroes.find(h => h.id === id)
   
   // Calculate score
-  const calculatedScore = Math.floor(scoreManagerRef.current?.getCurrentScore() || 0)
+  const calculatedScore = Math.floor(scoreManagerRef.current?.getCurrentScore() || score)
   
   return (
     <div className="min-h-screen bg-slate-carbon text-white">
@@ -308,7 +308,7 @@ function App() {
                     onClick={() => defeatEnemy(enemy.id)}
                     title={`Click to defeat ${enemy.name} (HP: ${enemy.hp}, Damage: ${enemy.damage})`}
                   >
-                    {enemy.name.split(' ').map(n => n[0]).join('')}
+                    {enemy.name.split(' ').map((initial: string) => initial[0]).join('')}
                   </div>
                 ))}
                 

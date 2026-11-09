@@ -3,7 +3,8 @@
  * Phase 3: Game Design - Manages wave spawning, timing, and progression
  */
 
-import type { Enemy, Position } from '../types/game'
+import type { Position } from '../types/game'
+import type { EnhancedEnemy } from '../db/seedDataEnhanced'
 import { WAVE_CONFIG } from '../config/gameConstants'
 import { enhancedEnemies } from '../db/seedDataEnhanced'
 
@@ -44,7 +45,7 @@ export class WaveManager {
   private currentWave: Wave
   private wavesCompleted: number = 0
   private spawnPoints: Position[] = []
-  private enemySpawnQueue: { enemy: Enemy; spawnTime: number; position: Position }[] = []
+  private enemySpawnQueue: { enemy: EnhancedEnemy; spawnTime: number; position: Position }[] = []
   private spawnTimer: NodeJS.Timeout | null = null
   private waveTimer: NodeJS.Timeout | null = null
   
@@ -247,11 +248,11 @@ export class WaveManager {
     }
   }
   
-  private getSpawnableEnemies(wave: number): Enemy[] {
-    return enemies.filter(e => e.minWave <= wave)
+  private getSpawnableEnemies(wave: number): EnhancedEnemy[] {
+    return enhancedEnemies.filter(enemy => enemy.minWave <= wave)
   }
   
-  private selectRandomEnemy(enemies: Enemy[]): Enemy {
+  private selectRandomEnemy(enemies: EnhancedEnemy[]): EnhancedEnemy {
     return enemies[Math.floor(Math.random() * enemies.length)]
   }
   
@@ -259,7 +260,7 @@ export class WaveManager {
     return this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)]
   }
   
-  spawnEnemy(enemyData: Enemy, position: Position): Enemy {
+  spawnEnemy(enemyData: EnhancedEnemy, _position: Position): void {
     this.currentWave.enemiesSpawned++
     
     // Check if this is a boss wave and we haven't spawned the boss yet
@@ -269,17 +270,8 @@ export class WaveManager {
       console.log(`👑 Boss spawned for wave ${this.currentWave.number}`)
     }
     
-    // Create enemy instance with position
-    const enemy: Enemy = {
-      ...enemyData,
-      position: { ...position },
-      velocity: { x: 0, y: 0 },
-      radius: 24, // Default radius
-      isActive: true,
-      createdAt: Date.now(),
-    }
-    
-    return enemy
+    // This prototype renders enemies from the React view's wave list.
+    // The manager only tracks wave spawn/defeat counts.
   }
   
   // ============================================
@@ -371,8 +363,8 @@ export class WaveManager {
     return wave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0
   }
   
-  static getBossEnemy(): Enemy | undefined {
-    return enhancedEnemies.find(enemy => enemy.category === 'Mini-Boss') as unknown as Enemy | undefined
+  static getBossEnemy(): EnhancedEnemy | undefined {
+    return enhancedEnemies.find(enemy => enemy.category === 'Mini-Boss')
   }
 }
 

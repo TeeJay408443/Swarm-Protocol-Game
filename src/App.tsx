@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { WaveManager, XPManager, AutoTargeting, ScoreManager } from './game'
-import { heroes, enemies, upgrades } from './db/seedData'
+import { heroes, enemies } from './db/seedData'
+import { enhancedEnemies } from './db/seedDataEnhanced'
 import './App.css'
 
 function App() {
@@ -79,12 +80,13 @@ function App() {
   
   // Generate enemies for a wave
   const generateWaveEnemies = (wave: number) => {
-    const spawnableEnemies = enemies.filter(e => e.minWave <= wave)
+    const spawnableEnemies = enhancedEnemies.filter(enemy => enemy.minWave <= wave)
     const enemyCount = Math.floor(10 + wave * 0.5)
     const waveEnemies: any[] = []
     
     for (let i = 0; i < enemyCount; i++) {
       const enemy = spawnableEnemies[Math.floor(Math.random() * spawnableEnemies.length)]
+      if (!enemy) continue
       waveEnemies.push({
         ...enemy,
         id: `${enemy.id}_${i}_${Date.now()}`,
@@ -120,10 +122,13 @@ function App() {
   }
   
   // Simulate enemy defeat
-  const defeatEnemy = (enemyId: string) => {
+  const defeatEnemy = (enemyId?: string) => {
+    if (!enemyId) return
+
     setEnemiesInWave(prev => prev.filter(e => e.id !== enemyId))
     xpManagerRef.current?.addEnemyKillXP()
-    scoreManagerRef.current?.addCoins(enemies.find(e => e.id === enemyId.split('_')[0])?.coin_value || 1)
+    const defeatedEnemy = enemies.find(enemy => enemyId.startsWith(`${enemy.id}_`))
+    scoreManagerRef.current?.addCoins(defeatedEnemy?.coin_value ?? 1)
     
     // Check if all enemies defeated
     if (enemiesInWave.length <= 1) {

@@ -5,7 +5,7 @@
 
 import type { Enemy, Position } from '../types/game'
 import { WAVE_CONFIG } from '../config/gameConstants'
-import { enemies } from '../db/seedData'
+import { enhancedEnemies } from '../db/seedDataEnhanced'
 
 // ============================================
 // WAVE TYPES
@@ -305,7 +305,7 @@ export class WaveManager {
     this.currentWave.isBreather = true
     
     // Trigger breather start callback
-    this.onBreatherStart?.(this.currentWave.number)
+    this.onBreatherStartCallback?.(this.currentWave.number)
     
     console.log(`🌬️ Breather started for wave ${this.currentWave.number}`)
     
@@ -372,7 +372,7 @@ export class WaveManager {
   }
   
   static getBossEnemy(): Enemy | undefined {
-    return enemies.find(e => e.category === 'Mini-Boss')
+    return enhancedEnemies.find(enemy => enemy.category === 'Mini-Boss') as unknown as Enemy | undefined
   }
 }
 

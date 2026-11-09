@@ -1,0 +1,1 @@
+export { ArmoryView } from './ArmoryView';

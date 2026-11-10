@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { HQView } from './components/views/HQView';
-import { PlayView } from './components/views/PlayView';
+import { PlayView } from './components/views/PlayView/PlayView';
 import { CodexView } from './components/views/CodexView';
 import { ArmoryView } from './components/views/ArmoryView';
 import { LeaderboardsView } from './components/views/LeaderboardsView';

@@ -151,7 +151,7 @@ export const Collision = {
   /**
    * Check if parallel lines overlap
    */
-  private lineLineParallel(line1: Line, line2: Line): boolean {
+  lineLineParallel(line1: Line, line2: Line): boolean {
     // Check if points are on the same line
     const onLine = (x: number, y: number, line: Line): boolean => {
       const cross = (x - line.x1) * (line.y2 - line.y1) - 

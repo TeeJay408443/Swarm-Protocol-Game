@@ -3,7 +3,8 @@
  * Phase 7: Build the Game - Core Engine
  */
 
-import { Camera, CameraOptions } from './Camera'
+import { Camera } from './Camera'
+import type { CameraOptions } from './Camera'
 import { InputManager } from './InputManager'
 import { Vector2 } from '../utils/vector'
 import { WaveManager } from '../WaveManager'

@@ -3,7 +3,6 @@
  * Phase 6: Core Build - Data Explorer
  */
 
-import { useState } from 'react'
 import { Card } from '../../ui/Card'
 import { Button } from '../../ui/Button'
 import { Input } from '../../ui/Input'
@@ -64,62 +63,6 @@ export function CodexView() {
     if ('archetype' in entity) return entity.archetype
     if ('category' in entity) return entity.category
     return entity.reward_badge || 'General'
-  }
-
-  // Get entity stats for display
-  const getEntityDetails = (entity: HeroesRow | EnemiesRow | UpgradesRow | AchievementsRow) => {
-    const entityName = getEntityName(entity)
-    const category = getEntityCategory(entity)
-
-    if ('hp' in entity && 'speed' in entity && 'archetype' in entity) {
-      // Hero
-      const hero = entity as HeroesRow
-      return {
-        title: entityName,
-        subtitle: hero.archetype,
-        stats: [
-          { label: 'HP', value: hero.hp },
-          { label: 'Speed', value: `${hero.speed}x` },
-        ],
-        description: hero.lore || 'No lore available',
-      }
-    } else if ('hp' in entity && 'speed' in entity && 'coin_value' in entity) {
-      // Enemy
-      const enemy = entity as EnemiesRow
-      return {
-        title: entityName,
-        subtitle: enemy.category,
-        stats: [
-          { label: 'HP', value: enemy.hp },
-          { label: 'Speed', value: `${enemy.speed}x` },
-          { label: 'Coin Value', value: enemy.coin_value },
-        ],
-        description: enemy.description || 'No description available',
-      }
-    } else if ('damage' in entity && 'cooldown_s' in entity) {
-      // Upgrade
-      const upgrade = entity as UpgradesRow
-      return {
-        title: entityName,
-        subtitle: upgrade.category,
-        stats: [
-          { label: 'Damage', value: upgrade.damage },
-          { label: 'Cooldown', value: `${upgrade.cooldown_s}s` },
-        ],
-        description: upgrade.function_desc || 'No description available',
-      }
-    } else {
-      // Achievement
-      const achievement = entity as AchievementsRow
-      return {
-        title: entityName,
-        subtitle: achievement.reward_badge || 'General',
-        stats: [
-          { label: 'Requirement', value: achievement.requirement },
-        ],
-        description: achievement.requirement,
-      }
-    }
   }
 
   // Tab configuration

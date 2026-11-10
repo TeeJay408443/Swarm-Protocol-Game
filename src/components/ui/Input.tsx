@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-
 interface InputProps {
   type?: 'text' | 'email' | 'password' | 'number' | 'search'
   value: string

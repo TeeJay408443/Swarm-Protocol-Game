@@ -11,7 +11,6 @@ import { Badge } from '../../ui/Badge'
 import { useSupabase } from '../../../hooks/useSupabase'
 import { useLoadouts } from '../../../hooks/useLoadouts'
 import { heroes, upgrades } from '../../../db/seedData'
-import type { HeroesRow, UpgradesRow } from '../../../types/database'
 
 // Define type for loadout
 interface Loadout {
@@ -24,14 +23,9 @@ interface Loadout {
 
 export function ArmoryView() {
   const { user, loading: authLoading } = useSupabase()
-  const { 
-    loadouts: dbLoadouts, 
-    createLoadout, 
-    updateLoadout, 
-    deleteLoadout,
+  const {
     loading: loadoutsLoading,
-    error: loadoutsError,
-    validate
+    error: loadoutsError
   } = useLoadouts()
 
   // Local state for the loadout builder

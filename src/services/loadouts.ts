@@ -6,7 +6,7 @@
  * Loadouts are user-specific and require authentication.
  */
 
-import { supabase } from './supabase'
+import { getSupabaseClient } from './supabase'
 import type { LoadoutsRow } from '../types/database'
 
 // ============================================
@@ -62,7 +62,7 @@ export const createLoadout = async (
   input: CreateLoadoutInput,
   userId: string
 ): Promise<LoadoutsRow> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('loadouts')
     .insert({
       ...input,
@@ -83,7 +83,7 @@ export const createLoadout = async (
  * Get all loadouts for a specific user
  */
 export const getLoadouts = async (userId: string): Promise<LoadoutsRow[]> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('loadouts')
     .select('*')
     .eq('user_id', userId)
@@ -101,7 +101,7 @@ export const getLoadouts = async (userId: string): Promise<LoadoutsRow[]> => {
  * Get a single loadout by ID
  */
 export const getLoadout = async (id: string): Promise<LoadoutsRow | null> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('loadouts')
     .select('*')
     .eq('id', id)
@@ -119,7 +119,7 @@ export const getLoadout = async (id: string): Promise<LoadoutsRow | null> => {
  * Get loadout with joined hero and upgrade data
  */
 export const getExtendedLoadout = async (id: string): Promise<ExtendedLoadout | null> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('loadouts')
     .select(`*, heroes(id, name, archetype, hp, speed), upgrades(id, name, category, damage, cooldown_s)`)
     .eq('id', id)
@@ -147,7 +147,7 @@ export const updateLoadout = async (
   id: string,
   updates: UpdateLoadoutInput
 ): Promise<LoadoutsRow> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('loadouts')
     .update(updates)
     .eq('id', id)
@@ -166,7 +166,7 @@ export const updateLoadout = async (
  * Delete a loadout
  */
 export const deleteLoadout = async (id: string): Promise<boolean> => {
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from('loadouts')
     .delete()
     .eq('id', id)
@@ -186,7 +186,7 @@ export const isLoadoutOwner = async (
   loadoutId: string,
   userId: string
 ): Promise<boolean> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('loadouts')
     .select('user_id')
     .eq('id', loadoutId)
@@ -210,7 +210,7 @@ export const isLoadoutOwner = async (
 export const getUserLoadoutsWithDetails = async (
   userId: string
 ): Promise<ExtendedLoadout[]> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('loadouts')
     .select(`*, heroes(id, name, archetype, hp, speed), upgrades(id, name, category, damage, cooldown_s)`)
     .eq('user_id', userId)
@@ -245,7 +245,7 @@ export const validateLoadoutInput = (input: CreateLoadoutInput | UpdateLoadoutIn
     if (!input.loadout_name || input.loadout_name.trim().length === 0) {
       errors.push('Loadout name is required')
     }
-    if (input.loadout_name.length > 100) {
+    if (input.loadout_name && input.loadout_name.length > 100) {
       errors.push('Loadout name must be less than 100 characters')
     }
   }

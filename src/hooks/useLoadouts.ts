@@ -10,12 +10,12 @@ import { useSupabase } from './useSupabase'
 import { 
   createLoadout as createLoadoutApi,
   getLoadouts as getLoadoutsApi,
-  getExtendedLoadout as getExtendedLoadoutApi,
   updateLoadout as updateLoadoutApi,
   deleteLoadout as deleteLoadoutApi,
   validateLoadoutInput
 } from '../services/loadouts'
-import type { LoadoutsRow, ExtendedLoadout, CreateLoadoutInput, UpdateLoadoutInput } from '../services/loadouts'
+import type { LoadoutsRow } from '../types/database'
+import type { ExtendedLoadout, CreateLoadoutInput, UpdateLoadoutInput } from '../services/loadouts'
 
 interface UseLoadoutsReturn {
   // Loadouts data

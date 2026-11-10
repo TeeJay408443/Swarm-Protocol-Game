@@ -6,7 +6,7 @@
  * Seed data tables are public read-only and contain game entity definitions.
  */
 
-import { supabase } from './supabase'
+import { getSupabaseClient } from './supabase'
 import type { 
   HeroesRow, 
   EnemiesRow, 
@@ -23,7 +23,7 @@ import type {
  * Fetch all heroes from the database
  */
 export const getHeroes = async (): Promise<HeroesRow[]> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('heroes')
     .select('*')
     .order('name', { ascending: true })
@@ -40,7 +40,7 @@ export const getHeroes = async (): Promise<HeroesRow[]> => {
  * Fetch a single hero by ID
  */
 export const getHero = async (id: string): Promise<HeroesRow | null> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('heroes')
     .select('*')
     .eq('id', id)
@@ -58,7 +58,7 @@ export const getHero = async (id: string): Promise<HeroesRow | null> => {
  * Fetch all enemies from the database
  */
 export const getEnemies = async (): Promise<EnemiesRow[]> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('enemies')
     .select('*')
     .order('name', { ascending: true })
@@ -75,7 +75,7 @@ export const getEnemies = async (): Promise<EnemiesRow[]> => {
  * Fetch a single enemy by ID
  */
 export const getEnemy = async (id: string): Promise<EnemiesRow | null> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('enemies')
     .select('*')
     .eq('id', id)
@@ -93,7 +93,7 @@ export const getEnemy = async (id: string): Promise<EnemiesRow | null> => {
  * Fetch all upgrades from the database
  */
 export const getUpgrades = async (): Promise<UpgradesRow[]> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('upgrades')
     .select('*')
     .order('name', { ascending: true })
@@ -110,7 +110,7 @@ export const getUpgrades = async (): Promise<UpgradesRow[]> => {
  * Fetch a single upgrade by ID
  */
 export const getUpgrade = async (id: string): Promise<UpgradesRow | null> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('upgrades')
     .select('*')
     .eq('id', id)
@@ -128,7 +128,7 @@ export const getUpgrade = async (id: string): Promise<UpgradesRow | null> => {
  * Fetch all achievements from the database
  */
 export const getAchievements = async (): Promise<AchievementsRow[]> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('achievements')
     .select('*')
     .order('title', { ascending: true })
@@ -145,7 +145,7 @@ export const getAchievements = async (): Promise<AchievementsRow[]> => {
  * Fetch a single achievement by ID
  */
 export const getAchievement = async (id: string): Promise<AchievementsRow | null> => {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('achievements')
     .select('*')
     .eq('id', id)

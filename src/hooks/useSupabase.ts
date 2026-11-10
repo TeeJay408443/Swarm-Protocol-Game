@@ -24,10 +24,17 @@ export const useSupabase = (): UseSupabaseReturn => {
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
+    const client = supabase
+    if (!client) {
+      setError(new Error('Supabase is not configured.'))
+      setLoading(false)
+      return
+    }
+
     const initialize = async () => {
       try {
         // Get initial session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        const { data: { session }, error: sessionError } = await client.auth.getSession()
         
         if (sessionError) {
           setError(sessionError)
@@ -47,7 +54,7 @@ export const useSupabase = (): UseSupabaseReturn => {
     initialize()
 
     // Subscribe to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       setUser(session?.user ?? null)
     })

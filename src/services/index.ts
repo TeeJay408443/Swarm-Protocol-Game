@@ -29,3 +29,14 @@ export {
   validateLoadoutInput
 } from './loadouts'
 export type { ExtendedLoadout, CreateLoadoutInput, UpdateLoadoutInput } from './loadouts'
+
+// Audio Service
+export {
+  AudioService,
+  getAudioService,
+  initializeAudio,
+  playSound,
+  playMusic,
+  stopMusic
+} from './AudioService'
+export type { AudioSettings, SoundType, AudioServiceConfig } from './AudioService'

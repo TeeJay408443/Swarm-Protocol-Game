@@ -14,7 +14,7 @@ interface AudioSettingsProps {
 }
 
 const AudioSettings: React.FC<AudioSettingsProps> = ({ isOpen, onClose }) => {
-  const { settings, updateSettings, resetSettings } = useAudio()
+  const { settings, updateSettings, resetSettings, playSound } = useAudio()
   const [tempSettings, setTempSettings] = useState(settings)
 
   // Sync with context settings
@@ -41,6 +41,7 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({ isOpen, onClose }) => {
   // Apply settings
   const handleApply = () => {
     updateSettings(tempSettings)
+    playSound('click')
     onClose()
   }
 
@@ -96,7 +97,8 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({ isOpen, onClose }) => {
 
   // Get volume icon based on type and value
   const getVolumeIcon = (type: string, value?: number) => {
-    const currentValue = value !== undefined ? value : tempSettings[type as keyof typeof tempSettings]
+    const rawVal = value !== undefined ? value : (tempSettings as any)[type]
+    const currentValue = typeof rawVal === 'number' ? rawVal : 0
     
     if (tempSettings.isMuted) {
       return '🔇'
@@ -172,31 +174,43 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({ isOpen, onClose }) => {
         {/* Quick Test */}
         <div className="border-t border-slate-700 pt-4">
           <h3 className="text-white/80 text-sm font-medium mb-3">Test Sounds</h3>
-          <div className="flex space-x-2">
+          <div className="flex flex-wrap gap-2">
             <Button
-              onClick={() => {/* playSound('click') */}}
+              onClick={() => {
+                updateSettings(tempSettings)
+                playSound('click')
+              }}
               variant="secondary"
               size="sm"
             >
               Click
             </Button>
             <Button
-              onClick={() => {/* playSound('coin') */}}
+              onClick={() => {
+                updateSettings(tempSettings)
+                playSound('coin')
+              }}
               variant="warning"
               size="sm"
             >
               Coin
             </Button>
             <Button
-              onClick={() => {/* playSound('shoot') */}}
+              onClick={() => {
+                updateSettings(tempSettings)
+                playSound('shoot')
+              }}
               variant="primary"
               size="sm"
             >
               Shoot
             </Button>
             <Button
-              onClick={() => {/* playSound('levelup') */}}
-              variant="success"
+              onClick={() => {
+                updateSettings(tempSettings)
+                playSound('levelup')
+              }}
+              variant="secondary"
               size="sm"
             >
               Level Up

@@ -56,14 +56,18 @@ export class ScoreManager {
     this.isRunning = false
   }
   
-  update(): void {
+  update(deltaTimeMs?: number): void {
     if (!this.isRunning) return
     
-    const now = Date.now()
-    const deltaTime = now - this.lastUpdateTime
-    
-    this.survivalSeconds += deltaTime / 1000
-    this.lastUpdateTime = now
+    if (typeof deltaTimeMs === 'number') {
+      this.survivalSeconds += deltaTimeMs / 1000
+      this.lastUpdateTime = Date.now()
+    } else {
+      const now = Date.now()
+      const deltaTime = now - this.lastUpdateTime
+      this.survivalSeconds += deltaTime / 1000
+      this.lastUpdateTime = now
+    }
   }
   
   // ============================================
@@ -133,8 +137,16 @@ export class ScoreManager {
     this.onScoreChangedCallback = callback
   }
   
+  onScoreChange(callback: (currentScore: number) => void): void {
+    this.onScoreChangedCallback = (score) => callback(score)
+  }
+
   onCoinCollected(callback: (amount: number, total: number) => void): void {
     this.onCoinCollectedCallback = callback
+  }
+
+  onCoinsChange(callback: (currentCoins: number) => void): void {
+    this.onCoinCollectedCallback = (_amount, total) => callback(total)
   }
   
   // ============================================

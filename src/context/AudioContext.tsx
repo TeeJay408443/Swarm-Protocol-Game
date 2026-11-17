@@ -6,7 +6,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react'
 import { AudioService, AudioSettings, getAudioService, initializeAudio } from '../services/AudioService'
 
-interface AudioContextType {
+export interface AudioContextType {
   audioService: AudioService | null
   settings: AudioSettings
   isReady: boolean
@@ -26,7 +26,7 @@ interface AudioContextType {
 
 const AudioContext = createContext<AudioContextType | undefined>(undefined)
 
-interface AudioProviderProps {
+export interface AudioProviderProps {
   children: ReactNode
   config?: {
     soundPath?: string
@@ -193,10 +193,11 @@ export const useAudioWithInit = (): AudioContextType => {
   const [isInitialized, setIsInitialized] = useState(false)
 
   useEffect(() => {
-    if (context.audioService && !context.isReady) {
+    const service = context.audioService
+    if (service && !context.isReady) {
       const init = async () => {
-        await context.audioService.initialize()
-        context.audioService.updateSettings(context.settings)
+        await service.initialize()
+        service.updateSettings(context.settings)
       }
       init()
       setIsInitialized(true)

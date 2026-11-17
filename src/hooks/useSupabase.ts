@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import { getLocalAuthState, subscribeLocalAuth } from '../services/auth'
 import type { Session, User } from '@supabase/supabase-js'
 
 interface UseSupabaseReturn {
@@ -18,17 +19,26 @@ interface UseSupabaseReturn {
 }
 
 export const useSupabase = (): UseSupabaseReturn => {
-  const [session, setSession] = useState<Session | null>(null)
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [session, setSession] = useState<Session | null>(() =>
+    supabase ? null : getLocalAuthState().session
+  )
+  const [user, setUser] = useState<User | null>(() =>
+    supabase ? null : getLocalAuthState().user
+  )
+  const [loading, setLoading] = useState(Boolean(supabase))
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
     const client = supabase
     if (!client) {
-      setError(new Error('Supabase is not configured.'))
+      const current = getLocalAuthState()
+      setSession(current.session)
+      setUser(current.user)
       setLoading(false)
-      return
+      return subscribeLocalAuth((nextUser, nextSession) => {
+        setUser(nextUser)
+        setSession(nextSession)
+      })
     }
 
     const initialize = async () => {

@@ -5,7 +5,7 @@
 
 import React from 'react'
 
-interface PauseMenuProps {
+export interface PauseMenuProps {
   onResume: () => void
   onRestart: () => void
   onQuit: () => void

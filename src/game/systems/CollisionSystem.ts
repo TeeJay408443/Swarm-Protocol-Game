@@ -28,7 +28,7 @@ export interface CollisionResult {
 
 export class CollisionSystem {
   /** Collision layers */
-  private layers: {
+  private layers: Record<string, any[]> & {
     player: any[]
     enemies: any[]
     playerProjectiles: any[]

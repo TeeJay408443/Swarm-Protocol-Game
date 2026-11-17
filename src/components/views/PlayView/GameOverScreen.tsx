@@ -5,13 +5,13 @@
 
 import React from 'react'
 
-interface GameOverStats {
+export interface GameOverStats {
   survivalSeconds: number
   coinsCollected: number
   enemiesDefeated: number
 }
 
-interface GameOverScreenProps {
+export interface GameOverScreenProps {
   score: number
   stats: GameOverStats
   onRestart: () => void
@@ -82,8 +82,13 @@ const GameOverScreen: React.FC<GameOverScreenProps> = ({ score, stats, onRestart
         </div>
         
         {/* Footer */}
-        <div className="mt-8 text-white/60 text-sm">
-          <p>Keep surviving to climb the leaderboards!</p>
+        <div className="mt-6 text-white/75 text-sm space-y-1">
+          <p className="text-yellow-400 font-semibold">
+            +{stats.coinsCollected.toLocaleString()} Battle Coins added to your Shop Wallet
+          </p>
+          <p className="text-white/60 text-xs">
+            Spend coins in the Shop and equip gear in your Armory!
+          </p>
         </div>
       </div>
     </div>

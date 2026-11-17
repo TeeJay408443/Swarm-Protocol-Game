@@ -3,7 +3,7 @@
  * Phase 8: Features & Polish - High-Contrast Accessibility Theme
  */
 
-import { ClassValue } from 'clsx'
+// ClassValue type replaced with string[]
 
 /**
  * Accessibility settings
@@ -177,7 +177,7 @@ export const getColors = (settings: AccessibilitySettings) => {
 /**
  * Get Tailwind classes for accessibility
  */
-export const getAccessibilityClasses = (settings: AccessibilitySettings): ClassValue => {
+export const getAccessibilityClasses = (settings: AccessibilitySettings): string[] => {
   const classes: string[] = []
   
   // High contrast

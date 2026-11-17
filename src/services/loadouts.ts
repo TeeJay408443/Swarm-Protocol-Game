@@ -6,8 +6,54 @@
  * Loadouts are user-specific and require authentication.
  */
 
-import { getSupabaseClient } from './supabase'
+import { supabase } from './supabase'
+import { heroes, upgrades } from '../db/seedData'
+import { shopWeaponsAsUpgrades } from './shop'
 import type { LoadoutsRow } from '../types/database'
+
+// Local in-memory / localStorage fallback storage
+const localLoadoutsKey = 'swarm_protocol_local_loadouts'
+const DEFAULT_LOCAL_LOADOUTS: LoadoutsRow[] = [
+  {
+    id: 'loadout_default_1',
+    user_id: 'guest_user',
+    loadout_name: 'Vanguard Assault',
+    hero_id: 'hero_01',
+    primary_upgrade_id: 'upg_01',
+    created_at: new Date().toISOString()
+  }
+]
+let memoryLoadoutsStore: LoadoutsRow[] | null = null
+
+const getLocalLoadouts = (): LoadoutsRow[] => {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(localLoadoutsKey)
+      if (raw) {
+        const parsed = JSON.parse(raw) as LoadoutsRow[]
+        memoryLoadoutsStore = parsed
+        return parsed
+      }
+    }
+  } catch {
+    // Fall back to in-memory store
+  }
+  if (!memoryLoadoutsStore) {
+    memoryLoadoutsStore = [...DEFAULT_LOCAL_LOADOUTS]
+  }
+  return [...memoryLoadoutsStore]
+}
+
+const saveLocalLoadouts = (list: LoadoutsRow[]) => {
+  memoryLoadoutsStore = [...list]
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(localLoadoutsKey, JSON.stringify(list))
+    }
+  } catch {
+    // Ignore storage quota errors in constrained environments
+  }
+}
 
 // ============================================
 // LOADOUT TYPE EXTENSIONS
@@ -62,82 +108,135 @@ export const createLoadout = async (
   input: CreateLoadoutInput,
   userId: string
 ): Promise<LoadoutsRow> => {
-  const { data, error } = await getSupabaseClient()
-    .from('loadouts')
-    .insert({
-      ...input,
-      user_id: userId
-    })
-    .select()
-    .single()
-  
-  if (error) {
-    console.error('Error creating loadout:', error)
-    throw error
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('loadouts')
+        .insert({
+          ...input,
+          user_id: userId
+        })
+        .select()
+        .single()
+      
+      if (!error && data) return data
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
-  return data
+
+  const list = getLocalLoadouts()
+  const newRow: LoadoutsRow = {
+    id: `loadout_${Date.now()}`,
+    user_id: userId || 'guest_user',
+    loadout_name: input.loadout_name,
+    hero_id: input.hero_id,
+    primary_upgrade_id: input.primary_upgrade_id,
+    created_at: new Date().toISOString()
+  }
+  list.unshift(newRow)
+  saveLocalLoadouts(list)
+  return newRow
 }
 
 /**
  * Get all loadouts for a specific user
  */
 export const getLoadouts = async (userId: string): Promise<LoadoutsRow[]> => {
-  const { data, error } = await getSupabaseClient()
-    .from('loadouts')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-  
-  if (error) {
-    console.error('Error fetching loadouts:', error)
-    throw error
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('loadouts')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+      
+      if (!error && data) return data
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
-  return data || []
+
+  const list = getLocalLoadouts()
+  if (!userId || userId === 'guest_user') {
+    return list.filter(l => l.user_id === 'guest_user')
+  }
+  return list.filter(l => l.user_id === userId)
 }
 
 /**
  * Get a single loadout by ID
  */
 export const getLoadout = async (id: string): Promise<LoadoutsRow | null> => {
-  const { data, error } = await getSupabaseClient()
-    .from('loadouts')
-    .select('*')
-    .eq('id', id)
-    .single()
-  
-  if (error) {
-    console.error('Error fetching loadout:', error)
-    throw error
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('loadouts')
+        .select('*')
+        .eq('id', id)
+        .single()
+      
+      if (!error && data) return data
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
-  return data || null
+
+  const list = getLocalLoadouts()
+  return list.find(l => l.id === id) || null
+}
+
+const enrichLoadout = (loadout: LoadoutsRow): ExtendedLoadout => {
+  const heroData = heroes.find(h => h.id === loadout.hero_id)
+  const upgradeData = [...upgrades, ...shopWeaponsAsUpgrades()].find(
+    u => u.id === loadout.primary_upgrade_id
+  )
+  return {
+    ...loadout,
+    hero: heroData ? {
+      id: heroData.id,
+      name: heroData.name,
+      archetype: heroData.archetype,
+      hp: heroData.hp,
+      speed: heroData.speed
+    } : undefined,
+    primary_upgrade: upgradeData ? {
+      id: upgradeData.id,
+      name: upgradeData.name,
+      category: upgradeData.category,
+      damage: upgradeData.damage,
+      cooldown_s: upgradeData.cooldown_s
+    } : undefined
+  }
 }
 
 /**
  * Get loadout with joined hero and upgrade data
  */
 export const getExtendedLoadout = async (id: string): Promise<ExtendedLoadout | null> => {
-  const { data, error } = await getSupabaseClient()
-    .from('loadouts')
-    .select(`*, heroes(id, name, archetype, hp, speed), upgrades(id, name, category, damage, cooldown_s)`)
-    .eq('id', id)
-    .single()
-  
-  if (error) {
-    console.error('Error fetching extended loadout:', error)
-    throw error
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('loadouts')
+        .select(`*, heroes(id, name, archetype, hp, speed), upgrades(id, name, category, damage, cooldown_s)`)
+        .eq('id', id)
+        .single()
+      
+      if (!error && data) {
+        return {
+          ...data,
+          hero: data.heroes || undefined,
+          primary_upgrade: data.upgrades || undefined
+        }
+      }
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
-  if (!data) return null
-  
-  // Transform the data to match our interface
-  return {
-    ...data,
-    hero: data.heroes || undefined,
-    primary_upgrade: data.upgrades || undefined
-  }
+
+  const loadout = await getLoadout(id)
+  if (!loadout) return null
+  return enrichLoadout(loadout)
 }
 
 /**
@@ -147,35 +246,53 @@ export const updateLoadout = async (
   id: string,
   updates: UpdateLoadoutInput
 ): Promise<LoadoutsRow> => {
-  const { data, error } = await getSupabaseClient()
-    .from('loadouts')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single()
-  
-  if (error) {
-    console.error('Error updating loadout:', error)
-    throw error
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('loadouts')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single()
+      
+      if (!error && data) return data
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
-  return data
+
+  const list = getLocalLoadouts()
+  const index = list.findIndex(l => l.id === id)
+  if (index === -1) throw new Error('Loadout not found')
+  const updated: LoadoutsRow = {
+    ...list[index],
+    ...updates
+  }
+  list[index] = updated
+  saveLocalLoadouts(list)
+  return updated
 }
 
 /**
  * Delete a loadout
  */
 export const deleteLoadout = async (id: string): Promise<boolean> => {
-  const { error } = await getSupabaseClient()
-    .from('loadouts')
-    .delete()
-    .eq('id', id)
-  
-  if (error) {
-    console.error('Error deleting loadout:', error)
-    throw error
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('loadouts')
+        .delete()
+        .eq('id', id)
+      
+      if (!error) return true
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
+
+  const list = getLocalLoadouts()
+  const filtered = list.filter(l => l.id !== id)
+  saveLocalLoadouts(filtered)
   return true
 }
 
@@ -186,18 +303,22 @@ export const isLoadoutOwner = async (
   loadoutId: string,
   userId: string
 ): Promise<boolean> => {
-  const { data, error } = await getSupabaseClient()
-    .from('loadouts')
-    .select('user_id')
-    .eq('id', loadoutId)
-    .single()
-  
-  if (error) {
-    console.error('Error checking loadout ownership:', error)
-    return false
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('loadouts')
+        .select('user_id')
+        .eq('id', loadoutId)
+        .single()
+      
+      if (!error && data) return data.user_id === userId
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
-  return data?.user_id === userId
+
+  const loadout = await getLoadout(loadoutId)
+  return loadout?.user_id === userId || loadout?.user_id === 'guest_user'
 }
 
 // ============================================
@@ -210,25 +331,28 @@ export const isLoadoutOwner = async (
 export const getUserLoadoutsWithDetails = async (
   userId: string
 ): Promise<ExtendedLoadout[]> => {
-  const { data, error } = await getSupabaseClient()
-    .from('loadouts')
-    .select(`*, heroes(id, name, archetype, hp, speed), upgrades(id, name, category, damage, cooldown_s)`)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-  
-  if (error) {
-    console.error('Error fetching user loadouts with details:', error)
-    throw error
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('loadouts')
+        .select(`*, heroes(id, name, archetype, hp, speed), upgrades(id, name, category, damage, cooldown_s)`)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+      
+      if (!error && data) {
+        return data.map(loadout => ({
+          ...loadout,
+          hero: loadout.heroes || undefined,
+          primary_upgrade: loadout.upgrades || undefined
+        }))
+      }
+    } catch (err) {
+      console.warn('Database offline, using local loadout store', err)
+    }
   }
-  
-  if (!data) return []
-  
-  // Transform the data
-  return data.map(loadout => ({
-    ...loadout,
-    hero: loadout.heroes || undefined,
-    primary_upgrade: loadout.upgrades || undefined
-  }))
+
+  const list = await getLoadouts(userId)
+  return list.map(enrichLoadout)
 }
 
 // ============================================

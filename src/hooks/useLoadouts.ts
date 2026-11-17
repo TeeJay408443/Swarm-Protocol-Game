@@ -1,164 +1,153 @@
 /**
  * useLoadouts Hook - Loadout Management
- * Phase 6: Core Build - CRUD Operations
- * 
- * This hook provides CRUD operations for user loadouts.
+ * Phase 6 / Phase 9: Full CRUD with Supabase + Local Guest Storage Fallback
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSupabase } from './useSupabase'
-import { 
+import {
   createLoadout as createLoadoutApi,
-  getLoadouts as getLoadoutsApi,
+  getUserLoadoutsWithDetails,
   updateLoadout as updateLoadoutApi,
   deleteLoadout as deleteLoadoutApi,
   validateLoadoutInput
 } from '../services/loadouts'
+import { heroes, upgrades } from '../db/seedData'
+import { shopWeaponsAsUpgrades } from '../services/shop'
 import type { LoadoutsRow } from '../types/database'
 import type { ExtendedLoadout, CreateLoadoutInput, UpdateLoadoutInput } from '../services/loadouts'
 
 interface UseLoadoutsReturn {
-  // Loadouts data
   loadouts: ExtendedLoadout[]
-  
-  // Loading and error states
   loading: boolean
   error: string | null
-  
-  // CRUD operations
-  createLoadout: (input: CreateLoadoutInput) => Promise<LoadoutsRow | null>
-  updateLoadout: (id: string, input: UpdateLoadoutInput) => Promise<LoadoutsRow | null>
+  isGuestMode: boolean
+  createLoadout: (input: CreateLoadoutInput) => Promise<ExtendedLoadout | null>
+  updateLoadout: (id: string, input: UpdateLoadoutInput) => Promise<ExtendedLoadout | null>
   deleteLoadout: (id: string) => Promise<boolean>
-  
-  // Refresh function
   refresh: () => Promise<void>
-  
-  // Validation
-  validate: (input: CreateLoadoutInput | UpdateLoadoutInput) => { valid: boolean, errors: string[] }
+  validate: (input: CreateLoadoutInput | UpdateLoadoutInput) => { valid: boolean; errors: string[] }
+}
+
+const enrichLoadoutDetails = (loadout: LoadoutsRow): ExtendedLoadout => {
+  const heroData = heroes.find(h => h.id === loadout.hero_id)
+  const upgradeData = [...upgrades, ...shopWeaponsAsUpgrades()].find(
+    u => u.id === loadout.primary_upgrade_id
+  )
+
+  return {
+    ...loadout,
+    hero: heroData
+      ? {
+          id: heroData.id,
+          name: heroData.name,
+          archetype: heroData.archetype,
+          hp: heroData.hp,
+          speed: heroData.speed
+        }
+      : undefined,
+    primary_upgrade: upgradeData
+      ? {
+          id: upgradeData.id,
+          name: upgradeData.name,
+          category: upgradeData.category,
+          damage: upgradeData.damage,
+          cooldown_s: upgradeData.cooldown_s
+        }
+      : undefined
+  }
 }
 
 export const useLoadouts = (): UseLoadoutsReturn => {
   const { user, loading: authLoading } = useSupabase()
-  
-  // Loadouts state
+  const effectiveUserId = user?.id || 'guest_user'
+  const isGuestMode = !user
+
   const [loadouts, setLoadouts] = useState<ExtendedLoadout[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
-  // Fetch loadouts for the current user
+
   const fetchLoadouts = useCallback(async () => {
-    if (!user) {
-      setLoadouts([])
-      setLoading(false)
-      return
-    }
-    
     try {
       setLoading(true)
       setError(null)
-      
-      const data = await getLoadoutsApi(user.id)
-      
-      // For now, use the basic loadouts - we'll enhance with details later
-      // In production, you'd want to fetch with joined data
-      setLoadouts(data.map(loadout => ({
-        ...loadout,
-        hero: undefined,
-        primary_upgrade: undefined
-      })))
+
+      const data = await getUserLoadoutsWithDetails(effectiveUserId)
+      setLoadouts(data.map(item => enrichLoadoutDetails(item)))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch loadouts')
     } finally {
       setLoading(false)
     }
-  }, [user])
-  
-  // Initial fetch and when user changes
+  }, [effectiveUserId])
+
   useEffect(() => {
-    fetchLoadouts()
-  }, [fetchLoadouts])
-  
-  // Create a new loadout
-  const createLoadout = async (input: CreateLoadoutInput): Promise<LoadoutsRow | null> => {
-    if (!user) {
-      setError('User not authenticated')
+    if (!authLoading) {
+      fetchLoadouts()
+    }
+  }, [authLoading, fetchLoadouts])
+
+  const createLoadout = async (input: CreateLoadoutInput): Promise<ExtendedLoadout | null> => {
+    const validation = validateLoadoutInput(input)
+    if (!validation.valid) {
+      setError(validation.errors[0] || 'Invalid loadout input')
       return null
     }
-    
+
     try {
-      setLoading(true)
       setError(null)
-      
-      const newLoadout = await createLoadoutApi(input, user.id)
-      
-      // Add to local state
-      setLoadouts(prev => [
-        { ...newLoadout, hero: undefined, primary_upgrade: undefined },
-        ...prev
-      ])
-      
-      return newLoadout
+      const created = await createLoadoutApi(input, effectiveUserId)
+      const enriched = enrichLoadoutDetails(created)
+      setLoadouts(prev => [enriched, ...prev])
+      return enriched
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create loadout')
       return null
-    } finally {
-      setLoading(false)
     }
   }
-  
-  // Update an existing loadout
-  const updateLoadout = async (id: string, input: UpdateLoadoutInput): Promise<LoadoutsRow | null> => {
+
+  const updateLoadout = async (id: string, input: UpdateLoadoutInput): Promise<ExtendedLoadout | null> => {
+    const validation = validateLoadoutInput(input)
+    if (!validation.valid) {
+      setError(validation.errors[0] || 'Invalid loadout update')
+      return null
+    }
+
     try {
-      setLoading(true)
       setError(null)
-      
-      const updatedLoadout = await updateLoadoutApi(id, input)
-      
-      // Update in local state
-      setLoadouts(prev => prev.map(loadout =>
-        loadout.id === id ? { ...updatedLoadout, hero: undefined, primary_upgrade: undefined } : loadout
-      ))
-      
-      return updatedLoadout
+      const updated = await updateLoadoutApi(id, input)
+      const enriched = enrichLoadoutDetails(updated)
+      setLoadouts(prev => prev.map(item => (item.id === id ? enriched : item)))
+      return enriched
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update loadout')
       return null
-    } finally {
-      setLoading(false)
     }
   }
-  
-  // Delete a loadout
+
   const deleteLoadout = async (id: string): Promise<boolean> => {
     try {
-      setLoading(true)
       setError(null)
-      
       const success = await deleteLoadoutApi(id)
-      
       if (success) {
-        // Remove from local state
-        setLoadouts(prev => prev.filter(loadout => loadout.id !== id))
+        setLoadouts(prev => prev.filter(item => item.id !== id))
       }
-      
       return success
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete loadout')
       return false
-    } finally {
-      setLoading(false)
     }
   }
-  
-  // Validation helper
+
   const validate = (input: CreateLoadoutInput | UpdateLoadoutInput) => {
     return validateLoadoutInput(input)
   }
-  
+
   return {
     loadouts,
     loading: loading || authLoading,
     error,
+    isGuestMode,
     createLoadout,
     updateLoadout,
     deleteLoadout,

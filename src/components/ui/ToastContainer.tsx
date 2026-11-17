@@ -5,14 +5,16 @@
 
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react'
 import Toast, { ToastType, ToastProps } from './Toast'
+export type { ToastType, ToastProps }
+export { Toast }
 
 interface ToastContextType {
-  addToast: (message: string, options?: Omit<ToastProps, 'id' | 'onDismiss'>) => string
+  addToast: (message: string, options?: Partial<Omit<ToastProps, 'id' | 'onDismiss'>>) => string
   dismissToast: (id: string) => void
   clearToasts: () => void
 }
 
-interface ToastProviderProps {
+export interface ToastProviderProps {
   children: ReactNode
   maxToasts?: number
   defaultDuration?: number
@@ -35,17 +37,17 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({
     return `toast-${++toastId}`
   }, [])
 
-  const addToast = useCallback((message: string, options: Omit<ToastProps, 'id' | 'onDismiss'> = {}) => {
+  const addToast = useCallback((message: string, options: Partial<Omit<ToastProps, 'id' | 'onDismiss'>> = {}) => {
     const id = generateId()
     
     const newToast: ToastProps & { id: string } = {
-      id,
-      message,
       type: 'info',
       duration: defaultDuration,
       position,
       ...options,
-      onDismiss: (toastId) => dismissToast(toastId)
+      id,
+      message,
+      onDismiss: (toastId: string) => dismissToast(toastId)
     }
     
     setToasts((prev) => {

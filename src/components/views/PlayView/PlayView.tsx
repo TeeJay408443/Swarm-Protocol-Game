@@ -1,266 +1,259 @@
-import { useState } from 'react';
-import { Card } from '../../ui/Card';
-import { Button } from '../../ui/Button';
-import { heroes } from '../../../db/seedData';
+import { useState, useEffect } from 'react'
+import { useSearchParams, Link } from 'react-router-dom'
+import { Card } from '../../ui/Card'
+import { Button } from '../../ui/Button'
+import { Badge } from '../../ui/Badge'
+import { heroes, upgrades } from '../../../db/seedData'
+import { GAME_CONFIG } from '../../../config/gameConstants'
+import { useLoadouts } from '../../../hooks/useLoadouts'
+import { useSupabase } from '../../../hooks/useSupabase'
+import {
+  MAX_EQUIPPED_ACCESSORIES,
+  shopWeaponsAsUpgrades,
+  useShopState
+} from '../../../services/shop'
+import GameContainer from './GameContainer'
 
 export function PlayView() {
-  const [gameState, setGameState] = useState<'menu' | 'playing' | 'paused' | 'gameOver'>('menu');
-  const [selectedHero, setSelectedHero] = useState<string | null>(null);
-  const [currentWave, setCurrentWave] = useState(1);
-  const [coins, setCoins] = useState(0);
-  const [time, setTime] = useState(0);
-  const [playerHP, setPlayerHP] = useState(100);
-  
-  // Get hero by ID
-  const getHero = (id: string) => heroes.find(h => h.id === id);
-  
-  // Start game
-  const startGame = (heroId: string) => {
-    setSelectedHero(heroId);
-    setGameState('playing');
-    setPlayerHP(100);
-    setCurrentWave(1);
-    setCoins(0);
-    setTime(0);
-  };
-  
-  // End game
-  const endGame = () => {
-    setGameState('gameOver');
-  };
-  
-  // Resume game
-  const resumeGame = () => {
-    setGameState('playing');
-  };
-  
-  // Restart game
-  const restartGame = () => {
-    setGameState('menu');
-    setSelectedHero(null);
-  };
-  
-  // Calculate score using formula S = 10t + 25c
-  const calculatedScore = 10 * time + 25 * coins;
-  
-  // Simulate time progression
-  // In a real game, this would be tied to the game loop
-  
-  if (gameState === 'menu') {
-    return (
-      <div className="min-h-screen bg-slate-carbon text-white p-6">
-        <header className="mb-8">
-          <h1 className="text-4xl font-bold text-cyan-accent">PLAY</h1>
-          <p className="text-gray-400 mt-2">Select Your Hero and Begin the Battle</p>
-        </header>
-        
-        <main className="max-w-6xl mx-auto">
-          <Card className="mb-8">
-            <h2 className="text-2xl font-semibold text-hazard-gold mb-6">Select Your Hero</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              {heroes.map(hero => (
-                <div 
-                  key={hero.id}
-                  className="bg-gray-800 rounded-lg p-4 cursor-pointer hover:bg-gray-700 transition-colors border border-gray-700"
-                  onClick={() => startGame(hero.id)}
-                >
-                  <div className="text-cyan-accent text-3xl mb-2 text-center">🎮</div>
-                  <h3 className="font-semibold text-white text-center">{hero.name}</h3>
-                  <p className="text-sm text-gray-400 text-center">{hero.archetype}</p>
-                  <div className="mt-3 space-y-1 text-xs text-gray-500">
-                    <p>HP: {hero.hp}</p>
-                    <p>Speed: {hero.speed}x</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-          
-          <Card className="bg-gray-900">
-            <h2 className="text-xl font-semibold text-hazard-gold mb-4">Game Information</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-800 rounded-lg p-4">
-                <h3 className="font-semibold text-cyan-accent mb-2">✅ Wave System</h3>
-                <p className="text-sm text-gray-300">30s active + 3s breather</p>
-                <p className="text-sm text-gray-300">Boss every 5th wave</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-4">
-                <h3 className="font-semibold text-cyan-accent mb-2">✅ Scoring</h3>
-                <p className="text-sm text-gray-300">Formula: S = 10t + 25c</p>
-                <p className="text-sm text-gray-300">Time × 10 + Coins × 25</p>
-              </div>
-            </div>
-          </Card>
-        </main>
-      </div>
-    );
+  const [searchParams] = useSearchParams()
+  const { user } = useSupabase()
+  const { loadouts } = useLoadouts()
+  const { equippedWeapon, equippedAccessories, shopState } = useShopState(user?.id)
+  const allUpgrades = [...shopWeaponsAsUpgrades(), ...upgrades]
+
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [selectedHeroId, setSelectedHeroId] = useState<string>(heroes[0].id)
+  const [selectedUpgradeId, setSelectedUpgradeId] = useState<string>(heroes[0].starting_upgrade_id)
+  const [selectedLoadoutName, setSelectedLoadoutName] = useState<string | undefined>(undefined)
+
+  // Deep-link support: /play?loadoutId=... or /play?heroId=...
+  useEffect(() => {
+    const loadoutId = searchParams.get('loadoutId')
+    const heroId = searchParams.get('heroId')
+
+    if (loadoutId && loadouts.length > 0) {
+      const found = loadouts.find((l) => l.id === loadoutId)
+      if (found) {
+        setSelectedHeroId(found.hero_id)
+        setSelectedUpgradeId(found.primary_upgrade_id)
+        setSelectedLoadoutName(found.loadout_name)
+        return
+      }
+    }
+
+    if (heroId) {
+      const foundHero = heroes.find((h) => h.id === heroId)
+      if (foundHero) {
+        setSelectedHeroId(foundHero.id)
+        setSelectedUpgradeId(foundHero.starting_upgrade_id)
+        setSelectedLoadoutName(undefined)
+      }
+    }
+  }, [searchParams, loadouts])
+
+  const handleSelectHero = (heroId: string) => {
+    const hero = heroes.find((h) => h.id === heroId)
+    if (!hero) return
+    setSelectedHeroId(hero.id)
+    setSelectedUpgradeId(hero.starting_upgrade_id)
+    setSelectedLoadoutName(undefined)
+    setIsPlaying(true)
   }
-  
-  if (gameState === 'gameOver') {
+
+  const handleLaunchLoadout = (heroId: string, upgradeId: string, name: string) => {
+    setSelectedHeroId(heroId)
+    setSelectedUpgradeId(upgradeId)
+    setSelectedLoadoutName(name)
+    setIsPlaying(true)
+  }
+
+  if (isPlaying) {
     return (
-      <div className="min-h-screen bg-slate-carbon text-white p-6 flex items-center justify-center">
-        <Card className="max-w-2xl text-center">
-          <h1 className="text-4xl font-bold text-alert-red mb-4">GAME OVER</h1>
-          <p className="text-xl text-gray-300 mb-6">
-            {selectedHero && `Hero ${getHero(selectedHero)?.name} has fallen in battle`}
-          </p>
-          
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            <div className="bg-gray-800 rounded-lg p-4">
-              <p className="text-cyan-accent font-semibold">Wave Reached</p>
-              <p className="text-3xl font-bold">{currentWave}</p>
+      <div className="min-h-screen bg-slate-carbon text-white p-3 sm:p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-cyan-accent">
+                SWARM PROTOCOL — ACTIVE OPERATION
+              </h1>
+              <p className="text-xs text-gray-400">
+                Move with WASD / Arrow Keys (or touch D-Pad). Press P or ESC to pause.
+              </p>
             </div>
-            <div className="bg-gray-800 rounded-lg p-4">
-              <p className="text-hazard-gold font-semibold">Final Score</p>
-              <p className="text-3xl font-bold">{calculatedScore}</p>
+            <Button variant="secondary" size="sm" onClick={() => setIsPlaying(false)}>
+              Abort & Return
+            </Button>
+          </div>
+
+          <GameContainer
+            selectedHeroId={selectedHeroId}
+            startingUpgradeId={selectedUpgradeId}
+            loadoutName={selectedLoadoutName}
+            autoStart={true}
+            onBack={() => setIsPlaying(false)}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-carbon text-white p-6">
+      <header className="max-w-6xl mx-auto mb-8">
+        <h1 className="text-4xl font-bold text-cyan-accent">DEPLOY TO ARENA</h1>
+        <p className="text-gray-400 mt-2">
+          Choose a Hero Unit or Launch from a Saved Armory Loadout
+        </p>
+      </header>
+
+      <main className="max-w-6xl mx-auto space-y-8">
+        {/* Equipped Armory Shop Gear Summary */}
+        <section className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-6">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-gray-400">
+                Armory Weapon Override
+              </p>
+              <p className="text-sm font-bold text-hazard-gold">
+                {equippedWeapon ? equippedWeapon.name : 'Hero / Loadout Default'}
+              </p>
             </div>
-            <div className="bg-gray-800 rounded-lg p-4">
-              <p className="text-cyan-accent font-semibold">Time</p>
-              <p className="text-3xl font-bold">{time}s</p>
-            </div>
-            <div className="bg-gray-800 rounded-lg p-4">
-              <p className="text-hazard-gold font-semibold">Coins</p>
-              <p className="text-3xl font-bold">{coins}</p>
+            <div className="h-8 w-px bg-gray-800 hidden sm:block" />
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-gray-400">
+                Equipped Accessories ({equippedAccessories.length}/{MAX_EQUIPPED_ACCESSORIES})
+              </p>
+              <p className="text-sm font-medium text-cyan-accent">
+                {equippedAccessories.length > 0
+                  ? equippedAccessories.map((a) => a.name).join(' • ')
+                  : 'None equipped'}
+              </p>
             </div>
           </div>
-          
-          <div className="flex justify-center space-x-4">
-            <Button variant="primary" onClick={restartGame}>
-              Play Again
-            </Button>
-            <Button variant="secondary" onClick={() => setGameState('menu')}>
-              Back to Menu
-            </Button>
+          <div className="flex items-center gap-4 text-sm">
+            <Link to="/armory?tab=gear" className="text-cyan-accent hover:underline font-medium">
+              Equip Gear in Armory
+            </Link>
+            <Link to="/shop" className="text-hazard-gold hover:underline font-medium tabular-nums">
+              Shop ({shopState.balance.toLocaleString()} Coins)
+            </Link>
+          </div>
+        </section>
+
+        {/* Saved Loadouts Quick Deploy */}
+        {loadouts.length > 0 && (
+          <Card>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-semibold text-hazard-gold">Saved Armory Loadouts</h2>
+              <Link to="/armory" className="text-sm text-cyan-accent hover:underline">
+                Manage in Armory →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {loadouts.map((loadout) => {
+                const hero = heroes.find((h) => h.id === loadout.hero_id)
+                const upg = allUpgrades.find((u) => u.id === loadout.primary_upgrade_id)
+                return (
+                  <div
+                    key={loadout.id}
+                    className="bg-gray-800/90 border border-gray-700 hover:border-cyan-accent rounded-lg p-4 flex flex-col justify-between transition-colors"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <h3 className="font-bold text-white">{loadout.loadout_name}</h3>
+                        <Badge variant="primary" size="sm">{hero?.archetype || 'Unit'}</Badge>
+                      </div>
+                      <p className="text-sm text-gray-300">{hero?.name || loadout.hero_id}</p>
+                      <p className="text-xs text-cyan-accent mt-1">
+                        Weapon: {upg?.name || loadout.primary_upgrade_id}
+                      </p>
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="mt-4 w-full"
+                      onClick={() =>
+                        handleLaunchLoadout(
+                          loadout.hero_id,
+                          loadout.primary_upgrade_id,
+                          loadout.loadout_name
+                        )
+                      }
+                    >
+                      ▶ Launch Loadout
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        )}
+
+        {/* Standard Hero Deployment */}
+        <Card>
+          <h2 className="text-2xl font-semibold text-hazard-gold mb-6">Select Your Hero Unit</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {heroes.map((hero) => {
+              const startUpgrade = upgrades.find((u) => u.id === hero.starting_upgrade_id)
+              const pixelSpeed = Math.round(hero.speed * GAME_CONFIG.BASE_PLAYER_SPEED)
+              return (
+                <div
+                  key={hero.id}
+                  onClick={() => handleSelectHero(hero.id)}
+                  className="bg-gray-800 rounded-lg p-5 cursor-pointer hover:bg-gray-700/80 transition-colors border border-gray-700 hover:border-cyan-accent flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-bold text-lg text-white">{hero.name}</h3>
+                      <Badge variant="secondary" size="sm">{hero.archetype}</Badge>
+                    </div>
+                    <p className="text-xs text-gray-400 mb-3">{hero.lore}</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                      <div className="bg-gray-900 rounded p-2">
+                        <span className="text-gray-400">HP: </span>
+                        <span className="text-alert-red font-bold">{hero.hp}</span>
+                      </div>
+                      <div className="bg-gray-900 rounded p-2">
+                        <span className="text-gray-400">Speed: </span>
+                        <span className="text-cyan-accent font-bold">{pixelSpeed} px/s</span>
+                      </div>
+                    </div>
+                    {startUpgrade && (
+                      <p className="text-xs text-hazard-gold mb-4">
+                        Starting Weapon: {startUpgrade.name}
+                      </p>
+                    )}
+                  </div>
+                  <Button variant="primary" size="sm" className="w-full">
+                    Deploy {hero.name}
+                  </Button>
+                </div>
+              )
+            })}
           </div>
         </Card>
-      </div>
-    );
-  }
-  
-  return (
-    <div className="min-h-screen bg-slate-carbon text-white">
-      {/* Header */}
-      <header className="p-4 border-b border-gray-700 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-cyan-accent">SWARM PROTOCOL: SURVIVOR</h1>
-          <p className="text-sm text-gray-400">
-            {selectedHero && `Hero: ${getHero(selectedHero)?.name || 'Unknown'}`}
-          </p>
-        </div>
-        <div className="flex items-center space-x-4">
-          <div className="bg-gray-800 rounded px-4 py-2">
-            <span className="text-cyan-accent font-semibold">Wave: {currentWave}</span>
-          </div>
-          <div className="bg-gray-800 rounded px-4 py-2">
-            <span className="text-hazard-gold font-semibold">Score: {calculatedScore}</span>
-          </div>
-          <div className="bg-gray-800 rounded px-4 py-2">
-            <span className="text-alert-red font-semibold">HP: {playerHP}</span>
-          </div>
-          <Button variant="secondary" onClick={() => setGameState('paused')}>
-            Pause
-          </Button>
-          <Button variant="secondary" onClick={() => setGameState('menu')}>
-            Quit
-          </Button>
-        </div>
-      </header>
-      
-      {/* Main Game Area */}
-      <main className="p-4">
-        <div className="max-w-7xl mx-auto">
-          {/* Game Canvas */}
-          <div className="bg-gray-900 rounded-lg border-2 border-gray-700 relative overflow-hidden mb-4" style={{ height: '600px' }}>
-            {/* Player */}
-            <div 
-              className="absolute bg-cyan-accent rounded-full flex items-center justify-center text-black font-bold z-10"
-              style={{
-                width: '40px',
-                height: '40px',
-                left: '50%',
-                top: '50%',
-                transform: 'translate(-50%, -50%)'
-              }}
-            >
-              P
+
+        {/* Tactical Rules */}
+        <Card className="bg-gray-900">
+          <h2 className="text-xl font-semibold text-hazard-gold mb-4">Mission Parameters</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-gray-800 rounded-lg p-4">
+              <h3 className="font-semibold text-cyan-accent mb-1">Wave Cadence</h3>
+              <p className="text-sm text-gray-300">30s active swarm + 3s breather window. Mini-Boss every 5th wave.</p>
             </div>
-            
-            {/* HUD */}
-            <div className="absolute bottom-4 left-4 bg-gray-800 bg-opacity-90 rounded px-4 py-2 z-20">
-              <div className="flex items-center space-x-4">
-                <div>
-                  <span className="text-white font-semibold">Time: {time}s</span>
-                </div>
-                <div>
-                  <span className="text-hazard-gold font-semibold">Coins: {coins}</span>
-                </div>
-              </div>
-              
-              {/* Score Breakdown */}
-              <div className="mt-2 text-xs text-gray-400">
-                Score: 10 × {time} + 25 × {coins} = {calculatedScore}
-              </div>
+            <div className="bg-gray-800 rounded-lg p-4">
+              <h3 className="font-semibold text-cyan-accent mb-1">Scoring Formula</h3>
+              <p className="text-sm text-gray-300">S = 10t + 25c (10 pts/sec + 25 pts/coin)</p>
             </div>
-            
-            {/* Wave Info */}
-            <div className="absolute top-4 right-4 bg-gray-800 bg-opacity-90 rounded px-4 py-2 z-20">
-              <div className="text-center">
-                <div className="text-cyan-accent font-bold text-xl">WAVE {currentWave}</div>
-                <div className="text-gray-400 text-sm">Active</div>
-              </div>
+            <div className="bg-gray-800 rounded-lg p-4">
+              <h3 className="font-semibold text-cyan-accent mb-1">Auto-Combat</h3>
+              <p className="text-sm text-gray-300">Move with WASD/Arrows; weapons auto-target nearest threats.</p>
             </div>
           </div>
-          
-          {/* Controls */}
-          <div className="flex justify-center space-x-4 mb-4">
-            <Button variant="primary" onClick={() => setCoins(c => c + 10)}>
-              Collect Coins (+10)
-            </Button>
-            <Button variant="warning" onClick={() => setTime(t => t + 30)}>
-              Advance Time (+30s)
-            </Button>
-            <Button variant="danger" onClick={() => endGame()}>
-              End Game
-            </Button>
-          </div>
-          
-          {/* Game Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-2">Score Breakdown</h3>
-              <p className="text-gray-300">Time: {time}s × 10 = {10 * time} pts</p>
-              <p className="text-gray-300">Coins: {coins} × 25 = {25 * coins} pts</p>
-              <p className="text-hazard-gold font-bold mt-2">Total: {calculatedScore} pts</p>
-            </Card>
-            
-            <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-2">Current Stats</h3>
-              <p className="text-gray-300">Wave: {currentWave}</p>
-              <p className="text-gray-300">HP: {playerHP}</p>
-              <p className="text-gray-300">Time: {time}s</p>
-              <p className="text-gray-300">Coins: {coins}</p>
-            </Card>
-          </div>
-        </div>
+        </Card>
       </main>
-      
-      {/* Pause Menu */}
-      {gameState === 'paused' && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <Card className="max-w-md text-center">
-            <h2 className="text-2xl font-bold text-cyan-accent mb-4">PAUSED</h2>
-            <p className="text-gray-300 mb-6">Game is paused</p>
-            <div className="flex justify-center space-x-4">
-              <Button variant="primary" onClick={resumeGame}>
-                Resume
-              </Button>
-              <Button variant="secondary" onClick={() => setGameState('menu')}>
-                Quit
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
     </div>
-  );
+  )
 }
+
+export default PlayView

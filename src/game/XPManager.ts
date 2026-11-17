@@ -5,7 +5,7 @@
 
 import type { LevelUpCard } from '../types/game'
 import type { Upgrade } from '../types/database'
-import { LEVEL_UP_CONFIG, UPGRADE_CONFIG } from '../config/gameConstants'
+import { LEVEL_UP_CONFIG, UPGRADE_CONFIG, getXpForNextLevel } from '../config/gameConstants'
 import { upgrades } from '../db/seedData'
 
 // ============================================
@@ -42,8 +42,8 @@ export class XPManager {
     
     console.log(`✨ +${amount} XP from ${source} (Total: ${this.totalXPEarned})`)
     
-    // Check for level up
-    while (this.xp >= LEVEL_UP_CONFIG.XP_TO_LEVEL && this.level < LEVEL_UP_CONFIG.MAX_LEVEL) {
+    // Check for endless level up
+    while (this.xp >= getXpForNextLevel(this.level)) {
       this.levelUp()
     }
     
@@ -64,15 +64,16 @@ export class XPManager {
   }
   
   getXPToNextLevel(): number {
-    return LEVEL_UP_CONFIG.XP_TO_LEVEL - this.xp
+    return getXpForNextLevel(this.level) - this.xp
   }
   
   getXPProgress(): number {
-    return (this.xp / LEVEL_UP_CONFIG.XP_TO_LEVEL) * 100
+    const needed = getXpForNextLevel(this.level)
+    return (this.xp / needed) * 100
   }
   
   isMaxLevel(): boolean {
-    return this.level >= LEVEL_UP_CONFIG.MAX_LEVEL
+    return false
   }
   
   reset(): void {
@@ -81,6 +82,18 @@ export class XPManager {
     this.totalXPEarned = 0
   }
   
+  update(_deltaTime?: number): void {
+    // XPManager tick update if needed
+  }
+
+  getCurrentXP(): number {
+    return this.getXP()
+  }
+
+  getCurrentLevel(): number {
+    return this.getLevel()
+  }
+
   // ============================================
   // CALLBACK REGISTRATION
   // ============================================
@@ -92,14 +105,19 @@ export class XPManager {
   onXPGained(callback: (amount: number, total: number) => void): void {
     this.onXPGainedCallback = callback
   }
+
+  onXPChange(callback: (currentXP: number) => void): void {
+    this.onXPGainedCallback = (_amount, total) => callback(total)
+  }
   
   // ============================================
   // LEVEL UP SYSTEM
   // ============================================
   
   private levelUp(): void {
+    const xpCost = getXpForNextLevel(this.level)
     this.level++
-    this.xp -= LEVEL_UP_CONFIG.XP_TO_LEVEL
+    this.xp = Math.max(0, this.xp - xpCost)
     
     console.log(`🎉 Level Up! Now level ${this.level}`)
     

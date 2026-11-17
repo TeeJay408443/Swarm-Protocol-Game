@@ -167,10 +167,13 @@ export class Coin {
     // Update spawn animation
     if (this.spawnTime < this.spawnDuration) {
       this.spawnTime += deltaTime
-      const progress = this.spawnTime / this.spawnDuration
-      const scale = Easing.easeOutBack(progress)
+      const progress = Math.min(1, Math.max(0, this.spawnTime / this.spawnDuration))
+      const scale = Math.max(0.25, Easing.easeOutBack(progress))
       this.width = 20 * scale
       this.height = 20 * scale
+    } else {
+      this.width = 20
+      this.height = 20
     }
     
     // Update bob animation
@@ -336,9 +339,10 @@ export class Coin {
     
     // Draw collection animation
     if (this.isCollected) {
-      const progress = this.collectTime / this.collectDuration
-      const scale = 1 - progress
-      const alpha = 1 - progress
+      const progress = Math.min(1, Math.max(0, this.collectTime / this.collectDuration))
+      const scale = Math.max(0, 1 - progress)
+      const alpha = Math.max(0, 1 - progress)
+      const collectRadius = Math.max(0.1, (this.width / 2) * scale)
       
       ctx.globalAlpha = alpha
       ctx.fillStyle = '#00F0FF'
@@ -346,7 +350,7 @@ export class Coin {
       ctx.arc(
         screenX,
         screenY - bobOffset,
-        this.width / 2 * scale,
+        collectRadius,
         0,
         Math.PI * 2
       )
@@ -371,7 +375,7 @@ export class Coin {
     if (this.isMagnetized) {
       const progress = this.magnetProgress
       ctx.strokeStyle = 'rgba(0, 240, 255, ' + (0.5 + 0.5 * progress) + ')'
-      ctx.lineWidth = 2 * (1 - progress)
+      ctx.lineWidth = Math.max(0.5, 2 * (1 - progress))
       
       if (this.magnetTarget) {
         const { x: targetX, y: targetY } = camera.worldToScreen(
@@ -387,15 +391,15 @@ export class Coin {
     
     // Draw spawn animation
     if (this.spawnTime < this.spawnDuration) {
-      const progress = this.spawnTime / this.spawnDuration
-      const scale = Easing.easeOutBack(progress)
+      const progress = Math.min(1, Math.max(0, this.spawnTime / this.spawnDuration))
+      const haloRadius = Math.max(0.1, (this.width / 2) * 1.5 * (1 - progress))
       
-      ctx.fillStyle = 'rgba(255, 255, 255, ' + (1 - progress) + ')'
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + Math.max(0, 1 - progress) + ')'
       ctx.beginPath()
       ctx.arc(
         screenX,
         screenY - bobOffset,
-        this.width / 2 * 1.5 * (1 - progress),
+        haloRadius,
         0,
         Math.PI * 2
       )
@@ -403,168 +407,89 @@ export class Coin {
     }
   }
 
-  /**
-   * Draw bronze coin
-   */
+  private drawDetailedCoin(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    rimColor: string,
+    faceColor: string,
+    highlightColor: string,
+    glowColor?: string
+  ): void {
+    const outerRadius = Math.max(2, this.width / 2)
+    const innerRadius = Math.max(1, outerRadius - 2.2)
+    const rimRadius = Math.max(1, outerRadius - 1)
+    const glint = 0.35 + 0.25 * Math.sin(this.bobTime * 4)
+
+    if (glowColor) {
+      ctx.fillStyle = glowColor
+      ctx.beginPath()
+      ctx.arc(x, y, outerRadius + 4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // Outer metallic bevel
+    ctx.fillStyle = rimColor
+    ctx.beginPath()
+    ctx.arc(x, y, outerRadius, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Recessed inner face
+    ctx.fillStyle = faceColor
+    ctx.beginPath()
+    ctx.arc(x, y, innerRadius, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Specular edge ring
+    ctx.strokeStyle = highlightColor
+    ctx.lineWidth = 1.2
+    ctx.beginPath()
+    ctx.arc(x, y, rimRadius, 0, Math.PI * 2)
+    ctx.stroke()
+
+    // Minted center diamond emblem
+    const emblem = Math.max(1.5, innerRadius * 0.45)
+    ctx.fillStyle = highlightColor
+    ctx.globalAlpha = 0.75
+    ctx.beginPath()
+    ctx.moveTo(x, y - emblem)
+    ctx.lineTo(x + emblem * 0.75, y)
+    ctx.lineTo(x, y + emblem)
+    ctx.lineTo(x - emblem * 0.75, y)
+    ctx.closePath()
+    ctx.fill()
+
+    // Animated diagonal shine
+    ctx.fillStyle = '#FFFFFF'
+    ctx.globalAlpha = glint
+    ctx.beginPath()
+    ctx.ellipse(
+      x - outerRadius * 0.32,
+      y - outerRadius * 0.32,
+      Math.max(0.8, outerRadius * 0.28),
+      Math.max(0.6, outerRadius * 0.16),
+      Math.PI / 4,
+      0,
+      Math.PI * 2
+    )
+    ctx.fill()
+    ctx.globalAlpha = 1
+  }
+
   private drawBronzeCoin(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-    // Outer circle
-    ctx.fillStyle = '#8B4513' // Saddle brown
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Inner circle
-    ctx.fillStyle = '#CD7F32' // Bronze
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Edge highlight
-    ctx.strokeStyle = '#FFD700'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 1, 0, Math.PI * 2)
-    ctx.stroke()
-    
-    // Shine
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.3)'
-    ctx.beginPath()
-    ctx.ellipse(
-      x - this.width / 4, 
-      y - this.width / 4,
-      this.width / 4,
-      this.width / 6,
-      Math.PI / 4,
-      0,
-      Math.PI * 2
-    )
-    ctx.fill()
+    this.drawDetailedCoin(ctx, x, y, '#7C2D12', '#D97706', '#FDE68A')
   }
 
-  /**
-   * Draw silver coin
-   */
   private drawSilverCoin(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-    // Outer circle
-    ctx.fillStyle = '#A9A9A9' // Dark gray
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Inner circle
-    ctx.fillStyle = '#C0C0C0' // Silver
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Edge highlight
-    ctx.strokeStyle = '#FFFFFF'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 1, 0, Math.PI * 2)
-    ctx.stroke()
-    
-    // Shine
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'
-    ctx.beginPath()
-    ctx.ellipse(
-      x - this.width / 4, 
-      y - this.width / 4,
-      this.width / 4,
-      this.width / 6,
-      Math.PI / 4,
-      0,
-      Math.PI * 2
-    )
-    ctx.fill()
+    this.drawDetailedCoin(ctx, x, y, '#64748B', '#CBD5E1', '#FFFFFF')
   }
 
-  /**
-   * Draw gold coin
-   */
   private drawGoldCoin(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-    // Outer circle
-    ctx.fillStyle = '#DAA520' // Goldenrod
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Inner circle
-    ctx.fillStyle = '#FFD700' // Gold
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Edge highlight
-    ctx.strokeStyle = '#FFD700'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 1, 0, Math.PI * 2)
-    ctx.stroke()
-    
-    // Shine
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.5)'
-    ctx.beginPath()
-    ctx.ellipse(
-      x - this.width / 4, 
-      y - this.width / 4,
-      this.width / 4,
-      this.width / 6,
-      Math.PI / 4,
-      0,
-      Math.PI * 2
-    )
-    ctx.fill()
-    
-    // Gold glow
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.2)'
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 + 3, 0, Math.PI * 2)
-    ctx.fill()
+    this.drawDetailedCoin(ctx, x, y, '#B45309', '#FACC15', '#FEF9C3', 'rgba(255, 215, 0, 0.25)')
   }
 
-  /**
-   * Draw platinum coin
-   */
   private drawPlatinumCoin(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-    // Outer circle
-    ctx.fillStyle = '#808080' // Gray
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Inner circle
-    ctx.fillStyle = '#E5E4E2' // Platinum
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 2, 0, Math.PI * 2)
-    ctx.fill()
-    
-    // Edge highlight
-    ctx.strokeStyle = '#FFFFFF'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 - 1, 0, Math.PI * 2)
-    ctx.stroke()
-    
-    // Shine
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'
-    ctx.beginPath()
-    ctx.ellipse(
-      x - this.width / 4, 
-      y - this.width / 4,
-      this.width / 4,
-      this.width / 6,
-      Math.PI / 4,
-      0,
-      Math.PI * 2
-    )
-    ctx.fill()
-    
-    // Platinum glow
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'
-    ctx.beginPath()
-    ctx.arc(x, y, this.width / 2 + 4, 0, Math.PI * 2)
-    ctx.fill()
+    this.drawDetailedCoin(ctx, x, y, '#0EA5E9', '#E0F2FE', '#FFFFFF', 'rgba(0, 240, 255, 0.32)')
   }
 
   /**

@@ -1,159 +1,223 @@
-import { useState } from 'react';
-import { Card } from '../../ui/Card';
-import { Button } from '../../ui/Button';
-import { heroes, achievements } from '../../../db/seedData';
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Card } from '../../ui/Card'
+import { Button } from '../../ui/Button'
+import { Badge } from '../../ui/Badge'
+import ValidatedInput from '../../ui/ValidatedInput'
+import { useToast } from '../../ui/ToastContainer'
+import { ValidationPresets } from '../../../hooks/useValidation'
+import { useSupabase } from '../../../hooks/useSupabase'
+import { useAudio } from '../../../context/AudioContext'
+import { heroes } from '../../../db/seedData'
+import { GAME_CONFIG } from '../../../config/gameConstants'
+import {
+  getPlayerTelemetry,
+  evaluateAchievements,
+  getOperativeProfile,
+  saveOperativeProfile,
+  type LocalPlayerTelemetry,
+  type OperativeProfile
+} from '../../../services/scores'
+import { updateLocalAccountUsername } from '../../../services/auth'
 
-// Mock user data
-const mockUser = {
-  username: 'TeeJay408443',
-  email: 'tee.jay@example.com',
-  joinDate: new Date('2024-01-15'),
-  totalGames: 47,
-  totalScore: 158400,
-  highestWave: 25,
-  highestScore: 15840,
-  totalCoins: 5840,
-  totalXP: 4700,
-  level: 10,
-  favoriteHero: 'hero_001',
-  achievements: ['achievement_001', 'achievement_002', 'achievement_003'],
-};
-
-type ActiveTab = 'overview' | 'stats' | 'achievements' | 'settings';
+type ActiveTab = 'overview' | 'stats' | 'achievements' | 'settings'
 
 export function ProfileView() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState({ username: mockUser.username, email: mockUser.email });
-  
-  // Calculate XP progress to next level
-  const xpForNextLevel = mockUser.level * 100;
-  const xpProgress = (mockUser.totalXP % xpForNextLevel) / xpForNextLevel * 100;
-  
-  // Get hero by ID
-  const getHero = (id: string) => heroes.find(h => h.id === id);
-  
-  // Format date
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-  };
-  
-  // Save profile changes
-  const saveProfile = () => {
-    setIsEditing(false);
-  };
-  
-  // Cancel editing
-  const cancelEditing = () => {
-    setIsEditing(false);
-    setEditData({ username: mockUser.username, email: mockUser.email });
-  };
-  
-  // Start editing
+  const navigate = useNavigate()
+  const toast = useToast()
+  const { user } = useSupabase()
+  const {
+    settings: audioSettings,
+    setSfxVolume,
+    setMusicVolume,
+    toggleMute
+  } = useAudio()
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>('overview')
+  const [telemetry, setTelemetry] = useState<LocalPlayerTelemetry | null>(null)
+  const [profile, setProfile] = useState<OperativeProfile>(() => getOperativeProfile(user?.id))
+  const [isEditing, setIsEditing] = useState(false)
+  const [editUsername, setEditUsername] = useState('')
+  const [targetingMode, setTargetingMode] = useState<OperativeProfile['targetingMode']>(
+    () => getOperativeProfile(user?.id).targetingMode
+  )
+  const [difficulty, setDifficulty] = useState<OperativeProfile['difficulty']>(
+    () => getOperativeProfile(user?.id).difficulty
+  )
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      setLoading(true)
+      try {
+        const data = await getPlayerTelemetry(user?.id)
+        if (!active) return
+        setTelemetry(data)
+        const storedProfile = getOperativeProfile(user?.id)
+        setProfile(storedProfile)
+        setTargetingMode(storedProfile.targetingMode)
+        setDifficulty(storedProfile.difficulty)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    load()
+    return () => {
+      active = false
+    }
+  }, [user?.id])
+
+  const getHero = (id: string) => heroes.find(h => h.id === id) || heroes[0]
+
+  const achievementProgress = telemetry
+    ? evaluateAchievements(telemetry)
+    : evaluateAchievements({
+        total_enemies_defeated: 0,
+        max_single_run_coins: 0,
+        longest_damage_free_wave_streak: 0
+      })
+
+  const unlockedCount = achievementProgress.filter(a => a.unlocked).length
+  const totalXP = telemetry?.total_xp ?? 0
+  const level = telemetry?.level ?? 1
+  const xpIntoLevel = totalXP % 500
+  const xpPercent = Math.min(100, (xpIntoLevel / 500) * 100)
+
+  const displayName =
+    (user?.user_metadata?.username as string | undefined) ||
+    (profile.username !== 'Guest Operative' ? profile.username : '') ||
+    user?.email?.split('@')[0] ||
+    profile.username ||
+    'Guest Operative'
+  const favoriteHero = getHero(telemetry?.favorite_hero || 'hero_01')
+
   const startEditing = () => {
-    setEditData({
-      username: mockUser.username,
-      email: mockUser.email,
-    });
-    setIsEditing(true);
-  };
-  
+    setEditUsername(displayName)
+    setIsEditing(true)
+  }
+
+  const saveProfile = () => {
+    const trimmed = editUsername.trim()
+    if (trimmed.length < 3 || trimmed.length > 20) {
+      toast.warning('Callsign must be between 3 and 20 characters.')
+      return
+    }
+    const updated = saveOperativeProfile({ username: trimmed }, user?.id)
+    if (user?.id) {
+      updateLocalAccountUsername(user.id, trimmed)
+    }
+    setProfile(updated)
+    setIsEditing(false)
+    toast.success(`Callsign updated to "${updated.username}"`)
+  }
+
+  const handleSavePreferences = () => {
+    const updated = saveOperativeProfile({
+      targetingMode,
+      difficulty
+    }, user?.id)
+    setProfile(updated)
+    toast.success('Combat preferences saved!')
+  }
+
   return (
     <div className="min-h-screen bg-slate-carbon text-white p-6">
-      <header className="mb-8">
+      <header className="max-w-6xl mx-auto mb-8">
         <h1 className="text-4xl font-bold text-cyan-accent">PROFILE</h1>
-        <p className="text-gray-400 mt-2">Your Swarm Protocol Journey</p>
+        <p className="text-gray-400 mt-2">Operative Service Record, Mastery & Preferences</p>
       </header>
-      
+
       <main className="max-w-6xl mx-auto">
         {/* Profile Header */}
         <Card className="bg-gray-900 mb-6">
           <div className="flex flex-col md:flex-row gap-6 items-center">
-            {/* Avatar */}
-            <div className="w-24 h-24 bg-gradient-to-br from-cyan-accent to-hazard-gold rounded-full flex items-center justify-center text-4xl border-4 border-gray-700">
-              🎮
+            <div className="w-24 h-24 bg-gradient-to-br from-cyan-accent to-hazard-gold rounded-full flex items-center justify-center text-4xl border-4 border-gray-700 shrink-0">
+              🛡️
             </div>
-            
-            {/* Profile Info */}
-            <div className="flex-grow">
+
+            <div className="flex-grow w-full">
               {isEditing ? (
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-2 text-white focus:outline-none focus:border-cyan-accent"
-                    value={editData.username}
-                    onChange={(e) => setEditData({ ...editData, username: e.target.value })}
-                  />
-                  <input
-                    type="email"
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-4 py-2 text-white focus:outline-none focus:border-cyan-accent"
-                    value={editData.email}
-                    onChange={(e) => setEditData({ ...editData, email: e.target.value })}
+                <div className="space-y-3 max-w-md">
+                  <ValidatedInput
+                    name="operative_callsign"
+                    label="Operative Callsign"
+                    value={editUsername}
+                    onChange={setEditUsername}
+                    rules={ValidationPresets.playerName}
+                    showSuccess
                   />
                   <div className="flex space-x-2">
-                    <Button variant="primary" onClick={saveProfile} className="text-sm">
-                      Save
+                    <Button variant="primary" onClick={saveProfile} size="sm">
+                      Save Callsign
                     </Button>
-                    <Button variant="secondary" onClick={cancelEditing} className="text-sm">
+                    <Button variant="secondary" onClick={() => setIsEditing(false)} size="sm">
                       Cancel
                     </Button>
                   </div>
                 </div>
               ) : (
                 <div>
-                  <h2 className="text-2xl font-bold text-white">{mockUser.username}</h2>
-                  <p className="text-gray-400">{mockUser.email}</p>
-                  <div className="flex items-center space-x-2 mt-2">
-                    <span className="text-cyan-accent">⭐</span>
-                    <span className="text-white">Level {mockUser.level}</span>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h2 className="text-2xl font-bold text-white">{displayName}</h2>
+                    <Badge variant="primary" size="sm">Level {level}</Badge>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Joined {formatDate(mockUser.joinDate)}
+                  <p className="text-gray-400 text-sm mt-1">
+                    {user?.email || 'Guest Operative (Persisted Locally)'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Last Updated: {new Date(profile.updatedAt).toLocaleDateString()}
                   </p>
                 </div>
               )}
             </div>
-            
-            {/* Stats Overview */}
-            <div className="grid grid-cols-2 gap-4">
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-2 gap-4 shrink-0">
               <div className="text-center">
-                <p className="text-2xl font-bold text-hazard-gold">{mockUser.totalGames}</p>
-                <p className="text-sm text-gray-400">Games Played</p>
+                <p className="text-2xl font-bold text-hazard-gold">
+                  {telemetry?.total_games ?? 0}
+                </p>
+                <p className="text-xs text-gray-400">Runs</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-cyan-accent">{mockUser.highestWave}</p>
-                <p className="text-sm text-gray-400">Highest Wave</p>
+                <p className="text-2xl font-bold text-cyan-accent">
+                  {telemetry?.highest_wave ?? 0}
+                </p>
+                <p className="text-xs text-gray-400">Best Wave</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-white">{mockUser.highestScore.toLocaleString()}</p>
-                <p className="text-sm text-gray-400">Highest Score</p>
+                <p className="text-2xl font-bold text-white">
+                  {(telemetry?.highest_score ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-400">Best Score</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-hazard-gold">{mockUser.totalCoins.toLocaleString()}</p>
-                <p className="text-sm text-gray-400">Total Coins</p>
+                <p className="text-2xl font-bold text-hazard-gold">
+                  {(telemetry?.total_coins_collected ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-400">Total Coins</p>
               </div>
             </div>
-            
-            {/* Edit Button */}
+
             {!isEditing && (
-              <Button variant="secondary" onClick={startEditing} className="text-sm">
-                Edit Profile
+              <Button variant="secondary" onClick={startEditing} size="sm">
+                Edit Callsign
               </Button>
             )}
           </div>
         </Card>
-        
+
         {/* Navigation Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
           {[
             { id: 'overview' as ActiveTab, label: 'Overview', icon: '📊' },
             { id: 'stats' as ActiveTab, label: 'Statistics', icon: '📈' },
-            { id: 'achievements' as ActiveTab, label: 'Achievements', icon: '🏆' },
-            { id: 'settings' as ActiveTab, label: 'Settings', icon: '⚙️' },
+            {
+              id: 'achievements' as ActiveTab,
+              label: `Achievements (${unlockedCount}/${achievementProgress.length})`,
+              icon: '🏆'
+            },
+            { id: 'settings' as ActiveTab, label: 'Settings', icon: '⚙️' }
           ].map(tab => (
             <Button
               key={tab.id}
@@ -166,303 +230,311 @@ export function ProfileView() {
             </Button>
           ))}
         </div>
-        
-        {/* Tab Content */}
-        {activeTab === 'overview' && (
+
+        {loading && (
+          <Card className="bg-gray-900 text-center py-12">
+            <p className="text-gray-400">Loading operative telemetry...</p>
+          </Card>
+        )}
+
+        {/* Overview Tab */}
+        {!loading && activeTab === 'overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Recent Activity */}
             <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Recent Activity</h3>
-              <div className="space-y-3">
-                {[
-                  { type: 'game', action: 'Completed', wave: 25, score: 15840, date: '2 hours ago' },
-                  { type: 'achievement', action: 'Unlocked', name: 'Wave Master', date: '1 day ago' },
-                  { type: 'game', action: 'Completed', wave: 23, score: 14230, date: '3 days ago' },
-                  { type: 'achievement', action: 'Unlocked', name: 'Survival Expert', date: '1 week ago' },
-                  { type: 'game', action: 'Completed', wave: 21, score: 12890, date: '2 weeks ago' },
-                ].map((activity: any, index) => (
-                  <div key={index} className="flex items-center space-x-3 p-3 bg-gray-800 rounded">
-                    <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center text-sm">
-                      {activity.type === 'game' ? '🎮' : '🏆'}
-                    </div>
-                    <div className="flex-grow">
-                      <p className="text-white">
-                        <span className="text-cyan-accent">{activity.action}</span> 
-                        {activity.type === 'game' ? (
-                          <span>wave {activity.wave} with score {activity.score?.toLocaleString()}</span>
-                        ) : (
-                          <span>{activity.name}</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-400">{activity.date}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-            
-            {/* Favorite Hero */}
-            <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Favorite Hero</h3>
-              {mockUser.favoriteHero && (
-                <div className="flex items-center space-x-4">
-                  <div className="w-16 h-16 bg-gray-800 rounded-lg flex items-center justify-center text-3xl border-2 border-cyan-accent">
-                    🎮
-                  </div>
-                  <div>
-                    <h4 className="text-xl font-semibold text-white">{getHero(mockUser.favoriteHero)?.name}</h4>
-                    <p className="text-gray-400">{getHero(mockUser.favoriteHero)?.archetype}</p>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <div className="bg-gray-800 rounded p-2 text-center">
-                        <p className="text-xs text-gray-400">HP</p>
-                        <p className="text-white font-semibold">{getHero(mockUser.favoriteHero)?.hp}</p>
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Recent Deployments</h3>
+              {telemetry && telemetry.recent_runs.length > 0 ? (
+                <div className="space-y-3">
+                  {telemetry.recent_runs.slice(0, 5).map(run => (
+                    <div
+                      key={run.id}
+                      className="flex items-center justify-between p-3 bg-gray-800 rounded"
+                    >
+                      <div>
+                        <p className="text-white font-semibold">
+                          {getHero(run.hero_used).name} • Wave {run.wave_reached}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {run.survival_seconds}s survived • {run.coins_collected} coins • {run.enemies_defeated} kills
+                        </p>
                       </div>
-                      <div className="bg-gray-800 rounded p-2 text-center">
-                        <p className="text-xs text-gray-400">Speed</p>
-                        <p className="text-white font-semibold">{getHero(mockUser.favoriteHero)?.speed}x</p>
+                      <div className="text-right">
+                        <p className="text-hazard-gold font-bold">
+                          {run.final_score.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(run.created_at).toLocaleDateString()}
+                        </p>
                       </div>
                     </div>
-                  </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-400 mb-4">No completed missions recorded yet.</p>
+                  <Button variant="primary" size="sm" onClick={() => navigate('/play')}>
+                    Launch First Run
+                  </Button>
                 </div>
               )}
             </Card>
-            
-            {/* Time Played */}
-            <Card className="bg-gray-900 lg:col-span-2">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Statistics</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-white">{mockUser.totalGames}</p>
-                  <p className="text-sm text-gray-400">Games Played</p>
+
+            <Card className="bg-gray-900">
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Primary Operative</h3>
+              <div className="flex items-start space-x-4">
+                <div className="w-16 h-16 bg-gray-800 rounded-lg flex items-center justify-center text-3xl border-2 border-cyan-accent shrink-0">
+                  ⚡
                 </div>
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-cyan-accent">{mockUser.highestWave}</p>
-                  <p className="text-sm text-gray-400">Highest Wave</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-white">{mockUser.highestScore.toLocaleString()}</p>
-                  <p className="text-sm text-gray-400">Highest Score</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-hazard-gold">{mockUser.totalCoins.toLocaleString()}</p>
-                  <p className="text-sm text-gray-400">Total Coins</p>
+                <div>
+                  <h4 className="text-xl font-semibold text-white">{favoriteHero.name}</h4>
+                  <p className="text-cyan-accent text-sm">{favoriteHero.archetype}</p>
+                  <p className="text-gray-400 text-xs mt-1">{favoriteHero.lore}</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="bg-gray-800 rounded p-2 text-center">
+                      <p className="text-xs text-gray-400">Base HP</p>
+                      <p className="text-white font-semibold">{favoriteHero.hp}</p>
+                    </div>
+                    <div className="bg-gray-800 rounded p-2 text-center">
+                      <p className="text-xs text-gray-400">Speed</p>
+                      <p className="text-white font-semibold">
+                        {Math.round(favoriteHero.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </Card>
           </div>
         )}
-        
-        {activeTab === 'stats' && (
+
+        {/* Statistics Tab */}
+        {!loading && activeTab === 'stats' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Game Statistics */}
             <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Game Statistics</h3>
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Combat Telemetry</h3>
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label: 'Total Games', value: mockUser.totalGames, color: 'white' },
-                  { label: 'Highest Wave', value: mockUser.highestWave, color: 'cyan-accent' },
-                  { label: 'Total Score', value: mockUser.totalScore.toLocaleString(), color: 'hazard-gold' },
-                  { label: 'Highest Score', value: mockUser.highestScore.toLocaleString(), color: 'white' },
-                  { label: 'Total Coins', value: mockUser.totalCoins.toLocaleString(), color: 'hazard-gold' },
-                  { label: 'Total XP', value: mockUser.totalXP.toLocaleString(), color: 'cyan-accent' },
-                  { label: 'Current Level', value: mockUser.level, color: 'white' },
-                ].map((stat, index) => (
-                  <div key={index} className="bg-gray-800 rounded p-3 text-center">
-                    <p className="text-sm text-gray-400">{stat.label}</p>
-                    <p className={`font-semibold text-${stat.color}`}>{stat.value}</p>
+                  { label: 'Total Runs', value: telemetry?.total_games ?? 0 },
+                  { label: 'Highest Wave', value: telemetry?.highest_wave ?? 0 },
+                  { label: 'Enemies Defeated', value: (telemetry?.total_enemies_defeated ?? 0).toLocaleString() },
+                  { label: 'Best No-Hit Streak', value: `${telemetry?.longest_damage_free_wave_streak ?? 0} waves` },
+                  { label: 'Total Coins', value: (telemetry?.total_coins_collected ?? 0).toLocaleString() },
+                  { label: 'Highest Score', value: (telemetry?.highest_score ?? 0).toLocaleString() }
+                ].map(stat => (
+                  <div key={stat.label} className="bg-gray-800 rounded p-3 text-center">
+                    <p className="text-xs text-gray-400">{stat.label}</p>
+                    <p className="text-lg font-semibold text-white">{stat.value}</p>
                   </div>
                 ))}
               </div>
             </Card>
-            
-            {/* XP Progress */}
+
             <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">XP Progress</h3>
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Operative Rank Progression</h3>
               <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-sm text-gray-400">Level {mockUser.level}</span>
-                    <span className="text-sm text-gray-400">Level {mockUser.level + 1}</span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-4">
-                    <div 
-                      className="bg-cyan-accent h-4 rounded-full transition-all duration-300"
-                      style={{ width: `${xpProgress}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between mt-1 text-xs text-gray-400">
-                    <span>{mockUser.totalXP - (mockUser.totalXP % xpForNextLevel)} XP</span>
-                    <span>{mockUser.totalXP % xpForNextLevel} / {xpForNextLevel} XP</span>
-                  </div>
+                <div className="flex justify-between text-sm text-gray-400">
+                  <span>Level {level}</span>
+                  <span>Level {level + 1}</span>
                 </div>
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-cyan-accent">{xpProgress.toFixed(0)}%</p>
-                  <p className="text-sm text-gray-400">to next level</p>
+                <div className="w-full bg-gray-800 rounded-full h-4">
+                  <div
+                    className="bg-cyan-accent h-4 rounded-full transition-all duration-300"
+                    style={{ width: `${xpPercent}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>Total XP: {totalXP.toLocaleString()}</span>
+                  <span>{xpIntoLevel} / 500 XP</span>
                 </div>
               </div>
             </Card>
-            
-            {/* Hero Statistics */}
+
             <Card className="bg-gray-900 lg:col-span-2">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Hero Statistics</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Hero Mastery Records</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {heroes.map(hero => {
-                  // Mock data for each hero
-                  const gamesPlayed = Math.floor(Math.random() * 20) + 5;
-                  const highestWave = Math.floor(Math.random() * 15) + 10;
-                  const totalScore = (Math.floor(Math.random() * 10000) + 5000) * gamesPlayed;
-                  
+                  const stat = telemetry?.hero_stats?.[hero.id]
                   return (
                     <div key={hero.id} className="bg-gray-800 rounded p-4">
-                      <div className="flex items-center space-x-3 mb-3">
-                        <span className="text-2xl">🎮</span>
+                      <h4 className="font-semibold text-white">{hero.name}</h4>
+                      <p className="text-xs text-cyan-accent mb-3">{hero.archetype}</p>
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
                         <div>
-                          <h4 className="font-semibold text-white">{hero.name}</h4>
-                          <p className="text-xs text-gray-400">{hero.archetype}</p>
+                          <p className="text-gray-400">Runs</p>
+                          <p className="text-white font-semibold">{stat?.gamesPlayed ?? 0}</p>
                         </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div className="text-center">
-                          <p className="text-gray-400">Games</p>
-                          <p className="text-white font-semibold">{gamesPlayed}</p>
+                        <div>
+                          <p className="text-gray-400">Best Wave</p>
+                          <p className="text-cyan-accent font-semibold">{stat?.highestWave ?? 0}</p>
                         </div>
-                        <div className="text-center">
-                          <p className="text-gray-400">Wave</p>
-                          <p className="text-cyan-accent font-semibold">{highestWave}</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-gray-400">Score</p>
-                          <p className="text-hazard-gold font-semibold">{totalScore.toLocaleString()}</p>
+                        <div>
+                          <p className="text-gray-400">Best Score</p>
+                          <p className="text-hazard-gold font-semibold">
+                            {(stat?.highestScore ?? 0).toLocaleString()}
+                          </p>
                         </div>
                       </div>
                     </div>
-                  );
+                  )
                 })}
               </div>
             </Card>
           </div>
         )}
-        
-        {activeTab === 'achievements' && (
+
+        {/* Achievements Tab */}
+        {!loading && activeTab === 'achievements' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Achievements List */}
             <div className="lg:col-span-2">
               <Card className="bg-gray-900">
                 <h3 className="text-lg font-semibold text-cyan-accent mb-4">
-                  Achievements ({achievements.length} Total)
+                  Achievements ({unlockedCount}/{achievementProgress.length} Unlocked)
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {achievements.map(achievement => {
-                    const isCompleted = mockUser.achievements.includes(achievement.id);
-                    
-                    return (
-                      <div
-                        key={achievement.id}
-                        className={`rounded p-4 ${isCompleted ? 'bg-gray-800 border border-cyan-accent' : 'bg-gray-800 opacity-70'}`}
-                      >
-                        <div className="flex items-start space-x-3">
-                          <span className="text-3xl">🏆</span>
-                          <div className="flex-grow">
-                            <h4 className="font-semibold text-white">{achievement.title}</h4>
-                            <p className="text-sm text-gray-400">{achievement.requirement}</p>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {achievement.reward_badge}
-                            </p>
-                            {isCompleted && (
-                              <p className="text-xs text-cyan-accent mt-1">Completed</p>
-                            )}
-                          </div>
+                  {achievementProgress.map(item => (
+                    <div
+                      key={item.achievement.id}
+                      className={`rounded p-4 border ${
+                        item.unlocked
+                          ? 'bg-gray-800 border-cyan-accent'
+                          : 'bg-gray-800/60 border-gray-800'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div>
+                          <h4 className="font-semibold text-white">{item.achievement.title}</h4>
+                          <p className="text-xs text-gray-400">{item.achievement.requirement}</p>
                         </div>
+                        <Badge variant={item.unlocked ? 'success' : 'secondary'} size="sm">
+                          {item.unlocked ? 'Unlocked' : 'Locked'}
+                        </Badge>
                       </div>
-                    );
-                  })}
+
+                      <div className="w-full bg-gray-700 rounded-full h-2 mt-3 mb-1">
+                        <div
+                          className={`h-2 rounded-full ${
+                            item.unlocked ? 'bg-cyan-accent' : 'bg-hazard-gold'
+                          }`}
+                          style={{ width: `${item.percent}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-400">
+                        <span>Badge: {item.achievement.reward_badge}</span>
+                        <span>
+                          {Math.min(item.current, item.target).toLocaleString()} / {item.target.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </Card>
             </div>
-            
-            {/* Achievements Stats */}
-            <div>
-              <Card className="bg-gray-900">
-                <h3 className="text-lg font-semibold text-cyan-accent mb-4">Progress</h3>
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-sm text-gray-400">Completed</span>
-                      <span className="text-sm text-white">{mockUser.achievements.length}/{achievements.length}</span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-4">
-                      <div 
-                        className="bg-hazard-gold h-4 rounded-full"
-                        style={{ width: `${(mockUser.achievements.length / achievements.length) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          </div>
-        )}
-        
-        {activeTab === 'settings' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Account Settings */}
+
             <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Account Settings</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Username</label>
-                  <p className="text-white">{mockUser.username}</p>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Email</label>
-                  <p className="text-white">{mockUser.email}</p>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Member Since</label>
-                  <p className="text-white">{formatDate(mockUser.joinDate)}</p>
-                </div>
-                <div className="pt-4">
-                  <Button variant="secondary" onClick={startEditing} className="w-full">
-                    Edit Profile
-                  </Button>
-                </div>
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Completion Progress</h3>
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-gray-400">Badges Earned</span>
+                <span className="text-white font-semibold">
+                  {unlockedCount} / {achievementProgress.length}
+                </span>
+              </div>
+              <div className="w-full bg-gray-800 rounded-full h-4">
+                <div
+                  className="bg-hazard-gold h-4 rounded-full transition-all duration-300"
+                  style={{
+                    width: `${achievementProgress.length ? (unlockedCount / achievementProgress.length) * 100 : 0}%`
+                  }}
+                />
               </div>
             </Card>
-            
-            {/* Game Preferences */}
+          </div>
+        )}
+
+        {/* Settings Tab */}
+        {!loading && activeTab === 'settings' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card className="bg-gray-900">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Game Preferences</h3>
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Operative Identity</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs text-gray-400">Callsign</label>
+                  <p className="text-white font-semibold">{displayName}</p>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400">Session Type</label>
+                  <p className="text-white">
+                    {user?.email ? `Authenticated (${user.email})` : 'Guest Operative (Local Telemetry)'}
+                  </p>
+                </div>
+                <Button variant="secondary" onClick={startEditing} className="w-full">
+                  Change Callsign
+                </Button>
+                <Button variant="primary" onClick={() => navigate('/login')} className="w-full">
+                  {user ? 'Switch Account / Sign Out' : 'Log In or Create Account'}
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="bg-gray-900">
+              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Combat & Audio Preferences</h3>
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-white">Audio Effects</span>
-                  <Button variant="primary" className="text-sm">ON</Button>
+                  <span className="text-white">Master Audio</span>
+                  <Button
+                    variant={audioSettings.isMuted ? 'secondary' : 'primary'}
+                    size="sm"
+                    onClick={toggleMute}
+                  >
+                    {audioSettings.isMuted ? 'MUTED' : 'ON'}
+                  </Button>
                 </div>
+
                 <div className="flex justify-between items-center">
-                  <span className="text-white">Music</span>
-                  <Button variant="primary" className="text-sm">ON</Button>
+                  <span className="text-white">Sound Effects (SFX)</span>
+                  <Button
+                    variant={audioSettings.sfxVolume === 0 ? 'secondary' : 'primary'}
+                    size="sm"
+                    onClick={() => setSfxVolume(audioSettings.sfxVolume === 0 ? 80 : 0)}
+                  >
+                    {audioSettings.sfxVolume === 0 ? 'OFF' : `ON (${audioSettings.sfxVolume}%)`}
+                  </Button>
                 </div>
+
                 <div className="flex justify-between items-center">
-                  <span className="text-white">Notifications</span>
-                  <Button variant="primary" className="text-sm">ON</Button>
+                  <span className="text-white">Music Channel</span>
+                  <Button
+                    variant={audioSettings.musicVolume === 0 ? 'secondary' : 'primary'}
+                    size="sm"
+                    onClick={() => setMusicVolume(audioSettings.musicVolume === 0 ? 50 : 0)}
+                  >
+                    {audioSettings.musicVolume === 0 ? 'OFF' : `ON (${audioSettings.musicVolume}%)`}
+                  </Button>
                 </div>
+
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Targeting Mode</label>
+                  <label className="block text-sm text-gray-400 mb-1">Auto-Target Priority</label>
                   <select
                     className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-accent"
-                    defaultValue="closest"
+                    value={targetingMode}
+                    onChange={(e) =>
+                      setTargetingMode(e.target.value as OperativeProfile['targetingMode'])
+                    }
                   >
-                    <option value="closest">Closest</option>
-                    <option value="weakest">Weakest</option>
-                    <option value="strongest">Strongest</option>
-                    <option value="mostDangerous">Most Dangerous</option>
-                    <option value="random">Random</option>
+                    <option value="closest">Closest Enemy</option>
+                    <option value="weakest">Lowest HP</option>
+                    <option value="strongest">Highest HP</option>
+                    <option value="most_dangerous">Most Dangerous</option>
+                    <option value="random">Random Target</option>
                   </select>
                 </div>
+
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Difficulty</label>
+                  <label className="block text-sm text-gray-400 mb-1">Deployment Intensity</label>
                   <select
                     className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-accent"
-                    defaultValue="normal"
+                    value={difficulty}
+                    onChange={(e) =>
+                      setDifficulty(e.target.value as OperativeProfile['difficulty'])
+                    }
                   >
                     <option value="easy">Easy</option>
                     <option value="normal">Normal</option>
@@ -470,16 +542,17 @@ export function ProfileView() {
                     <option value="expert">Expert</option>
                   </select>
                 </div>
-                <div className="pt-4">
-                  <Button variant="primary" onClick={() => alert('Preferences saved!')} className="w-full">
-                    Save Preferences
-                  </Button>
-                </div>
+
+                <Button variant="primary" onClick={handleSavePreferences} className="w-full">
+                  Save Combat Preferences
+                </Button>
               </div>
             </Card>
           </div>
         )}
       </main>
     </div>
-  );
+  )
 }
+
+export default ProfileView

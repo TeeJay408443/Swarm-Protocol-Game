@@ -14,6 +14,7 @@ import { enhancedEnemies } from '../db/seedDataEnhanced'
 
 export interface Wave {
   number: number
+  waveNumber: number
   startTime: number
   isActive: boolean
   isBreather: boolean
@@ -23,6 +24,7 @@ export interface Wave {
   isBossWave: boolean
   bossSpawned: boolean
   bossDefeated: boolean
+  getRemainingEnemies: () => number
 }
 
 export interface WaveConfig {
@@ -94,8 +96,10 @@ export class WaveManager {
   }
   
   private createWave(number: number): Wave {
-    return {
+    const waveConfig = this.getWaveConfig(number)
+    const wave: Wave = {
       number,
+      waveNumber: number,
       startTime: Date.now(),
       isActive: false,
       isBreather: false,
@@ -105,7 +109,9 @@ export class WaveManager {
       isBossWave: number % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0,
       bossSpawned: false,
       bossDefeated: false,
+      getRemainingEnemies: () => Math.max(0, waveConfig.enemyCount - wave.enemiesSpawned)
     }
+    return wave
   }
   
   // ============================================
@@ -114,6 +120,44 @@ export class WaveManager {
   
   start(): void {
     this.startWave()
+  }
+  
+  startWave(waveNumber?: number): void {
+    const num = waveNumber !== undefined ? waveNumber : this.currentWave.number
+    this.currentWave = this.createWave(num)
+    this.currentWave.isActive = true
+    
+    // Schedule enemy spawns
+    this.scheduleEnemySpawns()
+    
+    // Start wave timer
+    this.startWaveTimer()
+    
+    // Trigger wave start callback
+    this.onWaveStartCallback?.(num)
+    
+    console.log(`🌊 Wave ${num} started`)
+  }
+
+  resize(width: number, height: number): void {
+    this.spawnPoints = []
+    this.initializeSpawnPoints(width, height)
+  }
+
+  update(_deltaTime?: number): void {
+    // Wave state updates if needed
+  }
+
+  render(_ctx?: CanvasRenderingContext2D, _deltaTime?: number): void {
+    // Wave render overlay if needed
+  }
+
+  enemySpawned(_enemy?: any): void {
+    this.currentWave.enemiesSpawned++
+  }
+
+  enemyKilled(_enemy?: any): void {
+    this.enemyDefeated()
   }
   
   stop(): void {
@@ -146,6 +190,10 @@ export class WaveManager {
     this.onWaveStartCallback = callback
   }
   
+  onWaveEnd(callback: (wave: number) => void): void {
+    this.onWaveCompleteCallback = (wave, _allDefeated) => callback(wave)
+  }
+
   onWaveComplete(callback: (wave: number, allDefeated: boolean) => void): void {
     this.onWaveCompleteCallback = callback
   }
@@ -165,23 +213,6 @@ export class WaveManager {
   // ============================================
   // WAVE LIFECYCLE
   // ============================================
-  
-  private startWave(): void {
-    const waveNumber = this.currentWave.number
-    this.currentWave = this.createWave(waveNumber)
-    this.currentWave.isActive = true
-    
-    // Schedule enemy spawns
-    this.scheduleEnemySpawns()
-    
-    // Start wave timer
-    this.startWaveTimer()
-    
-    // Trigger wave start callback
-    this.onWaveStartCallback?.(waveNumber)
-    
-    console.log(`🌊 Wave ${waveNumber} started`)
-  }
   
   private scheduleEnemySpawns(): void {
     const waveConfig = this.getWaveConfig(this.currentWave.number)

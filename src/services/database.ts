@@ -6,7 +6,13 @@
  * Seed data tables are public read-only and contain game entity definitions.
  */
 
-import { getSupabaseClient } from './supabase'
+import { supabase } from './supabase'
+import {
+  heroes as defaultHeroes,
+  enemies as defaultEnemies,
+  upgrades as defaultUpgrades,
+  achievements as defaultAchievements
+} from '../db/seedData'
 import type { 
   HeroesRow, 
   EnemiesRow, 
@@ -16,147 +22,147 @@ import type {
 
 // ============================================
 // SEED DATA OPERATIONS
-// These tables are public read-only
+// These tables are public read-only with in-memory fallback
 // ============================================
 
 /**
  * Fetch all heroes from the database
  */
 export const getHeroes = async (): Promise<HeroesRow[]> => {
-  const { data, error } = await getSupabaseClient()
-    .from('heroes')
-    .select('*')
-    .order('name', { ascending: true })
-  
-  if (error) {
-    console.error('Error fetching heroes:', error)
-    throw error
+  if (!supabase) return defaultHeroes
+  try {
+    const { data, error } = await supabase
+      .from('heroes')
+      .select('*')
+      .order('name', { ascending: true })
+    if (error || !data || data.length === 0) return defaultHeroes
+    return data
+  } catch {
+    return defaultHeroes
   }
-  
-  return data || []
 }
 
 /**
  * Fetch a single hero by ID
  */
 export const getHero = async (id: string): Promise<HeroesRow | null> => {
-  const { data, error } = await getSupabaseClient()
-    .from('heroes')
-    .select('*')
-    .eq('id', id)
-    .single()
-  
-  if (error) {
-    console.error('Error fetching hero:', error)
-    throw error
+  if (!supabase) return defaultHeroes.find(h => h.id === id) || null
+  try {
+    const { data, error } = await supabase
+      .from('heroes')
+      .select('*')
+      .eq('id', id)
+      .single()
+    if (error || !data) return defaultHeroes.find(h => h.id === id) || null
+    return data
+  } catch {
+    return defaultHeroes.find(h => h.id === id) || null
   }
-  
-  return data || null
 }
 
 /**
  * Fetch all enemies from the database
  */
 export const getEnemies = async (): Promise<EnemiesRow[]> => {
-  const { data, error } = await getSupabaseClient()
-    .from('enemies')
-    .select('*')
-    .order('name', { ascending: true })
-  
-  if (error) {
-    console.error('Error fetching enemies:', error)
-    throw error
+  if (!supabase) return defaultEnemies
+  try {
+    const { data, error } = await supabase
+      .from('enemies')
+      .select('*')
+      .order('name', { ascending: true })
+    if (error || !data || data.length === 0) return defaultEnemies
+    return data
+  } catch {
+    return defaultEnemies
   }
-  
-  return data || []
 }
 
 /**
  * Fetch a single enemy by ID
  */
 export const getEnemy = async (id: string): Promise<EnemiesRow | null> => {
-  const { data, error } = await getSupabaseClient()
-    .from('enemies')
-    .select('*')
-    .eq('id', id)
-    .single()
-  
-  if (error) {
-    console.error('Error fetching enemy:', error)
-    throw error
+  if (!supabase) return defaultEnemies.find(e => e.id === id) || null
+  try {
+    const { data, error } = await supabase
+      .from('enemies')
+      .select('*')
+      .eq('id', id)
+      .single()
+    if (error || !data) return defaultEnemies.find(e => e.id === id) || null
+    return data
+  } catch {
+    return defaultEnemies.find(e => e.id === id) || null
   }
-  
-  return data || null
 }
 
 /**
  * Fetch all upgrades from the database
  */
 export const getUpgrades = async (): Promise<UpgradesRow[]> => {
-  const { data, error } = await getSupabaseClient()
-    .from('upgrades')
-    .select('*')
-    .order('name', { ascending: true })
-  
-  if (error) {
-    console.error('Error fetching upgrades:', error)
-    throw error
+  if (!supabase) return defaultUpgrades
+  try {
+    const { data, error } = await supabase
+      .from('upgrades')
+      .select('*')
+      .order('name', { ascending: true })
+    if (error || !data || data.length === 0) return defaultUpgrades
+    return data
+  } catch {
+    return defaultUpgrades
   }
-  
-  return data || []
 }
 
 /**
  * Fetch a single upgrade by ID
  */
 export const getUpgrade = async (id: string): Promise<UpgradesRow | null> => {
-  const { data, error } = await getSupabaseClient()
-    .from('upgrades')
-    .select('*')
-    .eq('id', id)
-    .single()
-  
-  if (error) {
-    console.error('Error fetching upgrade:', error)
-    throw error
+  if (!supabase) return defaultUpgrades.find(u => u.id === id) || null
+  try {
+    const { data, error } = await supabase
+      .from('upgrades')
+      .select('*')
+      .eq('id', id)
+      .single()
+    if (error || !data) return defaultUpgrades.find(u => u.id === id) || null
+    return data
+  } catch {
+    return defaultUpgrades.find(u => u.id === id) || null
   }
-  
-  return data || null
 }
 
 /**
  * Fetch all achievements from the database
  */
 export const getAchievements = async (): Promise<AchievementsRow[]> => {
-  const { data, error } = await getSupabaseClient()
-    .from('achievements')
-    .select('*')
-    .order('title', { ascending: true })
-  
-  if (error) {
-    console.error('Error fetching achievements:', error)
-    throw error
+  if (!supabase) return defaultAchievements
+  try {
+    const { data, error } = await supabase
+      .from('achievements')
+      .select('*')
+      .order('title', { ascending: true })
+    if (error || !data || data.length === 0) return defaultAchievements
+    return data
+  } catch {
+    return defaultAchievements
   }
-  
-  return data || []
 }
 
 /**
  * Fetch a single achievement by ID
  */
 export const getAchievement = async (id: string): Promise<AchievementsRow | null> => {
-  const { data, error } = await getSupabaseClient()
-    .from('achievements')
-    .select('*')
-    .eq('id', id)
-    .single()
-  
-  if (error) {
-    console.error('Error fetching achievement:', error)
-    throw error
+  if (!supabase) return defaultAchievements.find(a => a.id === id) || null
+  try {
+    const { data, error } = await supabase
+      .from('achievements')
+      .select('*')
+      .eq('id', id)
+      .single()
+    if (error || !data) return defaultAchievements.find(a => a.id === id) || null
+    return data
+  } catch {
+    return defaultAchievements.find(a => a.id === id) || null
   }
-  
-  return data || null
 }
 
 // ============================================

@@ -1,10 +1,10 @@
 // Seed Data for Swarm Protocol: Survivor
-// 29 Entities: 6 Heroes + 4 Enemies + 15 Upgrades + 4 Achievements
+// 35 Entities: 6 Heroes + 4 Enemies + 21 Upgrades + 4 Achievements
 
 import type { UpgradesRow, EnemiesRow, AchievementsRow, HeroesRow } from '../types/database'
 
 // ============================================
-// UPGRADES (15 Entries) - Must be seeded first
+// UPGRADES (21 Entries) - Must be seeded first
 // ============================================
 export const upgrades: UpgradesRow[] = [
   {
@@ -141,6 +141,60 @@ export const upgrades: UpgradesRow[] = [
     damage: 0,
     cooldown_s: 8.0,
     special: '1 charge',
+  },
+  {
+    id: 'upg_16',
+    name: 'Ion Scattergun',
+    category: 'Projectile',
+    function_desc: 'Fires a spread of piercing plasma pellets at close threats',
+    damage: 16,
+    cooldown_s: 1.1,
+    special: '5-pellet cone',
+  },
+  {
+    id: 'upg_17',
+    name: 'Void Singularity',
+    category: 'Heavy AoE',
+    function_desc: 'Deploys a gravity vortex pulling enemies inward before detonating',
+    damage: 36,
+    cooldown_s: 4.5,
+    special: 'Gravity pull',
+  },
+  {
+    id: 'upg_18',
+    name: 'Frost Nova Spire',
+    category: 'AoE Weapon',
+    function_desc: 'Launches a ring of piercing cryo shards outward in all directions',
+    damage: 22,
+    cooldown_s: 2.2,
+    special: '8-way radial',
+  },
+  {
+    id: 'upg_19',
+    name: 'Vampiric Siphon',
+    category: 'Utility',
+    function_desc: 'Drains bio-energy from nearby enemies to damage foes and heal HP',
+    damage: 14,
+    cooldown_s: 2.4,
+    special: 'Lifesteal aura',
+  },
+  {
+    id: 'upg_20',
+    name: 'Sentinel Turret',
+    category: 'Summon',
+    function_desc: 'Deploys an automated heavy pulse turret firing high-velocity shells',
+    damage: 20,
+    cooldown_s: 0.65,
+    special: 'Autonomous turret',
+  },
+  {
+    id: 'upg_21',
+    name: 'Inferno Fireball',
+    category: 'AoE Weapon',
+    function_desc: 'Throws explosive fireballs leaving burning zones that scorch foes inside',
+    damage: 32,
+    cooldown_s: 2.2,
+    special: 'Area burn zone',
   },
 ]
 

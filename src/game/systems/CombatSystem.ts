@@ -576,6 +576,7 @@ export class CombatSystem {
     
     // Apply damage to all enemies in range
     for (const enemy of enemiesInRange) {
+      const distance = Vector2.distance(enemy.getCenter(), position)
       this.applyDamage(enemy, {
         amount: damage * (1 - distance / radius), // Falloff damage
         type: 'explosion',

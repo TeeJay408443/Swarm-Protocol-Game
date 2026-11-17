@@ -10,10 +10,13 @@
     "preview": "vite preview",
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/db/reset.ts",
-    "db:validate": "tsx src/db/validateSeed.ts"
+    "db:validate": "tsx src/db/validateSeed.ts",
+    "test": "tsx --test tests/phase9.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
+    "@types/howler": "^2.2.13",
+    "howler": "^2.2.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5"

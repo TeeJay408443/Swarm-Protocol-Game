@@ -355,16 +355,16 @@ export class RenderSystem {
       
       switch (effect.type) {
         case 'hit':
-          this.drawHitEffect(ctx, screenX, screenY, effect, progress)
+          this.drawHitEffect(this.ctx, screenX, screenY, effect, progress)
           break
         case 'explosion':
-          this.drawExplosionEffect(ctx, screenX, screenY, effect, progress)
+          this.drawExplosionEffect(this.ctx, screenX, screenY, effect, progress)
           break
         case 'heal':
-          this.drawHealEffect(ctx, screenX, screenY, effect, progress)
+          this.drawHealEffect(this.ctx, screenX, screenY, effect, progress)
           break
         case 'levelup':
-          this.drawLevelUpEffect(ctx, screenX, screenY, effect, progress)
+          this.drawLevelUpEffect(this.ctx, screenX, screenY, effect, progress)
           break
       }
     }

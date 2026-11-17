@@ -5,12 +5,13 @@
 
 import { useState, useCallback } from 'react'
 import { ValidationRule } from '../components/ui/ValidatedInput'
+export type { ValidationRule } from '../components/ui/ValidatedInput'
 
-interface ValidationErrors {
+export interface ValidationErrors {
   [key: string]: string
 }
 
-interface ValidationResult {
+export interface ValidationResult {
   isValid: boolean
   errors: ValidationErrors
 }

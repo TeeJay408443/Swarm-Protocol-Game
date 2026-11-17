@@ -1,20 +1,27 @@
 /**
  * HUD Component
- * Phase 7: Build the Game - Heads-Up Display
+ * Phase 7 & 9: Real-time 60 FPS Heads-Up Display
  */
 
 import React from 'react'
+import { getXpForNextLevel } from '../../../config/gameConstants'
 
-interface HUDProps {
+export interface HUDProps {
   score: number
   coins: number
   xp: number
+  xpToNext?: number
   level: number
   health: number
   maxHealth: number
   wave: number
   time: number
   enemiesDefeated: number
+  waveTimeRemaining?: number
+  isBreather?: boolean
+  heroName?: string
+  activeUpgrades?: string[]
+  shieldActive?: boolean
   onPause: () => void
 }
 
@@ -22,122 +29,134 @@ const HUD: React.FC<HUDProps> = ({
   score,
   coins,
   xp,
+  xpToNext,
   level,
   health,
   maxHealth,
   wave,
   time,
   enemiesDefeated,
+  waveTimeRemaining,
+  isBreather = false,
+  heroName,
+  activeUpgrades = [],
+  shieldActive = false,
   onPause
 }) => {
-  // Calculate XP progress
-  const xpForNextLevel = 100
-  const xpProgress = (xp % xpForNextLevel) / xpForNextLevel * 100
-  
-  // Calculate health percentage
-  const healthPercent = (health / maxHealth) * 100
+  const xpForNextLevel = Math.max(1, xpToNext ?? getXpForNextLevel(level))
+  const xpDisplay = Math.max(0, Math.floor(xp))
+  const xpProgress = Math.min(100, Math.max(0, (xpDisplay / xpForNextLevel) * 100))
+  const healthPercent = maxHealth > 0 ? Math.max(0, Math.min(100, (health / maxHealth) * 100)) : 0
 
-  // Format time as MM:SS
   const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
+    const safe = Math.max(0, Math.floor(seconds))
+    const mins = Math.floor(safe / 60)
+    const secs = safe % 60
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  // Format score with commas
-  const formatScore = (num: number): string => {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-  }
-
   return (
-    <div className="absolute top-0 left-0 right-0 pointer-events-none">
-      {/* Top Bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-900/90 backdrop-blur-sm">
-        {/* Left Side - Score, Coins, Time */}
-        <div className="flex items-center space-x-6">
-          {/* Score */}
-          <div className="flex items-center space-x-2">
-            <span className="text-cyan-400 font-bold text-xl">SCORE</span>
-            <span className="text-white font-bold text-xl">{formatScore(score)}</span>
+    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-4">
+      {/* Top HUD */}
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-900/90 backdrop-blur-sm rounded-lg border border-gray-700/80">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+            <div className="flex items-center space-x-2">
+              <span className="text-cyan-400 font-bold text-sm sm:text-lg">SCORE</span>
+              <span className="text-white font-bold text-sm sm:text-xl font-mono">
+                {score.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="flex items-center space-x-1.5">
+              <span className="text-yellow-400 font-bold text-base sm:text-lg">🪙</span>
+              <span className="text-hazard-gold font-bold text-sm sm:text-xl font-mono">{coins}</span>
+            </div>
+
+            <div className="flex items-center space-x-1.5">
+              <span className="text-gray-400 text-xs uppercase">Time</span>
+              <span className="text-white font-mono text-sm sm:text-lg">{formatTime(time)}</span>
+            </div>
+
+            {heroName && (
+              <div className="hidden md:block text-xs text-cyan-accent font-semibold">
+                {heroName}
+              </div>
+            )}
           </div>
-          
-          {/* Coins */}
-          <div className="flex items-center space-x-2">
-            <span className="text-yellow-400 font-bold text-xl">💰</span>
-            <span className="text-white font-bold text-xl">{coins}</span>
+
+          <div className="flex items-center space-x-3">
+            <div className="text-right">
+              <div className={`text-xs font-bold uppercase ${isBreather ? 'text-hazard-gold' : 'text-cyan-accent'}`}>
+                {isBreather ? 'BREATHER WINDOW' : `WAVE ${wave}`}
+                {wave % 5 === 0 && !isBreather && ' • BOSS'}
+              </div>
+              {typeof waveTimeRemaining === 'number' && (
+                <div className="text-xs text-gray-300 font-mono">
+                  {Math.ceil(waveTimeRemaining)}s left
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onPause()
+              }}
+              className="pointer-events-auto px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-gray-600 text-white font-bold text-xs sm:text-sm rounded transition-colors"
+              aria-label="Pause game"
+            >
+              PAUSE
+            </button>
           </div>
-          
-          {/* Time */}
-          <div className="flex items-center space-x-2">
-            <span className="text-white/80 font-mono text-xl">{formatTime(time)}</span>
+        </div>
+
+        {/* Health & XP Bars */}
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="bg-slate-900/80 rounded p-2 border border-gray-800">
+            <div className="flex justify-between text-xs text-white/80 mb-1">
+              <span>HP: {Math.ceil(health)}/{maxHealth}</span>
+              {shieldActive && <span className="text-cyan-accent font-semibold">🛡️ SHIELD READY</span>}
+            </div>
+            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-alert-red transition-all duration-150"
+                style={{ width: `${healthPercent}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="bg-slate-900/80 rounded p-2 border border-gray-800">
+            <div className="flex justify-between text-xs text-white/80 mb-1">
+              <span className="text-cyan-400 font-bold">LEVEL {level}</span>
+              <span>XP: {xpDisplay}/{xpForNextLevel}</span>
+            </div>
+            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-cyan-500 transition-all duration-200"
+                style={{ width: `${xpProgress}%` }}
+              />
+            </div>
           </div>
         </div>
-        
-        {/* Right Side - Pause Button */}
-        <div className="flex items-center">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onPause()
-            }}
-            className="pointer-events-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors"
-          >
-            PAUSE
-          </button>
-        </div>
       </div>
-      
-      {/* Health Bar */}
-      <div className="px-4 py-2">
-        <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-red-500 transition-all duration-200"
-            style={{ width: `${healthPercent}%` }}
-          />
-          <div
-            className="absolute inset-0 h-full bg-gradient-to-r from-red-500 to-red-400 opacity-70"
-            style={{ width: `${healthPercent}%` }}
-          />
+
+      {/* Bottom HUD */}
+      <div className="flex items-end justify-between gap-2">
+        <div className="bg-slate-900/85 backdrop-blur-sm px-3 py-2 rounded-lg border border-gray-800 text-xs text-gray-300 space-y-1">
+          <div>
+            Kills: <span className="text-white font-bold">{enemiesDefeated}</span>
+          </div>
+          {activeUpgrades.length > 0 && (
+            <div className="hidden sm:block text-cyan-accent max-w-md truncate">
+              Weapons: {activeUpgrades.join(' • ')}
+            </div>
+          )}
         </div>
-        <div className="flex justify-between mt-1 text-xs text-white/80">
-          <span>HP: {health}/{maxHealth}</span>
+
+        <div className="bg-slate-900/85 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-gray-800">
+          <span className="text-xs text-cyan-400 font-mono">S = 10t + 25c</span>
         </div>
-      </div>
-      
-      {/* XP Bar */}
-      <div className="px-4 py-2">
-        <div className="flex items-center space-x-2">
-          <span className="text-cyan-400 font-bold text-sm">LEVEL {level}</span>
-        </div>
-        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-cyan-500 transition-all duration-300"
-            style={{ width: `${xpProgress}%` }}
-          />
-        </div>
-        <div className="flex justify-between mt-1 text-xs text-white/80">
-          <span>XP: {xp}/{xpForNextLevel * level}</span>
-        </div>
-      </div>
-      
-      {/* Wave Info */}
-      <div className="absolute top-20 right-4 bg-slate-800/90 backdrop-blur-sm px-4 py-2 rounded-lg">
-        <div className="text-center">
-          <div className="text-white/80 text-xs">WAVE</div>
-          <div className="text-cyan-400 font-bold text-2xl">{wave}</div>
-        </div>
-      </div>
-      
-      {/* Stats Panel (Bottom Left) */}
-      <div className="absolute bottom-4 left-4 bg-slate-800/90 backdrop-blur-sm px-4 py-2 rounded-lg">
-        <div className="text-white/80 text-sm">
-          <div>Enemies: {enemiesDefeated}</div>
-        </div>
-      </div>
-      
-      {/* Score Formula Display */}
-      <div className="absolute bottom-4 right-4 bg-slate-800/90 backdrop-blur-sm px-3 py-1 rounded-lg">
-        <span className="text-xs text-cyan-400">S = 10t + 25c</span>
       </div>
     </div>
   )

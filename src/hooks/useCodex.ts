@@ -1,90 +1,74 @@
 /**
  * useCodex Hook - Codex Data Management
- * Phase 6: Core Build - Data Explorer
- * 
- * This hook provides access to Codex data with search, filter, and sort capabilities.
+ * Phase 6 / Phase 9: Data Explorer with Multi-Field Search, Filtering & Sorting
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { 
-  getHeroes, 
-  getEnemies, 
-  getUpgrades, 
+import {
+  getHeroes,
+  getEnemies,
+  getUpgrades,
   getAchievements,
-  searchByName,
-  filterByCategory,
   sortEntities
 } from '../services/database'
 import type { HeroesRow, EnemiesRow, UpgradesRow, AchievementsRow } from '../types/database'
 
-// Entity types for the Codex
-type CodexEntityType = 'heroes' | 'enemies' | 'upgrades' | 'achievements'
-
-// Union type for all Codex entities
-type CodexEntity = HeroesRow | EnemiesRow | UpgradesRow | AchievementsRow
+export type CodexEntityType = 'heroes' | 'enemies' | 'upgrades' | 'achievements'
+export type CodexEntity = HeroesRow | EnemiesRow | UpgradesRow | AchievementsRow
 
 interface UseCodexReturn {
-  // Data
   heroes: HeroesRow[]
   enemies: EnemiesRow[]
   upgrades: UpgradesRow[]
   achievements: AchievementsRow[]
-  
-  // Loading and error states
   loading: boolean
   error: string | null
-  
-  // Active tab
   activeTab: CodexEntityType
   setActiveTab: (tab: CodexEntityType) => void
-  
-  // Search
   searchQuery: string
   setSearchQuery: (query: string) => void
-  
-  // Filter
   filterCategory: string
   setFilterCategory: (category: string) => void
   availableCategories: string[]
-  
-  // Sort
   sortBy: string
   setSortBy: (property: string) => void
   sortDirection: 'asc' | 'desc'
   setSortDirection: (direction: 'asc' | 'desc') => void
-  
-  // Filtered and sorted data for active tab
   filteredData: CodexEntity[]
-  
-  // Refresh function
+  clearFilters: () => void
   refresh: () => Promise<void>
 }
 
 export const useCodex = (): UseCodexReturn => {
-  // Data state
   const [heroes, setHeroes] = useState<HeroesRow[]>([])
   const [enemies, setEnemies] = useState<EnemiesRow[]>([])
   const [upgrades, setUpgrades] = useState<UpgradesRow[]>([])
   const [achievements, setAchievements] = useState<AchievementsRow[]>([])
-  
-  // Loading and error states
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
-  // Active tab
-  const [activeTab, setActiveTab] = useState<CodexEntityType>('heroes')
-  
-  // Search
+
+  const [activeTab, setActiveTabState] = useState<CodexEntityType>('heroes')
   const [searchQuery, setSearchQuery] = useState('')
-  
-  // Filter
   const [filterCategory, setFilterCategory] = useState('all')
-  
-  // Sort
   const [sortBy, setSortBy] = useState('name')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
-  
-  // Get data for active tab
+
+  const setActiveTab = useCallback((tab: CodexEntityType) => {
+    setActiveTabState(tab)
+    setSearchQuery('')
+    setFilterCategory('all')
+    setSortBy(tab === 'achievements' ? 'title' : 'name')
+    setSortDirection('asc')
+  }, [])
+
+  const clearFilters = useCallback(() => {
+    setSearchQuery('')
+    setFilterCategory('all')
+    setSortBy(activeTab === 'achievements' ? 'title' : 'name')
+    setSortDirection('asc')
+  }, [activeTab])
+
   const getActiveTabData = useCallback((): CodexEntity[] => {
     switch (activeTab) {
       case 'heroes':
@@ -99,80 +83,87 @@ export const useCodex = (): UseCodexReturn => {
         return []
     }
   }, [activeTab, heroes, enemies, upgrades, achievements])
-  
-  // Get available categories for active tab
+
   const availableCategories = useMemo(() => {
     const data = getActiveTabData()
     const categories = new Set<string>()
-    
+
     data.forEach(entity => {
       if ('archetype' in entity) categories.add(entity.archetype)
       if ('category' in entity) categories.add(entity.category)
       if ('reward_badge' in entity) categories.add(entity.reward_badge)
     })
-    
+
     return ['all', ...Array.from(categories)]
   }, [getActiveTabData])
-  
-  // Apply search, filter, and sort to active tab data
+
   const filteredData = useMemo(() => {
     let data = getActiveTabData()
-    
-    // Search
-    if (searchQuery) {
-      data = searchByName(data as any, searchQuery) as CodexEntity[]
+
+    // Search across name/title, lore, description, function_desc, requirement, special
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase()
+      data = data.filter(entity => {
+        const fields: string[] = [entity.id]
+        if ('name' in entity) fields.push(entity.name)
+        if ('title' in entity) fields.push(entity.title)
+        if ('archetype' in entity) fields.push(entity.archetype)
+        if ('lore' in entity) fields.push(entity.lore)
+        if ('category' in entity) fields.push(entity.category)
+        if ('description' in entity) fields.push(entity.description)
+        if ('function_desc' in entity) fields.push(entity.function_desc)
+        if ('special' in entity && entity.special) fields.push(entity.special)
+        if ('requirement' in entity) fields.push(entity.requirement)
+        if ('reward_badge' in entity) fields.push(entity.reward_badge)
+        return fields.some(f => f.toLowerCase().includes(q))
+      })
     }
-    
-    // Filter by category
+
+    // Filter across archetype, category, or reward_badge
     if (filterCategory !== 'all') {
-      data = filterByCategory(data as any, filterCategory) as CodexEntity[]
+      data = data.filter(entity => {
+        if ('archetype' in entity) return entity.archetype === filterCategory
+        if ('category' in entity) return entity.category === filterCategory
+        if ('reward_badge' in entity) return entity.reward_badge === filterCategory
+        return true
+      })
     }
-    
+
     // Sort
     if (sortBy) {
-      data = sortEntities(data, sortBy as any, sortDirection) as CodexEntity[]
+      data = sortEntities(data, sortBy as keyof CodexEntity, sortDirection) as CodexEntity[]
     }
-    
+
     return data
   }, [getActiveTabData, searchQuery, filterCategory, sortBy, sortDirection])
-  
-  // Fetch all data
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
-      
+
       const [heroesData, enemiesData, upgradesData, achievementsData] = await Promise.all([
         getHeroes(),
         getEnemies(),
         getUpgrades(),
         getAchievements()
       ])
-      
+
       setHeroes(heroesData || [])
       setEnemies(enemiesData || [])
       setUpgrades(upgradesData || [])
       setAchievements(achievementsData || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch data')
+      setError(err instanceof Error ? err.message : 'Failed to fetch Codex data')
     } finally {
       setLoading(false)
     }
   }, [])
-  
-  // Initial fetch
+
   useEffect(() => {
     fetchData()
   }, [fetchData])
-  
-  // Reset filter and search when tab changes
-  useEffect(() => {
-    setSearchQuery('')
-    setFilterCategory('all')
-    setSortBy('name')
-    setSortDirection('asc')
-  }, [activeTab])
-  
+
   return {
     heroes,
     enemies,
@@ -192,6 +183,7 @@ export const useCodex = (): UseCodexReturn => {
     sortDirection,
     setSortDirection,
     filteredData,
+    clearFilters,
     refresh: fetchData
   }
 }

@@ -30,6 +30,29 @@ export {
 } from './loadouts'
 export type { ExtendedLoadout, CreateLoadoutInput, UpdateLoadoutInput } from './loadouts'
 
+// Score, Telemetry & Achievement Services
+export {
+  calculateScoreFormula,
+  estimateWaveFromSeconds,
+  getOperativeProfile,
+  saveOperativeProfile,
+  getLocalPlayerTelemetry,
+  evaluateAchievements,
+  submitScore,
+  getScores,
+  getTopScores,
+  getPlayerTelemetry
+} from './scores'
+export type {
+  OperativeProfile,
+  LocalRunRecord,
+  HeroAggregateStat,
+  LocalPlayerTelemetry,
+  AchievementProgress,
+  SubmitScoreInput,
+  GetScoresOptions
+} from './scores'
+
 // Audio Service
 export {
   AudioService,

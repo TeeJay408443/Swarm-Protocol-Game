@@ -158,6 +158,46 @@ function validatePositiveNumbers<T>(
 }
 
 /**
+ * Validate that numeric values are non-negative (>= 0)
+ */
+function validateNonNegativeNumbers<T>(
+  entities: T[],
+  entityType: string,
+  fields: (keyof T)[]
+): ValidationResult {
+  const result: ValidationResult = {
+    valid: true,
+    errors: [],
+    warnings: [],
+    info: [],
+  }
+
+  const invalidEntities: string[] = []
+
+  for (const entity of entities) {
+    for (const field of fields) {
+      const value = (entity as any)[field]
+      if (typeof value === 'number' && value < 0) {
+        invalidEntities.push(`${entityType}.${(entity as any).id}.${String(field)} = ${value}`)
+        result.valid = false
+      }
+    }
+  }
+
+  if (invalidEntities.length > 0) {
+    result.errors.push(
+      `❌ ${entityType}: Found ${invalidEntities.length} negative numeric values: ${invalidEntities.join(', ')}`
+    )
+  } else {
+    result.info.push(
+      `✅ ${entityType}: All specified numeric fields have non-negative values`
+    )
+  }
+
+  return result
+}
+
+/**
  * Validate that string fields are non-empty
  */
 function validateNonEmptyStrings<T>(
@@ -209,11 +249,11 @@ function validateEntityCounts(): ValidationResult {
   }
 
   const expectedCounts = {
-    upgrades: 15,
+    upgrades: 21,
     enemies: 4,
     achievements: 4,
     heroes: 6,
-    total: 29,
+    total: 35,
   }
 
   const actualCounts = {
@@ -493,7 +533,7 @@ export function validateSeedData(): ValidationResult & { stats: ValidationStats 
   allResults.push(validateReferences(heroes, 'Heroes', 'starting_upgrade_id', upgrades, 'Upgrades'))
   
   // 4. Numeric validation
-  allResults.push(validatePositiveNumbers(upgrades, 'Upgrades', ['damage', 'cooldown_s']))
+  allResults.push(validateNonNegativeNumbers(upgrades, 'Upgrades', ['damage', 'cooldown_s']))
   allResults.push(validatePositiveNumbers(enemies, 'Enemies', ['hp', 'speed', 'coin_value']))
   allResults.push(validatePositiveNumbers(heroes, 'Heroes', ['hp', 'speed']))
   

@@ -1,0 +1,7 @@
+{
+  "name": "Swarm Protocol: Survivor",
+  "description": "A sci-fi survivor game where operatives battle waves of mechanical swarms, collecting upgrades, leveling up heroes, and competing on leaderboards.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

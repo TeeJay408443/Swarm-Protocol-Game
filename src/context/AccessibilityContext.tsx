@@ -9,10 +9,11 @@ import {
   DEFAULT_ACCESSIBILITY_SETTINGS,
   ACCESSIBILITY_STORAGE_KEY,
   saveAccessibilitySettings,
-  loadAccessibilitySettings
+  loadAccessibilitySettings,
+  getColors
 } from '../themes/accessibility'
 
-interface AccessibilityContextType {
+export interface AccessibilityContextType {
   settings: AccessibilitySettings
   isHighContrast: boolean
   isLargeText: boolean
@@ -26,7 +27,7 @@ interface AccessibilityContextType {
 
 const AccessibilityContext = createContext<AccessibilityContextType | undefined>(undefined)
 
-interface AccessibilityProviderProps {
+export interface AccessibilityProviderProps {
   children: ReactNode
   defaultSettings?: AccessibilitySettings
 }
@@ -132,11 +133,10 @@ export const useAccessibility = (): AccessibilityContextType => {
  */
 export const AccessibilityStyles: React.FC = () => {
   const { settings } = useAccessibility()
-  const { getColors } = require('../themes/accessibility')
   const colors = getColors(settings)
 
   return (
-    <style jsx global>{`
+    <style>{`
       .high-contrast {
         --color-background: ${colors.background};
         --color-surface: ${colors.surface};

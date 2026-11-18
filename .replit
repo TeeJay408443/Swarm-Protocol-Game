@@ -38,3 +38,12 @@ externalPort = 80
 localPort = 5173
 externalPort = 5173
 exposeLocalhost = true
+
+[deployment]
+deploymentTarget = "static"
+build = ["npm", "run", "build"]
+publicDir = "dist"
+
+[[deployment.rewrites]]
+from = "/*"
+to = "/index.html"

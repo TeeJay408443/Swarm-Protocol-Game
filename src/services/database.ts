@@ -13,6 +13,7 @@ import {
   upgrades as defaultUpgrades,
   achievements as defaultAchievements
 } from '../db/seedData'
+import { AREA_TWO_BOSSES, AREA_TWO_ENEMIES } from '../config/arenas'
 import type { 
   HeroesRow, 
   EnemiesRow, 
@@ -64,16 +65,22 @@ export const getHero = async (id: string): Promise<HeroesRow | null> => {
  * Fetch all enemies from the database
  */
 export const getEnemies = async (): Promise<EnemiesRow[]> => {
-  if (!supabase) return defaultEnemies
+  const mergeWithAreaTwo = (base: EnemiesRow[]): EnemiesRow[] => {
+    const seen = new Set(base.map((e) => e.id))
+    const areaTwoRoster = [...AREA_TWO_ENEMIES, ...AREA_TWO_BOSSES]
+    return [...base, ...areaTwoRoster.filter((e) => !seen.has(e.id))]
+  }
+
+  if (!supabase) return mergeWithAreaTwo(defaultEnemies)
   try {
     const { data, error } = await supabase
       .from('enemies')
       .select('*')
       .order('name', { ascending: true })
-    if (error || !data || data.length === 0) return defaultEnemies
-    return data
+    if (error || !data || data.length === 0) return mergeWithAreaTwo(defaultEnemies)
+    return mergeWithAreaTwo(data)
   } catch {
-    return defaultEnemies
+    return mergeWithAreaTwo(defaultEnemies)
   }
 }
 

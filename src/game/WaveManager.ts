@@ -353,7 +353,12 @@ export class WaveManager {
     
     // Increment waves completed
     this.wavesCompleted++
-    
+
+    // Stop advancing past Wave 15 (Final Boss wave)
+    if (this.currentWave.number >= WAVE_CONFIG.MAX_WAVE) {
+      return
+    }
+
     // Start next wave
     this.startWave()
   }

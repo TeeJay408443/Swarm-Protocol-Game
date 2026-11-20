@@ -21,8 +21,23 @@ import {
   getUpgradeOverdriveHint,
   getXpForNextLevel
 } from '../src/config/gameConstants'
+import {
+  AREA_TWO_BOSSES,
+  AREA_TWO_ENEMIES,
+  GAME_AREAS,
+  getAreaBossTemplateForWave,
+  getAreaById,
+  getAreaEnemies,
+  getAreaMiniBossCap,
+  getWave15FinalBossHp,
+  isAreaUnlocked,
+  selectAreaEnemyTemplateForWave,
+  shouldSpawnRegularEnemiesInWave,
+  WAVE_15_FINAL_BOSS_BASE_HP
+} from '../src/config/arenas'
 import { heroes, enemies, upgrades, achievements } from '../src/db/seedData'
 import { validateSeedData } from '../src/db/validateSeed'
+import { getEnemies } from '../src/services/database'
 import {
   calculateScoreFormula,
   estimateWaveFromSeconds,
@@ -36,8 +51,13 @@ import { XPManager } from '../src/game/XPManager'
 import { WaveManager } from '../src/game/WaveManager'
 import { Player } from '../src/game/entities/Player'
 import {
+  BossArenaBounds,
+  ClosingSideLaserMode,
   checkBossTelegraphHit,
+  checkEnemyAoeHit,
   Enemy,
+  getClosingSideLaserRects,
+  getClosingSideLaserTrackRects,
   resolveEnemyCollisions
 } from '../src/game/entities/Enemy'
 import { Coin } from '../src/game/entities/Coin'
@@ -52,6 +72,17 @@ import {
 } from '../src/services/auth'
 import { getLocalPlayerTelemetry, submitScore } from '../src/services/scores'
 import { isConfiguredSupabase } from '../src/services/supabase'
+import {
+  DEV_AUTHORIZED_EMAIL,
+  DevLiveAction,
+  dispatchDevAction,
+  getDevSettings,
+  grantDevCoins,
+  isDevAuthorizedEmail,
+  resetDevSettings,
+  subscribeDevActions,
+  updateDevSettings
+} from '../src/services/devTools'
 import {
   computeEquippedAccessoryBonuses,
   creditShopCoins,
@@ -152,8 +183,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(WAVE_CONFIG.WAVE_DURATION_SECONDS, 30)
     assert.equal(WAVE_CONFIG.BREATHER_DURATION_SECONDS, 3)
     assert.equal(WAVE_CONFIG.TOTAL_CYCLE_SECONDS, 33)
+    assert.equal(WAVE_CONFIG.MAX_WAVE, 15)
     assert.equal(WaveManager.isBossWave(5), true)
     assert.equal(WaveManager.isBossWave(10), true)
+    assert.equal(WaveManager.isBossWave(15), true)
     assert.equal(WaveManager.isBossWave(4), false)
 
     const boss = WaveManager.getBossEnemy()
@@ -840,4 +873,456 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(inv.some((e) => e.itemId === 'acc_alloy_vest' && e.stars === 5 && e.count === 1))
     assert.ok(inv.some((e) => e.itemId === 'wpn_plasma_lance' && e.stars === 1 && e.count === 1))
   })
+
+  it('caps waves at Wave 15, anchors Final Boss in upper center, fires closing side lasers past half screen, tracking attacks, and bullet hell', () => {
+    assert.equal(WAVE_CONFIG.MAX_WAVE, 15)
+    assert.equal(WAVE_CONFIG.MAX_NORMAL_WAVE, 15)
+    assert.equal(WaveManager.isBossWave(15), true)
+
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 980, y: 1120, hero })
+    const bossTemplate = enemies.find((e) => e.id === 'ene_04')!
+    const arenaBounds: BossArenaBounds = { left: 360, top: 640, width: 1280, height: 720 }
+    const anchorPos = { x: arenaBounds.left + arenaBounds.width / 2, y: arenaBounds.top + 195 }
+
+    const finalBoss = new Enemy({
+      x: anchorPos.x - 46,
+      y: anchorPos.y - 46,
+      enemyData: bossTemplate,
+      target: player,
+      isBoss: true,
+      isStationaryBoss: true,
+      isFinalBoss: true,
+      anchorPos,
+      arenaBounds
+    })
+    finalBoss.isSpawning = false
+
+    // Stationary boss stays anchored in upper center even after collision resolution & movement ticks
+    const collidingAdd = new Enemy({
+      x: anchorPos.x - 15,
+      y: anchorPos.y - 15,
+      enemyData: enemies[0],
+      target: player
+    })
+    collidingAdd.isSpawning = false
+    resolveEnemyCollisions([finalBoss, collidingAdd], 2000, 4)
+    assert.equal(Math.round(finalBoss.getCenter().x), anchorPos.x)
+    assert.equal(Math.round(finalBoss.getCenter().y), anchorPos.y)
+
+    finalBoss.specialCooldown = 0.05
+    finalBoss.update(0.1, player)
+    assert.ok(
+      Math.abs(finalBoss.getCenter().x - anchorPos.x) < 1 &&
+        Math.abs(finalBoss.getCenter().y - anchorPos.y) <= 4,
+      'Wave 15 Final Boss must remain anchored at the upper center of the screen'
+    )
+
+    // First auto-selected special is closing_side_lasers reaching half way across the screen (0.5)
+    assert.equal(finalBoss.telegraphs.length, 1)
+    const firstTelegraph = finalBoss.telegraphs[0]
+    assert.equal(firstTelegraph.kind, 'closing_side_lasers')
+    assert.equal(firstTelegraph.hasTriggered, false)
+    assert.equal(firstTelegraph.closingReachRatio, 0.5)
+    assert.ok(firstTelegraph.safeRect)
+
+    // Verify all 3 closing side laser modes ('left', 'right', 'pincer') stop at half screen (50%) & hit inside beam
+    const sideModes: ClosingSideLaserMode[] = ['left', 'right', 'pincer']
+    for (const mode of sideModes) {
+      const atk = finalBoss.spawnTelegraphedAttack('closing_side_lasers', undefined, mode)!
+      assert.equal(atk.kind, 'closing_side_lasers')
+      assert.equal(atk.sideMode, mode)
+      assert.equal(atk.closingReachRatio, 0.5)
+
+      const trackRects = getClosingSideLaserTrackRects(atk)
+      assert.ok(trackRects.length >= 1)
+      for (const tr of trackRects) {
+        assert.equal(tr.width, arenaBounds.width * 0.5, `${mode} laser track must extend half way across screen`)
+      }
+
+      // Advance to full laser sweep
+      atk.hasTriggered = true
+      atk.activeTimer = atk.activeDuration * 0.85
+      const activeRects = getClosingSideLaserRects(atk)
+      assert.equal(activeRects[0].width, arenaBounds.width * 0.5)
+
+      // Player standing inside the swept half-screen beam gets hit; player inside safeRect dodges cleanly
+      const laserZone = activeRects[0]
+      const hitTarget = {
+        x: laserZone.x + laserZone.width * 0.75,
+        y: laserZone.y + laserZone.height * 0.5,
+        radius: player.width / 2
+      }
+      const sr = atk.safeRect!
+      const safeTarget = {
+        x: sr.x + sr.width * 0.5,
+        y: sr.y + sr.height * 0.5,
+        radius: player.width / 2
+      }
+      assert.equal(checkBossTelegraphHit(atk, hitTarget), true)
+      assert.equal(checkBossTelegraphHit(atk, safeTarget), false)
+    }
+
+    // Verify closing_side_lasers re-arms hit flag after cooldown while active
+    finalBoss.telegraphs = [firstTelegraph]
+    firstTelegraph.hasTriggered = true
+    firstTelegraph.hasDamagedPlayer = true
+    firstTelegraph.hitCooldown = 0
+    finalBoss.update(0.6, player)
+    assert.equal(firstTelegraph.hasDamagedPlayer, false, 'closing_side_lasers should re-arm after 0.55s hitCooldown')
+
+    // Verify player-following tracking_strikes spawns sequential reticles at player's updated footsteps
+    finalBoss.telegraphs = []
+    const trackingAtk = finalBoss.spawnTelegraphedAttack('tracking_strikes')!
+    assert.equal(trackingAtk.kind, 'tracking_strikes')
+    assert.equal(trackingAtk.trackingBlasts?.length, 1)
+    player.x += 220
+    player.y += 90
+    finalBoss.update(0.1, player)
+    finalBoss.update(0.55, player)
+    assert.ok((trackingAtk.trackingBlasts?.length ?? 0) >= 2, 'tracking_strikes must spawn follow-up blasts at new player coords')
+    const newestBlast = trackingAtk.trackingBlasts![trackingAtk.trackingBlasts!.length - 1]
+    assert.ok(Math.abs(newestBlast.x - player.getCenter().x) < 20)
+
+    // Verify player-following pursuit_beam tracks initially, then locks aim 0.3s before firing and stays locked
+    finalBoss.telegraphs = []
+    player.x = anchorPos.x - 320
+    player.y = anchorPos.y + 300
+    const pursuitAtk = finalBoss.spawnTelegraphedAttack('pursuit_beam')!
+    const initialBeamAngle = pursuitAtk.angle!
+    player.x = anchorPos.x + 320
+    finalBoss.update(0.4, player)
+    assert.notEqual(pursuitAtk.angle, initialBeamAngle, 'pursuit_beam must track player during early windup')
+
+    // Advance into the final 0.3s lock-in window and move player to opposite side -> angle must stay locked
+    pursuitAtk.chargeTimer = pursuitAtk.chargeDuration - 0.28
+    const lockedAngleBeforeFire = pursuitAtk.angle!
+    player.x = anchorPos.x - 420
+    finalBoss.update(0.2, player)
+    assert.equal(pursuitAtk.angle, lockedAngleBeforeFire, 'pursuit_beam must stop tracking 0.3s before firing')
+
+    // Trigger active fire and move player again -> angle must stay locked while firing
+    finalBoss.update(0.15, player)
+    assert.equal(pursuitAtk.hasTriggered, true)
+    assert.equal(pursuitAtk.angle, lockedAngleBeforeFire, 'pursuit_beam must remain locked once firing')
+
+    // Verify bullet_hell emits dense spiral projectile curtains
+    finalBoss.telegraphs = []
+    finalBoss.projectiles = []
+    const bulletHellAtk = finalBoss.spawnTelegraphedAttack('bullet_hell')!
+    assert.equal(bulletHellAtk.kind, 'bullet_hell')
+    finalBoss.update(1.0, player)
+    finalBoss.update(0.5, player)
+    assert.ok(finalBoss.projectiles.length >= 20, 'bullet_hell must emit multi-spoke projectile curtains')
+
+    // Verify Wave 15 shoot rotation includes homing seeker orbs
+    finalBoss.telegraphs = []
+    finalBoss.projectiles = []
+    finalBoss.attackPatternIndex = 0
+    finalBoss.shootCooldown = 0
+    finalBoss.update(0.05, player)
+    const homingOrb = finalBoss.projectiles.find((p) => (p.homingTurnRate ?? 0) > 0)
+    assert.ok(
+      homingOrb,
+      'Wave 15 boss must fire homing seeker orbs that curve toward the player'
+    )
+    const initialDirX = homingOrb.direction.x
+    const initialDirY = homingOrb.direction.y
+    player.x = anchorPos.x - 420
+    player.y = anchorPos.y + 420
+    finalBoss.update(0.25, player)
+    assert.ok(
+      homingOrb.direction.x !== initialDirX || homingOrb.direction.y !== initialDirY,
+      'Homing seeker orb trajectory must steer toward the player position'
+    )
+  })
+
+  it('defines 2 distinct areas and unlocks Area 2 only after beating Wave 15', async () => {
+    assert.equal(GAME_AREAS.length, 2)
+    const area1 = getAreaById('carbon_sector')
+    const area2 = getAreaById('astral_citadel')
+    assert.equal(area1.id, 'carbon_sector')
+    assert.equal(area2.id, 'astral_citadel')
+    assert.notEqual(area1.floorColor, area2.floorColor)
+    assert.equal(area2.unlockWaveRequirement, 15)
+    assert.ok(area2.coinBonusMultiplier > 1)
+
+    const areaUser = `area_user_${Date.now()}`
+    const freshTelemetry = getLocalPlayerTelemetry(areaUser)
+    assert.equal(isAreaUnlocked('carbon_sector', freshTelemetry), true)
+    assert.equal(isAreaUnlocked('astral_citadel', freshTelemetry), false)
+
+    // Reaching Wave 15 and losing must keep Area 2 locked
+    await submitScore({
+      userId: areaUser,
+      playerName: 'AreaTester',
+      survivalSeconds: 470,
+      coinsCollected: 80,
+      enemiesDefeated: 120,
+      damageFreeWaveStreak: 1,
+      waveReached: 15,
+      victory: false,
+      heroUsed: 'hero_01'
+    })
+    const afterLoss = getLocalPlayerTelemetry(areaUser)
+    assert.equal(afterLoss.highest_wave, 15)
+    assert.equal(afterLoss.wave_15_cleared, false)
+    assert.equal(isAreaUnlocked('astral_citadel', afterLoss), false)
+
+    // Beating Wave 15 (victory: true) unlocks Area 2
+    await submitScore({
+      userId: areaUser,
+      playerName: 'AreaTester',
+      survivalSeconds: 510,
+      coinsCollected: 150,
+      enemiesDefeated: 180,
+      damageFreeWaveStreak: 2,
+      waveReached: 15,
+      victory: true,
+      heroUsed: 'hero_01'
+    })
+    const afterVictory = getLocalPlayerTelemetry(areaUser)
+    assert.equal(afterVictory.wave_15_cleared, true)
+    assert.equal(afterVictory.boss_victories, 1)
+    assert.equal(isAreaUnlocked('astral_citadel', afterVictory), true)
+  })
+
+  it('populates Area 2 with 5 distinct enemies including slow tanky AoE-indicator mini-boss', async () => {
+    const a2Enemies = getAreaEnemies('astral_citadel')
+    assert.equal(a2Enemies.length, 5)
+    assert.equal(AREA_TWO_ENEMIES.length, 5)
+
+    const [tankSwarm, fastSwarm, rangedOne, rangedTwo, miniBoss] = a2Enemies
+    const standardSwarm = enemies.find((e) => e.id === 'ene_01')!
+
+    // 1. Slower, tankier swarmer vs faster, slightly weaker swarmer
+    assert.ok(tankSwarm.hp > standardSwarm.hp, 'Area 2 tank swarmer must be tankier than Spore Zombie')
+    assert.ok(tankSwarm.speed < standardSwarm.speed, 'Area 2 tank swarmer must be slower than Spore Zombie')
+    assert.ok(fastSwarm.speed > tankSwarm.speed, 'Area 2 fast swarmer must be much faster than tank swarmer')
+    assert.ok(fastSwarm.hp < standardSwarm.hp && fastSwarm.hp < tankSwarm.hp, 'Area 2 fast swarmer must be weaker')
+
+    // 2. Two distinct ranged enemies shoot projectiles at player
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 800, y: 800, hero })
+
+    const r1 = new Enemy({ x: 1020, y: 800, enemyData: rangedOne, target: player })
+    r1.isSpawning = false
+    r1.shootCooldown = 0
+    r1.update(0.05, player)
+    assert.equal(r1.canShoot, true)
+    assert.equal(r1.projectiles.length, 1, 'Prism Bolt Weaver should fire focused single crystal bolt')
+
+    const r2 = new Enemy({ x: 1020, y: 800, enemyData: rangedTwo, target: player })
+    r2.isSpawning = false
+    r2.shootCooldown = 0
+    r2.update(0.05, player)
+    assert.equal(r2.canShoot, true)
+    assert.equal(r2.projectiles.length, 3, 'Astral Arcanist should fire 3-orb fanned projectile spread')
+
+    // 3. Slow tanky mini-boss launches AoE projectile with ground landing indicator so player can dodge
+    assert.ok(miniBoss.hp >= 240, 'Mini-boss must be tanky')
+    assert.ok(miniBoss.speed < tankSwarm.speed, 'Mini-boss must be slow')
+
+    const warden = new Enemy({ x: 1120, y: 800, enemyData: miniBoss, target: player })
+    warden.isSpawning = false
+    warden.isBoss = false
+    assert.equal(warden.isMiniBoss, true)
+    assert.equal(warden.launchesAoeProjectiles, true)
+
+    warden.aoeCooldown = 0.02
+    warden.update(0.05, player)
+    assert.equal(warden.aoeProjectiles.length, 1, 'Mini-boss must launch an AoE mortar projectile')
+
+    const aoe = warden.aoeProjectiles[0]
+    assert.equal(aoe.hasDetonated, false)
+    assert.ok(aoe.radius >= 80, 'AoE indicator radius should be clearly visible')
+    assert.ok(aoe.flightDuration >= 1.2, 'AoE flight duration must give player time to dodge')
+
+    const playerInsideZone = { x: aoe.targetX, y: aoe.targetY, radius: player.width / 2 }
+    const playerDodged = { x: aoe.targetX + aoe.radius + 70, y: aoe.targetY, radius: player.width / 2 }
+    assert.equal(checkEnemyAoeHit(aoe, playerInsideZone), true)
+    assert.equal(checkEnemyAoeHit(aoe, playerDodged), false)
+
+    // Advance past flightDuration -> mortar lands and detonates
+    warden.update(aoe.flightDuration + 0.05, player)
+    assert.equal(aoe.hasDetonated, true)
+
+    // 4. Area 2 wave spawning selects all 5 archetypes cleanly & respects caps
+    assert.equal(getAreaMiniBossCap(2), 0)
+    assert.equal(getAreaMiniBossCap(3), 1)
+    assert.equal(getAreaMiniBossCap(8), 2)
+
+    assert.equal(
+      selectAreaEnemyTemplateForWave('astral_citadel', 1, { roll: 0.2 }).template.id,
+      'ene_a2_01'
+    )
+    assert.equal(
+      selectAreaEnemyTemplateForWave('astral_citadel', 1, { roll: 0.8 }).template.id,
+      'ene_a2_02'
+    )
+    assert.equal(
+      selectAreaEnemyTemplateForWave('astral_citadel', 2, { roll: 0.85, subRoll: 0.2, canSpawnRanged: true }).template.id,
+      'ene_a2_03'
+    )
+    assert.equal(
+      selectAreaEnemyTemplateForWave('astral_citadel', 2, { roll: 0.85, subRoll: 0.8, canSpawnRanged: true }).template.id,
+      'ene_a2_04'
+    )
+    assert.equal(
+      selectAreaEnemyTemplateForWave('astral_citadel', 3, { roll: 0.95, canSpawnMiniBoss: true }).template.id,
+      'ene_a2_05'
+    )
+
+    // 5. Codex enemy database lists Area 1 (4), Area 2 enemies (5), and Area 2 bosses (3) = 12 entries
+    const codexEnemies = await getEnemies()
+    assert.ok(codexEnemies.length >= 12)
+    for (const a2 of AREA_TWO_ENEMIES) {
+      assert.ok(codexEnemies.some((e) => e.id === a2.id))
+    }
+    for (const b2 of AREA_TWO_BOSSES) {
+      assert.ok(codexEnemies.some((e) => e.id === b2.id))
+    }
+  })
+
+  it('spawns dedicated Area 2 bosses every 5 waves, disables regular spawns on ~150k HP Wave 15 bosses, and enables Endless Mode in Area 2', () => {
+    // 1. Area 2 defines 3 distinct bosses every 5 waves + Endless alternating bosses
+    assert.equal(AREA_TWO_BOSSES.length, 3)
+    assert.equal(getAreaBossTemplateForWave('astral_citadel', 5).id, 'boss_a2_05')
+    assert.equal(getAreaBossTemplateForWave('astral_citadel', 10).id, 'boss_a2_10')
+    assert.equal(getAreaBossTemplateForWave('astral_citadel', 15).id, 'boss_a2_15')
+    assert.equal(getAreaBossTemplateForWave('astral_citadel', 20).id, 'boss_a2_10')
+    assert.equal(getAreaBossTemplateForWave('astral_citadel', 25).id, 'boss_a2_05')
+    assert.equal(getAreaBossTemplateForWave('carbon_sector', 15).id, 'ene_04')
+
+    // 2. Wave 15 Final Boss HP is ~150k in Area 1 and scaled ~187.5k in Area 2
+    assert.equal(WAVE_15_FINAL_BOSS_BASE_HP, 150000)
+    assert.equal(getWave15FinalBossHp('carbon_sector'), 150000)
+    assert.equal(getWave15FinalBossHp('astral_citadel'), 187500)
+
+    // 3. Wave 15 disables regular enemy spawns while normal waves & Endless Mode (16+) allow regular spawns
+    assert.equal(shouldSpawnRegularEnemiesInWave(14, false), true)
+    assert.equal(shouldSpawnRegularEnemiesInWave(15, false), false)
+    assert.equal(shouldSpawnRegularEnemiesInWave(16, true), true)
+    assert.equal(shouldSpawnRegularEnemiesInWave(20, true), true)
+
+    // 4. Verify Area 2 bosses instantiate with boss flags, balanced contact damage, and AoE/telegraph attacks
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 960, y: 980, hero })
+
+    const w5Boss = new Enemy({
+      x: 640,
+      y: 640,
+      enemyData: getAreaBossTemplateForWave('astral_citadel', 5),
+      target: player,
+      isBoss: true
+    })
+    assert.equal(w5Boss.isBoss, true)
+    assert.equal(w5Boss.canShoot, true)
+
+    const w10Boss = new Enemy({
+      x: 640,
+      y: 640,
+      enemyData: getAreaBossTemplateForWave('astral_citadel', 10),
+      target: player,
+      isBoss: true
+    })
+    assert.equal(w10Boss.isBoss, true)
+    assert.equal(w10Boss.launchesAoeProjectiles, true)
+
+    const w15Seraph = new Enemy({
+      x: 960,
+      y: 360,
+      enemyData: getAreaBossTemplateForWave('astral_citadel', 15),
+      target: player,
+      isBoss: true,
+      isStationaryBoss: true,
+      isFinalBoss: true,
+      anchorPos: { x: 960, y: 360 },
+      arenaBounds: { left: 320, top: 160, width: 1280, height: 720 }
+    })
+    w15Seraph.isSpawning = false
+    assert.equal(w15Seraph.isBoss, true)
+    assert.equal(w15Seraph.isFinalBoss, true)
+    assert.equal(w15Seraph.isStationaryBoss, true)
+    assert.equal(w15Seraph.launchesAoeProjectiles, true)
+    assert.equal(w15Seraph.maxHealth, 150000)
+    assert.ok(w15Seraph.damage < 100, 'W15 Seraph contact damage must remain balanced (not 20% of 150k HP)')
+
+    w15Seraph.specialCooldown = 0.02
+    w15Seraph.update(0.05, player)
+    assert.equal(w15Seraph.telegraphs[0]?.kind, 'closing_side_lasers')
+  })
+
+  it('restricts Dev Panel exclusively to 408443@guhsd.net and supports coins, damage multipliers, health, and wave skips', () => {
+    assert.equal(DEV_AUTHORIZED_EMAIL, '408443@guhsd.net')
+    assert.equal(isDevAuthorizedEmail('408443@guhsd.net'), true)
+    assert.equal(isDevAuthorizedEmail(' 408443@GUHSD.NET '), true)
+    assert.equal(isDevAuthorizedEmail(null), false)
+    assert.equal(isDevAuthorizedEmail(undefined), false)
+    assert.equal(isDevAuthorizedEmail('other@guhsd.net'), false)
+    assert.equal(isDevAuthorizedEmail('admin@swarm.io'), false)
+
+    const outsiderUser = `outsider_${Date.now()}`
+    const devUser = `dev_${Date.now()}`
+
+    // Outsider emails cannot grant coins, edit multipliers, or dispatch live actions
+    const blockedCoins = grantDevCoins(outsiderUser, 'other@guhsd.net', 5000)
+    assert.equal(blockedCoins.success, false)
+    assert.equal(getShopAccountState(outsiderUser).balance, 0)
+
+    const blockedSettings = updateDevSettings('other@guhsd.net', {
+      damageMultiplier: 50,
+      healthMultiplier: 10,
+      godMode: true
+    })
+    assert.equal(blockedSettings.success, false)
+    assert.equal(getDevSettings('other@guhsd.net').damageMultiplier, 1)
+
+    const blockedWaveSkip = dispatchDevAction('other@guhsd.net', {
+      type: 'skip_wave',
+      mode: 'set',
+      value: 15
+    })
+    assert.equal(blockedWaveSkip.success, false)
+
+    // Authorized account 408443@guhsd.net can grant coins, scale damage & health, and dispatch wave skips
+    const receivedActions: DevLiveAction[] = []
+    const unsub = subscribeDevActions((action) => receivedActions.push(action))
+
+    const coinGrant = grantDevCoins(devUser, '408443@guhsd.net', 25000)
+    assert.equal(coinGrant.success, true)
+    assert.equal(coinGrant.newBalance, 25000)
+    assert.equal(getShopAccountState(devUser).balance, 25000)
+
+    const updated = updateDevSettings('408443@guhsd.net', {
+      damageMultiplier: 25,
+      healthMultiplier: 5,
+      godMode: true,
+      startingWaveOverride: 10
+    })
+    assert.equal(updated.success, true)
+    assert.equal(updated.settings.damageMultiplier, 25)
+    assert.equal(updated.settings.healthMultiplier, 5)
+    assert.equal(updated.settings.godMode, true)
+    assert.equal(updated.settings.startingWaveOverride, 10)
+
+    assert.equal(dispatchDevAction('408443@guhsd.net', { type: 'heal_full' }).success, true)
+    assert.equal(
+      dispatchDevAction('408443@guhsd.net', { type: 'skip_wave', mode: 'set', value: 15 }).success,
+      true
+    )
+
+    unsub()
+    assert.ok(receivedActions.some((a) => a.type === 'grant_coins' && a.amount === 25000))
+    assert.ok(receivedActions.some((a) => a.type === 'heal_full'))
+    assert.ok(receivedActions.some((a) => a.type === 'skip_wave' && a.value === 15))
+
+    const reset = resetDevSettings('408443@guhsd.net')
+    assert.equal(reset.success, true)
+    assert.equal(reset.settings.damageMultiplier, 1)
+    assert.equal(reset.settings.healthMultiplier, 1)
+    assert.equal(reset.settings.godMode, false)
+  })
 })
+
+

@@ -11,6 +11,7 @@ import { LoginView } from './components/views/LoginView'
 import { ToastProvider } from './components/ui/ToastContainer'
 import { AudioSettingsButton } from './components/ui/AudioSettings'
 import { AccessibilitySettingsButton } from './components/ui/AccessibilitySettings'
+import { DevPanel } from './components/ui/DevPanel'
 import { AudioProvider } from './context/AudioContext'
 import { AccessibilityProvider, AccessibilityStyles } from './context/AccessibilityContext'
 
@@ -40,6 +41,7 @@ function App() {
                 <Route path="*" element={<Navigate to="/hq" replace />} />
               </Route>
             </Routes>
+            <DevPanel />
           </BrowserRouter>
           <AccessibilitySettingsButton />
           <AudioSettingsButton />

@@ -52,6 +52,8 @@ export interface LocalPlayerTelemetry extends PlayerStatsRow {
   max_single_run_coins: number
   total_xp: number
   level: number
+  wave_15_cleared: boolean
+  boss_victories: number
   favorite_hero: string
   hero_stats: Record<string, HeroAggregateStat>
   recent_runs: LocalRunRecord[]
@@ -73,6 +75,7 @@ export interface SubmitScoreInput {
   enemiesDefeated: number
   damageFreeWaveStreak: number
   waveReached?: number
+  victory?: boolean
   heroUsed: string
   coinsAlreadyBanked?: boolean
 }
@@ -193,6 +196,8 @@ function getDefaultTelemetry(userId = 'guest_user'): LocalPlayerTelemetry {
     max_single_run_coins: 0,
     total_xp: 0,
     level: 1,
+    wave_15_cleared: false,
+    boss_victories: 0,
     favorite_hero: 'hero_01',
     hero_stats: {},
     recent_runs: []
@@ -368,6 +373,8 @@ export async function submitScore(input: SubmitScoreInput): Promise<{
   const earnedXP = Math.max(25, enemiesDefeated * 10 + waveReached * 50)
   const nextTotalXP = prevTelemetry.total_xp + earnedXP
 
+  const didBeatWave15 = Boolean(input.victory && waveReached >= 15)
+
   const nextTelemetry: LocalPlayerTelemetry = {
     user_id: input.userId || prevTelemetry.user_id || 'guest_user',
     total_enemies_defeated: prevTelemetry.total_enemies_defeated + enemiesDefeated,
@@ -381,6 +388,8 @@ export async function submitScore(input: SubmitScoreInput): Promise<{
     max_single_run_coins: Math.max(prevTelemetry.max_single_run_coins, coinsCollected),
     total_xp: nextTotalXP,
     level: Math.max(1, Math.floor(nextTotalXP / 500) + 1),
+    wave_15_cleared: Boolean(prevTelemetry.wave_15_cleared || didBeatWave15),
+    boss_victories: (prevTelemetry.boss_victories || 0) + (didBeatWave15 ? 1 : 0),
     favorite_hero: favoriteHero,
     hero_stats: nextHeroStats,
     recent_runs: [scoreRecord, ...prevTelemetry.recent_runs].slice(0, 20)

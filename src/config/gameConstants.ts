@@ -45,8 +45,9 @@ export const WAVE_CONFIG = {
   ENEMY_HP_SCALING: 1.1, // HP multiplier per wave
   ENEMY_SPEED_SCALING: 1.02, // Speed multiplier per wave
   
-  // Maximum wave for normal enemies (endless scaling)
-  MAX_NORMAL_WAVE: Infinity,
+  // Maximum wave (Wave 15 Final Boss)
+  MAX_WAVE: 15,
+  MAX_NORMAL_WAVE: 15,
 } as const
 
 export function getWaveSpawnConfig(

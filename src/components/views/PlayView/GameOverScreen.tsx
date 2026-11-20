@@ -14,11 +14,22 @@ export interface GameOverStats {
 export interface GameOverScreenProps {
   score: number
   stats: GameOverStats
+  isVictory?: boolean
+  isEndless?: boolean
+  waveReached?: number
   onRestart: () => void
   onQuit: () => void
 }
 
-const GameOverScreen: React.FC<GameOverScreenProps> = ({ score, stats, onRestart, onQuit }) => {
+const GameOverScreen: React.FC<GameOverScreenProps> = ({
+  score,
+  stats,
+  isVictory = false,
+  isEndless = false,
+  waveReached,
+  onRestart,
+  onQuit
+}) => {
   // Format time as MM:SS
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60)
@@ -33,13 +44,34 @@ const GameOverScreen: React.FC<GameOverScreenProps> = ({ score, stats, onRestart
 
   // Calculate score using formula: S = 10t + 25c
   const calculatedScore = Math.floor(10 * stats.survivalSeconds + 25 * stats.coinsCollected)
+  const endedInEndless = isEndless || (typeof waveReached === 'number' && waveReached > 15)
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/90 backdrop-blur-md z-50">
-      <div className="bg-slate-800 border-2 border-red-500 rounded-xl p-8 max-w-lg w-full mx-4 text-center">
+      <div
+        className={`bg-slate-800 border-2 rounded-xl p-8 max-w-lg w-full mx-4 text-center ${
+          isVictory ? 'border-yellow-400 shadow-[0_0_40px_rgba(250,204,21,0.25)]' : 'border-red-500'
+        }`}
+      >
         {/* Header */}
-        <h2 className="text-4xl font-bold text-red-400 mb-2">GAME OVER</h2>
-        <p className="text-white/80 text-lg mb-8">Your run has ended</p>
+        <h2
+          className={`text-4xl font-bold mb-2 ${
+            isVictory ? 'text-yellow-400' : 'text-red-400'
+          }`}
+        >
+          {isVictory ? 'VICTORY!' : 'GAME OVER'}
+        </h2>
+        <p className="text-white/80 text-lg mb-8">
+          {isVictory
+            ? endedInEndless
+              ? `Area Cleared + Endless Record: Reached Wave ${waveReached || 16}!`
+              : 'Sector Cleared — Wave 15 Final Boss Defeated!'
+            : waveReached
+              ? endedInEndless
+                ? `Eliminated on Wave ${waveReached} (Endless)`
+                : `Eliminated on Wave ${waveReached} / 15`
+              : 'Your run has ended'}
+        </p>
         
         {/* Final Score */}
         <div className="mb-8">

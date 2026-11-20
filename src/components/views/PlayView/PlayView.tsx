@@ -5,26 +5,53 @@ import { Button } from '../../ui/Button'
 import { Badge } from '../../ui/Badge'
 import { heroes, upgrades } from '../../../db/seedData'
 import { GAME_CONFIG } from '../../../config/gameConstants'
+import { ArenaId, GAME_AREAS, getAreaById, isAreaUnlocked } from '../../../config/arenas'
 import { useLoadouts } from '../../../hooks/useLoadouts'
 import { useSupabase } from '../../../hooks/useSupabase'
+import { getPlayerTelemetry } from '../../../services/scores'
 import {
   MAX_EQUIPPED_ACCESSORIES,
   shopWeaponsAsUpgrades,
   useShopState
 } from '../../../services/shop'
+import { ARENA_PREVIEW_IMAGES } from '../HQView/arenaAssets'
 import GameContainer from './GameContainer'
 
 export function PlayView() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useSupabase()
   const { loadouts } = useLoadouts()
   const { equippedWeapon, equippedAccessories, shopState } = useShopState(user?.id)
   const allUpgrades = [...shopWeaponsAsUpgrades(), ...upgrades]
 
   const [isPlaying, setIsPlaying] = useState(false)
+  const [selectedAreaId, setSelectedAreaId] = useState<ArenaId>('carbon_sector')
+  const [wave15Cleared, setWave15Cleared] = useState(false)
+  const [highestWave, setHighestWave] = useState(0)
   const [selectedHeroId, setSelectedHeroId] = useState<string>(heroes[0].id)
   const [selectedUpgradeId, setSelectedUpgradeId] = useState<string>(heroes[0].starting_upgrade_id)
   const [selectedLoadoutName, setSelectedLoadoutName] = useState<string | undefined>(undefined)
+
+  // Check Wave 15 clear status to enforce Area 2 access
+  useEffect(() => {
+    let active = true
+    getPlayerTelemetry(user?.id).then((telemetry) => {
+      if (!active) return
+      const cleared = Boolean(telemetry.wave_15_cleared)
+      setWave15Cleared(cleared)
+      setHighestWave(telemetry.highest_wave || 0)
+
+      const requestedArea = searchParams.get('area') as ArenaId | null
+      if (requestedArea && isAreaUnlocked(requestedArea, telemetry)) {
+        setSelectedAreaId(requestedArea)
+      } else if (requestedArea === 'astral_citadel' && !cleared) {
+        setSelectedAreaId('carbon_sector')
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [user?.id, searchParams])
 
   // Deep-link support: /play?loadoutId=... or /play?heroId=...
   useEffect(() => {
@@ -51,6 +78,14 @@ export function PlayView() {
     }
   }, [searchParams, loadouts])
 
+  const handleSelectArea = (areaId: ArenaId) => {
+    if (!isAreaUnlocked(areaId, { wave_15_cleared: wave15Cleared })) return
+    setSelectedAreaId(areaId)
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('area', areaId)
+    setSearchParams(nextParams, { replace: true })
+  }
+
   const handleSelectHero = (heroId: string) => {
     const hero = heroes.find((h) => h.id === heroId)
     if (!hero) return
@@ -67,14 +102,16 @@ export function PlayView() {
     setIsPlaying(true)
   }
 
+  const currentArea = getAreaById(selectedAreaId)
+
   if (isPlaying) {
     return (
       <div className="min-h-screen bg-slate-carbon text-white p-3 sm:p-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-cyan-accent">
-                SWARM PROTOCOL — ACTIVE OPERATION
+              <h1 className="text-xl sm:text-2xl font-bold text-cyan-accent font-display">
+                SWARM PROTOCOL — {currentArea.name.toUpperCase()}
               </h1>
               <p className="text-xs text-gray-400">
                 Move with WASD / Arrow Keys (or touch D-Pad). Press P or ESC to pause.
@@ -89,6 +126,7 @@ export function PlayView() {
             selectedHeroId={selectedHeroId}
             startingUpgradeId={selectedUpgradeId}
             loadoutName={selectedLoadoutName}
+            areaId={selectedAreaId}
             autoStart={true}
             onBack={() => setIsPlaying(false)}
           />
@@ -99,16 +137,75 @@ export function PlayView() {
 
   return (
     <div className="min-h-screen bg-slate-carbon text-white p-6">
-      <header className="max-w-6xl mx-auto mb-8">
-        <h1 className="text-4xl font-bold text-cyan-accent">DEPLOY TO ARENA</h1>
-        <p className="text-gray-400 mt-2">
-          Choose a Hero Unit or Launch from a Saved Armory Loadout
-        </p>
+      <header className="max-w-6xl mx-auto mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <h1 className="text-4xl font-bold text-cyan-accent font-display">DEPLOY TO ARENA</h1>
+          <p className="text-gray-400 mt-1">
+            Pick an unlocked Arena, then launch with a Hero Unit or Saved Loadout
+          </p>
+        </div>
+        <Button
+          variant="primary"
+          size="md"
+          onClick={() => handleSelectHero(selectedHeroId)}
+          className="rounded-full px-6"
+        >
+          Quick Deploy: {currentArea.name}
+        </Button>
       </header>
 
       <main className="max-w-6xl mx-auto space-y-8">
+        {/* Arena / Area Switcher */}
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {GAME_AREAS.map((area) => {
+            const unlocked = isAreaUnlocked(area.id, { wave_15_cleared: wave15Cleared })
+            const selected = selectedAreaId === area.id
+            return (
+              <button
+                key={area.id}
+                type="button"
+                disabled={!unlocked}
+                onClick={() => handleSelectArea(area.id)}
+                className={`text-left rounded-2xl overflow-hidden border transition-all flex items-center gap-4 p-3 ${
+                  selected
+                    ? 'bg-slate-800/95 border-cyan-accent shadow-[0_0_24px_rgba(56,189,248,0.2)]'
+                    : unlocked
+                      ? 'bg-gray-900/90 border-gray-800 hover:border-gray-600'
+                      : 'bg-gray-900/50 border-gray-800/70 opacity-65 cursor-not-allowed'
+                }`}
+              >
+                <div className="w-28 h-16 rounded-xl overflow-hidden shrink-0 bg-slate-950 relative">
+                  <img
+                    src={ARENA_PREVIEW_IMAGES[area.id]}
+                    alt={`${area.name} arena preview`}
+                    referrerPolicy="no-referrer"
+                    className={`w-full h-full object-cover ${!unlocked ? 'grayscale brightness-50' : ''}`}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-gray-400">
+                    Area {area.order} · {unlocked ? area.difficultyLabel : `Locked · Beat Wave 15 (${highestWave}/15)`}
+                  </div>
+                  <div className="font-bold text-white font-display truncate">
+                    {area.name} <span className="text-sm font-normal text-gray-400">({area.subtitle})</span>
+                  </div>
+                  <div className="text-xs text-cyan-accent mt-0.5">
+                    {selected
+                      ? 'Selected for Deployment'
+                      : unlocked
+                        ? area.coinBonusPercent > 0
+                          ? `+${area.coinBonusPercent}% Battle Coins · Click to select`
+                          : 'Standard Rules · Click to select'
+                        : 'Defeat Wave 15 Final Boss to unlock'}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </section>
+
         {/* Equipped Armory Shop Gear Summary */}
-        <section className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <section className="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex flex-wrap items-center gap-6">
             <div>
               <p className="text-[11px] uppercase tracking-wider text-gray-400">
@@ -144,7 +241,7 @@ export function PlayView() {
         {loadouts.length > 0 && (
           <Card>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-semibold text-hazard-gold">Saved Armory Loadouts</h2>
+              <h2 className="text-2xl font-semibold text-hazard-gold font-display">Saved Armory Loadouts</h2>
               <Link to="/armory" className="text-sm text-cyan-accent hover:underline">
                 Manage in Armory →
               </Link>
@@ -156,7 +253,7 @@ export function PlayView() {
                 return (
                   <div
                     key={loadout.id}
-                    className="bg-gray-800/90 border border-gray-700 hover:border-cyan-accent rounded-lg p-4 flex flex-col justify-between transition-colors"
+                    className="bg-gray-800/90 border border-gray-700 hover:border-cyan-accent rounded-xl p-4 flex flex-col justify-between transition-colors"
                   >
                     <div>
                       <div className="flex items-center justify-between mb-1">
@@ -191,7 +288,7 @@ export function PlayView() {
 
         {/* Standard Hero Deployment */}
         <Card>
-          <h2 className="text-2xl font-semibold text-hazard-gold mb-6">Select Your Hero Unit</h2>
+          <h2 className="text-2xl font-semibold text-hazard-gold mb-6 font-display">Select Your Hero Unit</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {heroes.map((hero) => {
               const startUpgrade = upgrades.find((u) => u.id === hero.starting_upgrade_id)
@@ -200,7 +297,7 @@ export function PlayView() {
                 <div
                   key={hero.id}
                   onClick={() => handleSelectHero(hero.id)}
-                  className="bg-gray-800 rounded-lg p-5 cursor-pointer hover:bg-gray-700/80 transition-colors border border-gray-700 hover:border-cyan-accent flex flex-col justify-between"
+                  className="bg-gray-800 rounded-xl p-5 cursor-pointer hover:bg-gray-700/80 transition-colors border border-gray-700 hover:border-cyan-accent flex flex-col justify-between"
                 >
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -235,17 +332,17 @@ export function PlayView() {
 
         {/* Tactical Rules */}
         <Card className="bg-gray-900">
-          <h2 className="text-xl font-semibold text-hazard-gold mb-4">Mission Parameters</h2>
+          <h2 className="text-xl font-semibold text-hazard-gold mb-4 font-display">Mission Parameters</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-gray-800 rounded-lg p-4">
+            <div className="bg-gray-800 rounded-xl p-4">
               <h3 className="font-semibold text-cyan-accent mb-1">Wave Cadence</h3>
-              <p className="text-sm text-gray-300">30s active swarm + 3s breather window. Mini-Boss every 5th wave.</p>
+              <p className="text-sm text-gray-300">30s active swarm + 3s breather. Beat Wave 15 Final Boss to unlock Area 2.</p>
             </div>
-            <div className="bg-gray-800 rounded-lg p-4">
+            <div className="bg-gray-800 rounded-xl p-4">
               <h3 className="font-semibold text-cyan-accent mb-1">Scoring Formula</h3>
               <p className="text-sm text-gray-300">S = 10t + 25c (10 pts/sec + 25 pts/coin)</p>
             </div>
-            <div className="bg-gray-800 rounded-lg p-4">
+            <div className="bg-gray-800 rounded-xl p-4">
               <h3 className="font-semibold text-cyan-accent mb-1">Auto-Combat</h3>
               <p className="text-sm text-gray-300">Move with WASD/Arrows; weapons auto-target nearest threats.</p>
             </div>

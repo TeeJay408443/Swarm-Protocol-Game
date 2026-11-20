@@ -798,6 +798,17 @@ export class Projectile {
 
     ctx.restore()
 
+    // Seeker lock halo on homing projectiles
+    if (this.homingStrength > 0) {
+      ctx.save()
+      ctx.strokeStyle = 'rgba(52, 211, 153, 0.7)'
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.arc(screenX, screenY, Math.max(6, this.width * 0.65), 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+
     // Draw explosion wave
     if (this.isExploding) {
       const progress = Math.min(1, Math.max(0, this.explosionTimer / this.explosionDuration))

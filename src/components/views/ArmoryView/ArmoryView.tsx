@@ -11,6 +11,7 @@ import { useSupabase } from '../../../hooks/useSupabase'
 import { useLoadouts } from '../../../hooks/useLoadouts'
 import { heroes, upgrades } from '../../../db/seedData'
 import { GAME_CONFIG } from '../../../config/gameConstants'
+import { getHeroAbility, getHeroDamageReduction } from '../../../config/heroAbilities'
 import {
   formatAccessoryStatSummary,
   FUSION_COPIES_REQUIRED,
@@ -27,6 +28,11 @@ import {
   useShopState
 } from '../../../services/shop'
 import type { ExtendedLoadout } from '../../../services/loadouts'
+import {
+  FusionAnimationOverlay,
+  type FusionAnimationPayload,
+  type FusionRepeatAction
+} from './FusionAnimationOverlay'
 
 type ArmoryTab = 'inventory' | 'forge' | 'loadouts' | 'builder'
 type InventoryFilter = 'all' | 'weapon' | 'accessory' | 'fusable'
@@ -112,6 +118,7 @@ export function ArmoryView() {
   const [forgeSelection, setForgeSelection] = useState<{ itemId: string; stars: number } | null>(
     null
   )
+  const [fusionAnim, setFusionAnim] = useState<FusionAnimationPayload | null>(null)
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loadoutName, setLoadoutName] = useState('')
@@ -356,17 +363,43 @@ export function ArmoryView() {
       return
     }
     if (res.item) {
-      toast.success(
-        `Fused 2× ${res.item.name} (${res.fromStars}★) → 1× ${res.toStars}★!`
-      )
+      const fromStars = res.fromStars ?? sourceStars
       const toStars = res.toStars ?? sourceStars + 1
+      toast.success(
+        `Fused 2× ${res.item.name} (${fromStars}★) → 1× ${toStars}★!`
+      )
+
+      let nextRepeatAction: FusionRepeatAction | null = null
       if ((res.remainingSourceCount ?? 0) >= FUSION_COPIES_REQUIRED) {
         setForgeSelection({ itemId, stars: sourceStars })
+        nextRepeatAction = {
+          label: `Fuse Another ${fromStars}★ → ${toStars}★`,
+          itemId,
+          stars: fromStars
+        }
+      } else if (
+        toStars < MAX_GEAR_STARS &&
+        getStackCount(res.state, itemId, toStars) >= FUSION_COPIES_REQUIRED
+      ) {
+        setForgeSelection({ itemId, stars: toStars })
+        nextRepeatAction = {
+          label: `Fuse ${toStars}★ → ${toStars + 1}★`,
+          itemId,
+          stars: toStars
+        }
       } else if (toStars < MAX_GEAR_STARS && getStackCount(res.state, itemId, toStars) >= 1) {
         setForgeSelection({ itemId, stars: toStars })
       } else {
         setForgeSelection(null)
       }
+
+      setFusionAnim({
+        key: Date.now() + Math.random(),
+        item: res.item,
+        fromStars,
+        toStars,
+        nextRepeatAction
+      })
     }
   }
 
@@ -1155,24 +1188,30 @@ export function ArmoryView() {
                   1. Select Hero Operative
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {heroes.map((hero) => (
-                    <button
-                      type="button"
-                      key={hero.id}
-                      onClick={() => handleSelectHero(hero.id)}
-                      className={`text-left bg-gray-800 rounded-lg p-3 transition-all border-2 ${
-                        selectedHeroId === hero.id
-                          ? 'border-cyan-accent bg-gray-800/90'
-                          : 'border-transparent hover:border-gray-600'
-                      }`}
-                    >
-                      <h4 className="font-semibold text-white text-sm">{hero.name}</h4>
-                      <p className="text-xs text-cyan-accent mb-1">{hero.archetype}</p>
-                      <p className="text-xs text-gray-400 tabular-nums">
-                        {hero.hp} HP · {Math.round(hero.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s
-                      </p>
-                    </button>
-                  ))}
+                  {heroes.map((hero) => {
+                    const spec = getHeroAbility(hero.id)
+                    return (
+                      <button
+                        type="button"
+                        key={hero.id}
+                        onClick={() => handleSelectHero(hero.id)}
+                        className={`text-left bg-gray-800 rounded-lg p-3 transition-all border-2 ${
+                          selectedHeroId === hero.id
+                            ? 'border-cyan-accent bg-gray-800/90'
+                            : 'border-transparent hover:border-gray-600'
+                        }`}
+                      >
+                        <h4 className="font-semibold text-white text-sm">{hero.name}</h4>
+                        <p className="text-xs text-cyan-accent mb-0.5">{hero.archetype}</p>
+                        <p className="text-[11px] font-semibold text-amber-300 mb-1">
+                          {spec.shortTag}
+                        </p>
+                        <p className="text-xs text-gray-400 tabular-nums">
+                          {hero.hp} HP · {Math.round(hero.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s
+                        </p>
+                      </button>
+                    )
+                  })}
                 </div>
               </Card>
 
@@ -1258,7 +1297,17 @@ export function ArmoryView() {
                       </span>
                     </div>
                     <p className="text-lg font-bold text-white">{selectedHero.name}</p>
-                    <p className="text-xs text-gray-400 mt-1">{selectedHero.lore}</p>
+                    <p className="text-xs font-semibold text-amber-300 mt-1">
+                      Signature: {getHeroAbility(selectedHero.id).abilityName}
+                    </p>
+                    <p className="text-xs text-gray-300 mt-0.5">
+                      {getHeroAbility(selectedHero.id).description}
+                    </p>
+                    {getHeroDamageReduction(selectedHero.id) > 0 && (
+                      <p className="text-xs text-emerald-300 font-semibold mt-1">
+                        Base Damage Reduction: +{Math.round(getHeroDamageReduction(selectedHero.id) * 100)}%
+                      </p>
+                    )}
                   </div>
 
                   <div className="bg-gray-800 rounded p-4">
@@ -1340,6 +1389,13 @@ export function ArmoryView() {
           </div>
         )}
       </main>
+
+      {/* Gear Fusion Sequence Overlay */}
+      <FusionAnimationOverlay
+        payload={fusionAnim}
+        onClose={() => setFusionAnim(null)}
+        onFuseAnother={(itemId, stars) => handleFuseStack(itemId, stars)}
+      />
 
       {/* Delete Confirmation Modal */}
       <Modal

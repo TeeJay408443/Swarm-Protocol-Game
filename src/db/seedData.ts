@@ -281,7 +281,7 @@ export const heroes: HeroesRow[] = [
     hp: 150,
     speed: 1.0,
     starting_upgrade_id: 'upg_12',
-    lore: 'Heavy frontline unit built for close-range crowd clearing.',
+    lore: 'Frontline blademaster wielding a buffed Muramasa Arc Slash with crimson crescent waves.',
   },
   {
     id: 'hero_02',
@@ -290,7 +290,7 @@ export const heroes: HeroesRow[] = [
     hp: 90,
     speed: 1.3,
     starting_upgrade_id: 'upg_13',
-    lore: 'High-speed scout designed for long-range kiting tactics.',
+    lore: 'High-speed sharpshooter whose targeting computer gives every projectile homing guidance.',
   },
   {
     id: 'hero_03',
@@ -299,7 +299,7 @@ export const heroes: HeroesRow[] = [
     hp: 110,
     speed: 1.0,
     starting_upgrade_id: 'upg_01',
-    lore: 'Drone operator who lets autonomous units handle the swarm.',
+    lore: 'Drone commander who deploys extra autonomous minions with boosted fire rate.',
   },
   {
     id: 'hero_04',
@@ -308,7 +308,7 @@ export const heroes: HeroesRow[] = [
     hp: 85,
     speed: 1.4,
     starting_upgrade_id: 'upg_14',
-    lore: 'Time-warping agent who leaves damaging phase shadows.',
+    lore: 'Time-warping agent who spawns 3s holographic clones copying every attack at 50% damage.',
   },
   {
     id: 'hero_05',
@@ -317,7 +317,7 @@ export const heroes: HeroesRow[] = [
     hp: 175,
     speed: 0.85,
     starting_upgrade_id: 'upg_15',
-    lore: 'Heavily armored fortress who knocks back enemies on collision.',
+    lore: 'Armored bastion with 25% damage reduction and a 10s cooldown Spacebar Shield Dash.',
   },
   {
     id: 'hero_06',
@@ -326,6 +326,6 @@ export const heroes: HeroesRow[] = [
     hp: 100,
     speed: 1.1,
     starting_upgrade_id: 'upg_10',
-    lore: 'Combat engineer who incinerates chokepoints and entrenched swarm nests.',
+    lore: 'Incendiary specialist whose every hit ignites hostiles with scorching burn damage.',
   },
 ]

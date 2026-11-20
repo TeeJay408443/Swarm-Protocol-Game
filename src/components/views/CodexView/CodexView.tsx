@@ -14,6 +14,7 @@ import { Modal } from '../../ui/Modal'
 import { CodexEmptyState } from '../../ui/EmptyState'
 import { useCodex, type CodexEntityType, type CodexEntity } from '../../../hooks/useCodex'
 import { GAME_CONFIG } from '../../../config/gameConstants'
+import { getHeroAbility } from '../../../config/heroAbilities'
 import type { HeroesRow, EnemiesRow, UpgradesRow, AchievementsRow } from '../../../types/database'
 
 const isHero = (e: CodexEntity): e is HeroesRow => 'archetype' in e
@@ -235,6 +236,9 @@ export function CodexView() {
 
                       {isHero(entity) && (
                         <div className="space-y-2 text-sm">
+                          <p className="text-xs font-semibold text-amber-300">
+                            {getHeroAbility(entity.id).abilityName} ({getHeroAbility(entity.id).shortTag})
+                          </p>
                           <p className="text-gray-300">{entity.lore}</p>
                           <div className="flex flex-wrap gap-3 text-xs text-gray-400 pt-1">
                             <span>HP: <strong className="text-white">{entity.hp}</strong></span>
@@ -316,7 +320,14 @@ export function CodexView() {
 
             {isHero(selectedEntity) && (
               <>
-                <p className="text-gray-200">{selectedEntity.lore}</p>
+                <div className="bg-gray-900/90 border border-amber-400/30 rounded p-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                    Signature Ability: {getHeroAbility(selectedEntity.id).abilityName}
+                  </p>
+                  <p className="text-sm text-gray-200 mt-1">
+                    {getHeroAbility(selectedEntity.id).description}
+                  </p>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div className="bg-gray-900 p-3 rounded">
                     <p className="text-xs text-gray-400">Max Health</p>

@@ -1,194 +1,380 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Card } from '../../ui/Card'
-import { Button } from '../../ui/Button'
-import { Badge } from '../../ui/Badge'
-import { heroes } from '../../../db/seedData'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useSupabase } from '../../../hooks/useSupabase'
 import {
-  getTopScores,
-  getPlayerTelemetry,
   getOperativeProfile,
-  type LocalRunRecord,
+  getPlayerTelemetry,
   type LocalPlayerTelemetry
 } from '../../../services/scores'
+import { useShopState } from '../../../services/shop'
+import { ArenaId, GAME_AREAS, getAreaById, isAreaUnlocked } from '../../../config/arenas'
+import { ARENA_PREVIEW_IMAGES } from './arenaAssets'
+
+interface SideScreenTab {
+  id: string
+  label: string
+  subtitle: string
+  to: string
+  icon: string
+}
+
+const SIDE_TABS: SideScreenTab[] = [
+  { id: 'armory', label: 'Armory', subtitle: 'Loadouts & Fusion', to: '/armory', icon: '⚔️' },
+  { id: 'shop', label: 'Shop', subtitle: 'Crates & Gear', to: '/shop', icon: '🛒' },
+  { id: 'codex', label: 'Codex', subtitle: 'Heroes & Foes', to: '/codex', icon: '📘' },
+  { id: 'leaderboards', label: 'Rankings', subtitle: 'Top Scores', to: '/leaderboards', icon: '🏆' },
+  { id: 'profile', label: 'Profile', subtitle: 'Stats & Medals', to: '/profile', icon: '🎖️' }
+]
 
 export function HQView() {
+  const navigate = useNavigate()
   const { user } = useSupabase()
-  const [topScores, setTopScores] = useState<LocalRunRecord[]>([])
+  const { shopState } = useShopState(user?.id)
+
   const [telemetry, setTelemetry] = useState<LocalPlayerTelemetry | null>(null)
   const [operativeName, setOperativeName] = useState('Guest Operative')
-  const [loading, setLoading] = useState(true)
+  const [selectedAreaId, setSelectedAreaId] = useState<ArenaId>('carbon_sector')
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [transitioning, setTransitioning] = useState(false)
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [lockMessage, setLockMessage] = useState<string | null>(null)
+
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let active = true
-    const loadBriefing = async () => {
-      try {
-        setLoading(true)
-        const profile = getOperativeProfile()
-        const displayName = user?.email ? user.email.split('@')[0] : profile.username
-        const [scoresData, telemetryData] = await Promise.all([
-          getTopScores(3, user?.id),
-          getPlayerTelemetry(user?.id)
-        ])
+    const profile = getOperativeProfile(user?.id)
+    const displayName =
+      (user?.user_metadata?.username as string | undefined) ||
+      (user?.email ? user.email.split('@')[0] : profile.username)
+    setOperativeName(displayName)
 
-        if (!active) return
-        setOperativeName(displayName)
-        setTopScores(scoresData)
-        setTelemetry(telemetryData)
-      } finally {
-        if (active) setLoading(false)
-      }
-    }
+    getPlayerTelemetry(user?.id).then((data) => {
+      if (!active) return
+      setTelemetry(data)
+    })
 
-    loadBriefing()
     return () => {
       active = false
     }
-  }, [user?.id, user?.email])
+  }, [user?.id, user?.email, user?.user_metadata])
 
-  const getHeroName = (heroId: string) =>
-    heroes.find((h) => h.id === heroId)?.name || 'Vanguard Blade'
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
+      }
+    }
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDropdownOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    window.addEventListener('keydown', handleEsc)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      window.removeEventListener('keydown', handleEsc)
+    }
+  }, [])
 
-  const lastRun = telemetry?.recent_runs?.[0]
+  const wave15Cleared = Boolean(telemetry?.wave_15_cleared)
+  const highestWave = telemetry?.highest_wave ?? 0
+  const selectedArea = getAreaById(selectedAreaId)
 
-  const quickStats = [
-    { label: 'Total Runs', value: telemetry?.total_games ?? 0 },
-    { label: 'Best Wave', value: telemetry?.highest_wave ?? 0 },
-    { label: 'Total Kills', value: telemetry?.total_enemies_defeated ?? 0 },
-    { label: 'Total Coins', value: telemetry?.total_coins_collected ?? 0 }
-  ]
+  const transitionToRoute = (to: string, tabId?: string) => {
+    if (transitioning) return
+    setDropdownOpen(false)
+    setActiveTabId(tabId ?? null)
+    setTransitioning(true)
+    window.setTimeout(() => {
+      navigate(to)
+    }, 150)
+  }
 
-  const recentBriefings = [
-    'Wave 5 Protocol Active: Aegis Commander Drone deploys every 5th wave.',
-    'Arsenal Online: 6 Heroes, 20 Upgrades (Lv 1–5 Overdrive), and live DPS calculations ready in Armory.',
-    'Scoring Telemetry Verified: S = 10t + 25c syncs directly to Mission Leaderboards.'
-  ]
+  const handleSelectCenterArea = (areaId: ArenaId) => {
+    const unlocked = isAreaUnlocked(areaId, telemetry)
+    if (unlocked) {
+      setSelectedAreaId(areaId)
+      setLockMessage(null)
+    } else {
+      setLockMessage(
+        `Beat Wave 15 in Area 1 to unlock ${getAreaById(areaId).name} (Current best: Wave ${highestWave}/15)`
+      )
+    }
+  }
+
+  const handlePlayArea = (areaId: ArenaId) => {
+    if (!isAreaUnlocked(areaId, telemetry)) {
+      setLockMessage(
+        `Beat Wave 15 in Area 1 to unlock ${getAreaById(areaId).name} (Current best: Wave ${highestWave}/15)`
+      )
+      return
+    }
+    transitionToRoute(`/play?area=${areaId}`)
+  }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      {/* Hero Section */}
-      <div className="mb-8">
-        <Card className="text-center py-10">
-          <Badge variant="primary" size="sm" className="mb-4">
-            SECTOR BRIEFING // LIVE TELEMETRY
-          </Badge>
-          <h1 className="text-4xl font-bold text-cyan-accent mb-3">
-            MISSION BRIEFING
-          </h1>
-          <p className="text-gray-200 text-lg mb-2">
-            Welcome back, <span className="text-cyan-accent font-semibold">{operativeName}</span>!
-          </p>
-          <p className="text-gray-400 mb-8">
-            {lastRun
-              ? `Your last run: ${getHeroName(lastRun.hero_used)} • Wave ${lastRun.wave_reached} • Score ${lastRun.final_score.toLocaleString()}`
-              : 'No deployments logged yet. Select an operative in the Armory or launch straight into combat.'}
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <Link to="/play">
-              <Button variant="primary" size="lg">
-                ▶ LAUNCH MISSION
-              </Button>
-            </Link>
-            <Link to="/armory">
-              <Button variant="secondary" size="lg">
-                ⚔️ CONFIGURE LOADOUT
-              </Button>
-            </Link>
-          </div>
-        </Card>
+    <div
+      className={`relative flex-grow flex flex-col justify-between overflow-hidden bg-gradient-to-b from-[#131D3D] via-[#0F1733] to-[#090F24] px-4 sm:px-8 py-6 transition-all ${
+        transitioning ? 'animate-screen-exit-left pointer-events-none' : ''
+      }`}
+    >
+      {/* Ambient Bubbly Backdrop Spheres (GPU compositor-only) */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="animate-float-bubble absolute -top-20 -left-16 w-80 h-80 rounded-full bg-sky-400/12 blur-2xl" />
+        <div className="animate-float-bubble-slow absolute top-1/4 -right-24 w-96 h-96 rounded-full bg-emerald-400/10 blur-3xl" />
+        <div className="animate-float-bubble absolute -bottom-24 left-1/3 w-72 h-72 rounded-full bg-amber-300/10 blur-2xl" />
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Top Scores */}
-        <Card className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-hazard-gold">
-              🏆 TOP SCORES
-            </h2>
-            <Link to="/leaderboards" className="text-cyan-accent text-sm hover:underline">
-              View All →
-            </Link>
+      {/* Main Front Page Workspace: Left Side Tabs + Center Two-Area Stage */}
+      <div className="relative z-10 max-w-6xl w-full mx-auto flex-grow flex flex-col lg:flex-row items-stretch gap-6 lg:gap-8">
+        {/* Left Side Navigation Tabs */}
+        <aside
+          aria-label="Screen navigation tabs"
+          className="lg:w-60 shrink-0 flex lg:flex-col gap-2.5 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 lg:justify-center"
+        >
+          {SIDE_TABS.map((tab) => {
+            const isTabActive = activeTabId === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => transitionToRoute(tab.to, tab.id)}
+                className={`group flex items-center gap-3.5 px-4 py-3.5 rounded-3xl border text-left transition-all duration-150 shrink-0 cursor-pointer shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_8px_20px_rgba(0,0,0,0.28)] ${
+                  isTabActive
+                    ? 'bg-sky-400/20 border-sky-300/70 -translate-y-0.5'
+                    : 'bg-[#19254A]/85 hover:bg-[#223161] border-white/10 hover:border-sky-300/50 hover:-translate-y-0.5'
+                }`}
+              >
+                <span className="w-10 h-10 rounded-2xl bg-slate-950/55 border border-white/10 flex items-center justify-center text-lg shrink-0 group-hover:scale-105 transition-transform">
+                  {tab.icon}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-display font-bold text-white text-base leading-tight whitespace-nowrap">
+                    {tab.label}
+                  </span>
+                  <span className="block text-xs text-slate-300/80 whitespace-nowrap">
+                    {tab.subtitle}
+                  </span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="text-sky-300/70 group-hover:text-sky-200 group-hover:translate-x-0.5 transition-all text-sm font-bold hidden lg:inline"
+                >
+                  ›
+                </span>
+              </button>
+            )
+          })}
+        </aside>
+
+        {/* Center Showcase: Title + Two Areas Displayed in Center */}
+        <section className="flex-1 flex flex-col items-center justify-center min-w-0">
+          {/* Compact Bubbly Greeting Header */}
+          <div className="text-center max-w-2xl mb-6">
+            <p className="text-xs sm:text-sm font-medium text-sky-200/85 mb-1.5 tabular-nums">
+              {operativeName} · Best Wave {highestWave}/15 · {shopState.balance.toLocaleString()} Coins
+            </p>
+            <h1 className="font-display font-black text-3xl sm:text-5xl tracking-tight text-white [text-wrap:balance]">
+              Choose Your Battle Arena
+            </h1>
           </div>
 
-          {loading ? (
-            <div className="py-8 text-center text-gray-400">Syncing leaderboard records...</div>
-          ) : topScores.length === 0 ? (
-            <div className="py-8 text-center text-gray-400">
-              No mission scores recorded yet. Launch a run to log your first score!
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {topScores.map((entry) => (
-                <div
-                  key={entry.id}
-                  className={`flex items-center justify-between p-3 bg-gray-900 rounded border ${
-                    entry.isCurrentUser ? 'border-cyan-accent/60' : 'border-gray-800'
+          {/* Center Two Areas Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full max-w-4xl">
+            {GAME_AREAS.map((area) => {
+              const unlocked = isAreaUnlocked(area.id, telemetry)
+              const isSelected = selectedAreaId === area.id
+              const progressPct = wave15Cleared
+                ? 100
+                : Math.min(100, Math.round((highestWave / 15) * 100))
+
+              return (
+                <button
+                  key={area.id}
+                  type="button"
+                  onClick={() => handleSelectCenterArea(area.id)}
+                  aria-pressed={isSelected}
+                  className={`group relative rounded-[28px] p-3.5 text-left transition-all duration-200 cursor-pointer flex flex-col justify-between shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_14px_32px_rgba(0,0,0,0.38)] ${
+                    isSelected
+                      ? 'bg-[#1D2C58] border-2 border-sky-300 -translate-y-1 shadow-[0_18px_40px_rgba(56,189,248,0.22)]'
+                      : unlocked
+                        ? 'bg-[#172347]/90 border-2 border-white/12 hover:border-emerald-300/60 hover:-translate-y-0.5'
+                        : 'bg-[#131C3A]/85 border-2 border-white/10 hover:border-amber-300/40'
                   }`}
                 >
-                  <div>
-                    <div className="text-white font-semibold flex items-center gap-2">
-                      <span>{entry.player_name}</span>
-                      {entry.isCurrentUser && (
-                        <Badge variant="primary" size="sm">You</Badge>
-                      )}
-                    </div>
-                    <div className="text-gray-400 text-sm">
-                      {getHeroName(entry.hero_used)} • {entry.survival_seconds}s survived
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-cyan-accent font-bold">
-                      {entry.final_score.toLocaleString()}
-                    </div>
-                    <div className="text-gray-400 text-sm">Wave {entry.wave_reached}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+                  {/* Area Artwork Frame */}
+                  <div className="relative w-full aspect-[16/9] rounded-[20px] overflow-hidden bg-slate-950 mb-3.5">
+                    <img
+                      src={ARENA_PREVIEW_IMAGES[area.id]}
+                      alt={`${area.name} - ${area.subtitle}`}
+                      referrerPolicy="no-referrer"
+                      className={`w-full h-full object-cover transition-transform duration-300 ${
+                        unlocked
+                          ? 'group-hover:scale-105'
+                          : 'grayscale brightness-[0.45] saturate-50'
+                      }`}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/25 to-transparent" />
 
-        {/* Quick Stats */}
-        <Card>
-          <h2 className="text-xl font-semibold text-hazard-gold mb-4">
-            📊 QUICK STATS
-          </h2>
-          <div className="space-y-4">
-            {quickStats.map((stat) => (
-              <div key={stat.label} className="flex justify-between items-center border-b border-gray-800 pb-2">
-                <span className="text-gray-400">{stat.label}</span>
-                <span className="text-white font-semibold">{stat.value.toLocaleString()}</span>
-              </div>
-            ))}
+                    {/* Top-left subtle area indicator text */}
+                    <div className="absolute top-3 left-3.5 text-xs font-bold text-white/95 drop-shadow">
+                      Area {area.order} · {area.subtitle}
+                    </div>
+
+                    {/* Locked Overlay Centerpiece */}
+                    {!unlocked && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-slate-950/85 border border-amber-300/50 flex items-center justify-center text-2xl mb-2 shadow-lg">
+                          🔒
+                        </div>
+                        <span className="font-display font-bold text-sm sm:text-base text-amber-200">
+                          Beat Wave 15 to Unlock
+                        </span>
+                        <span className="text-xs text-slate-300 mt-0.5 tabular-nums">
+                          Progress: Wave {highestWave} / 15 ({progressPct}%)
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Bottom overlay area title */}
+                    <div className="absolute bottom-3 left-3.5 right-3.5 flex items-end justify-between gap-2">
+                      <h2 className="font-display font-extrabold text-xl sm:text-2xl text-white leading-tight drop-shadow">
+                        {area.name}
+                      </h2>
+                      <span
+                        className={`text-xs font-bold whitespace-nowrap shrink-0 ${
+                          isSelected
+                            ? 'text-sky-300'
+                            : unlocked
+                              ? 'text-emerald-300'
+                              : 'text-amber-300'
+                        }`}
+                      >
+                        {isSelected ? 'Selected' : unlocked ? 'Ready' : 'Locked'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Area Info Body */}
+                  <div className="px-1.5 pb-1 flex flex-col gap-2">
+                    <p className="text-sm text-slate-200/90 leading-snug">
+                      {area.description}
+                    </p>
+                    <div className="text-xs text-slate-300/80 font-medium tabular-nums pt-1 border-t border-white/10 flex items-center justify-between">
+                      <span>{area.difficultyLabel}</span>
+                      <span className={area.coinBonusPercent > 0 ? 'text-amber-300 font-semibold' : ''}>
+                        {area.coinBonusPercent > 0
+                          ? `+${area.coinBonusPercent}% Coin Rewards`
+                          : 'Standard Rewards'}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
           </div>
-          <div className="mt-6 flex items-center justify-between">
-            <Link to="/profile" className="text-cyan-accent text-sm hover:underline">
-              View Operative Profile →
-            </Link>
-            <Link to="/codex" className="text-gray-300 text-sm hover:text-cyan-accent">
-              Codex (34)
-            </Link>
-          </div>
-        </Card>
+
+          {lockMessage && (
+            <p
+              role="status"
+              className="mt-4 text-sm font-medium text-amber-200 bg-amber-950/50 border border-amber-300/35 rounded-full px-5 py-2 animate-pop-in text-center"
+            >
+              {lockMessage}
+            </p>
+          )}
+        </section>
       </div>
 
-      {/* Tactical Comms */}
-      <div className="mt-8">
-        <Card>
-          <h2 className="text-xl font-semibold text-hazard-gold mb-4">
-            📡 TACTICAL COMMS
-          </h2>
-          <ul className="space-y-3">
-            {recentBriefings.map((item) => (
-              <li key={item} className="text-gray-300 flex items-start gap-2">
-                <span className="text-cyan-accent">▸</span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+      {/* Bottom Dock: Big Bubbly Play Button + Area Dropdown */}
+      <div className="relative z-20 pt-6 pb-2 flex flex-col items-center justify-center">
+        <div ref={dropdownRef} className="relative inline-flex items-stretch">
+          {/* Little Area Selector Dropdown Menu (opens upward from Play bar) */}
+          {dropdownOpen && (
+            <div
+              role="menu"
+              aria-label="Select Area to Play"
+              className="animate-pop-in absolute bottom-full mb-3 right-0 w-72 sm:w-80 rounded-3xl bg-[#182449]/95 backdrop-blur-xl border border-white/15 p-2.5 shadow-[0_20px_50px_rgba(0,0,0,0.6)]"
+            >
+              <div className="px-3 py-1.5 text-xs font-semibold text-slate-300/80">
+                Jump to Arena Area
+              </div>
+              <div className="space-y-1.5 mt-1">
+                {GAME_AREAS.map((area) => {
+                  const unlocked = isAreaUnlocked(area.id, telemetry)
+                  const isCurrent = selectedAreaId === area.id
+                  return (
+                    <button
+                      key={area.id}
+                      type="button"
+                      role="menuitem"
+                      disabled={!unlocked}
+                      onClick={() => handlePlayArea(area.id)}
+                      className={`w-full flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl text-left transition-colors ${
+                        unlocked
+                          ? isCurrent
+                            ? 'bg-sky-400/25 border border-sky-300/60 text-white hover:bg-sky-400/35 cursor-pointer'
+                            : 'bg-white/5 hover:bg-white/15 border border-transparent text-white cursor-pointer'
+                          : 'bg-slate-950/45 border border-white/5 text-slate-400 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-display font-bold text-sm leading-tight truncate">
+                          Area {area.order}: {area.name}
+                        </div>
+                        <div className="text-xs text-slate-300/75 truncate">
+                          {unlocked
+                            ? area.coinBonusPercent > 0
+                              ? `${area.subtitle} · +${area.coinBonusPercent}% Coins`
+                              : `${area.subtitle} · Click to Play`
+                            : `Beat Wave 15 to unlock (${highestWave}/15)`}
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold shrink-0">
+                        {unlocked ? 'Go →' : '🔒'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Compound Big Bubbly Play Button + Attached Area Dropdown Trigger */}
+          <button
+            type="button"
+            onClick={() => handlePlayArea(selectedArea.id)}
+            className="px-10 sm:px-14 py-4 rounded-l-full bg-gradient-to-b from-cyan-300 via-sky-400 to-sky-500 hover:brightness-105 active:translate-y-0.5 text-slate-950 border-b-[5px] border-sky-700 shadow-[0_14px_34px_rgba(56,189,248,0.38)] transition-all duration-150 flex items-center gap-3 cursor-pointer"
+          >
+            <span className="w-8 h-8 rounded-full bg-slate-950/15 flex items-center justify-center text-base">
+              ▶
+            </span>
+            <span className="text-left leading-none">
+              <span className="block font-display font-black text-2xl sm:text-3xl tracking-wide">
+                PLAY
+              </span>
+              <span className="block text-xs font-bold text-slate-900/80 mt-0.5 whitespace-nowrap">
+                {selectedArea.name}
+              </span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDropdownOpen((prev) => !prev)}
+            aria-label="Choose area dropdown"
+            aria-haspopup="menu"
+            aria-expanded={dropdownOpen}
+            className="px-5 py-4 rounded-r-full bg-gradient-to-b from-sky-400 to-cyan-600 hover:brightness-110 active:translate-y-0.5 text-slate-950 border-l border-slate-950/20 border-b-[5px] border-sky-800 shadow-[0_14px_34px_rgba(56,189,248,0.28)] transition-all duration-150 flex items-center justify-center cursor-pointer"
+          >
+            <span
+              className={`text-lg font-black transition-transform duration-150 ${
+                dropdownOpen ? 'rotate-180' : ''
+              }`}
+            >
+              ▾
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   )

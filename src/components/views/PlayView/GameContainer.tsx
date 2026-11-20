@@ -10,7 +10,9 @@ import { Camera } from '../../../game/engine/Camera'
 import { InputManager } from '../../../game/engine/InputManager'
 import { Player } from '../../../game/entities/Player'
 import {
+  BossArenaBounds,
   checkBossTelegraphHit,
+  checkEnemyAoeHit,
   Enemy,
   resolveEnemyCollisions
 } from '../../../game/entities/Enemy'
@@ -33,6 +35,25 @@ import {
   selectEnemyTypeIndexForWave,
   WAVE_CONFIG
 } from '../../../config/gameConstants'
+import {
+  AREA_TWO_ENEMIES,
+  ArenaId,
+  getAreaBossTemplateForWave,
+  getAreaById,
+  getAreaMiniBossCap,
+  getWave15FinalBossHp,
+  selectAreaEnemyTemplateForWave,
+  shouldSpawnRegularEnemiesInWave
+} from '../../../config/arenas'
+import {
+  computeHeroBurnPerTick,
+  getArcSlashConfig,
+  getHeroAbility,
+  getHeroDamageReduction,
+  getSummonCountForUpgrade,
+  HERO_ABILITY_CONSTANTS,
+  shouldApplyHomingForHero
+} from '../../../config/heroAbilities'
 import type { UpgradesRow } from '../../../types/database'
 import { calculateScoreFormula, getOperativeProfile, submitScore } from '../../../services/scores'
 import {
@@ -42,6 +63,11 @@ import {
   shopWeaponsAsUpgrades,
   type ComputedAccessoryBonuses
 } from '../../../services/shop'
+import {
+  setDevRunStatus,
+  subscribeDevActions,
+  useDevSettings
+} from '../../../services/devTools'
 import { useSupabase } from '../../../hooks/useSupabase'
 import { useAudio } from '../../../context/AudioContext'
 import { useToast } from '../../ui/ToastContainer'
@@ -56,10 +82,11 @@ export interface GameContainerProps {
   selectedHeroId?: string
   startingUpgradeId?: string
   loadoutName?: string
+  areaId?: ArenaId
   autoStart?: boolean
 }
 
-type EngineState = 'menu' | 'playing' | 'paused' | 'gameover' | 'levelup'
+type EngineState = 'menu' | 'playing' | 'paused' | 'gameover' | 'levelup' | 'victory_choice'
 
 interface ExplosionFx {
   x: number
@@ -86,6 +113,10 @@ interface OrbitalBeamFx {
   timer: number
   duration: number
   hitCooldowns: Map<Enemy, number>
+  cloneId?: number
+  originX?: number
+  originY?: number
+  color?: string
 }
 
 interface VoidVortexFx {
@@ -145,6 +176,16 @@ type AttackFx =
       duration: number
     }
   | {
+      kind: 'muramasa_slash'
+      x: number
+      y: number
+      angle: number
+      radius: number
+      color: string
+      timer: number
+      duration: number
+    }
+  | {
       kind: 'heal_wave'
       x: number
       y: number
@@ -153,6 +194,22 @@ type AttackFx =
       duration: number
     }
 
+interface ChronoClone {
+  id: number
+  x: number
+  y: number
+  timer: number
+  duration: number
+  slotOffsetAngle: number
+}
+
+interface DashAfterimage {
+  x: number
+  y: number
+  timer: number
+  duration: number
+}
+
 const ARENA_SIZE = 2000
 
 const GameContainer: React.FC<GameContainerProps> = ({
@@ -160,9 +217,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
   selectedHeroId,
   startingUpgradeId,
   loadoutName,
+  areaId = 'carbon_sector',
   autoStart = true
 }) => {
+  const activeArea = getAreaById(areaId)
+  const areaRef = useRef(activeArea)
+  areaRef.current = activeArea
+
   const { user } = useSupabase()
+  const { authorized: isDevUser, settings: devSettings } = useDevSettings(user?.email)
   const { playSound } = useAudio()
   const toast = useToast()
 
@@ -183,10 +246,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const [enemiesDefeated, setEnemiesDefeated] = useState<number>(0)
   const [timeSurvived, setTimeSurvived] = useState<number>(0)
   const [heroName, setHeroName] = useState<string>('')
+  const [heroAbilityTag, setHeroAbilityTag] = useState<string>('')
+  const [hasSpaceDash, setHasSpaceDash] = useState<boolean>(false)
+  const [dashCooldown, setDashCooldown] = useState<number>(0)
   const [activeUpgradeNames, setActiveUpgradeNames] = useState<string[]>([])
   const [shieldActive, setShieldActive] = useState<boolean>(false)
   const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[]>([])
   const [finalScore, setFinalScore] = useState<number>(0)
+  const [isVictory, setIsVictory] = useState<boolean>(false)
+  const [isEndlessMode, setIsEndlessMode] = useState<boolean>(false)
   const [finalStats, setFinalStats] = useState({
     survivalSeconds: 0,
     coinsCollected: 0,
@@ -202,6 +270,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const playerProjectilesRef = useRef<Projectile[]>([])
   const coinsRef = useRef<Coin[]>([])
   const summonsRef = useRef<Summon[]>([])
+  const chronoClonesRef = useRef<ChronoClone[]>([])
+  const chronoCloneSpawnTimerRef = useRef<number>(0)
+  const chronoCloneNextIdRef = useRef<number>(1)
+  const dashCooldownRef = useRef<number>(0)
+  const dashTimerRef = useRef<number>(0)
+  const dashDirRef = useRef<{ x: number; y: number }>({ x: 1, y: 0 })
+  const lastMoveDirRef = useRef<{ x: number; y: number }>({ x: 1, y: 0 })
+  const dashAfterimagesRef = useRef<DashAfterimage[]>([])
+  const dashHitEnemiesRef = useRef<Set<Enemy>>(new Set())
   const activeBeamsRef = useRef<OrbitalBeamFx[]>([])
   const voidVorticesRef = useRef<VoidVortexFx[]>([])
   const burnZonesRef = useRef<BurnZoneFx[]>([])
@@ -218,9 +295,14 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const waveElapsedRef = useRef<number>(0)
   const breatherElapsedRef = useRef<number>(0)
   const isBreatherRef = useRef<boolean>(false)
+  const endlessModeRef = useRef<boolean>(false)
+  const clearedWave15BossRef = useRef<boolean>(false)
   const spawnAccumulatorRef = useRef<number>(0)
   const rangedSpawnedInWaveRef = useRef<number>(0)
   const bossSpawnedWaveRef = useRef<number>(0)
+  const bossArenaRef = useRef<BossArenaBounds | null>(null)
+  const finalBossSpawnedRef = useRef<boolean>(false)
+  const announcedHalfTelegraphIdsRef = useRef<Set<string>>(new Set())
 
   const timeSurvivedRef = useRef<number>(0)
   const coinsCollectedRef = useRef<number>(0)
@@ -240,6 +322,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const currentDamageFreeStreakRef = useRef<number>(0)
   const longestDamageFreeStreakRef = useRef<number>(0)
   const hasSubmittedRunRef = useRef<boolean>(false)
+
+  const isDevUserRef = useRef<boolean>(isDevUser)
+  isDevUserRef.current = isDevUser
+  const devSettingsRef = useRef(devSettings)
+  devSettingsRef.current = devSettings
+  const basePlayerMaxHealthRef = useRef<number>(100)
 
   // Virtual mobile directional pad state
   const touchDirRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -339,68 +427,82 @@ const GameContainer: React.FC<GameContainerProps> = ({
     })
   }, [])
 
-  const triggerEndGame = useCallback(() => {
-    if (gameStateRef.current === 'gameover') return
+  const triggerEndGame = useCallback(
+    (victory = false) => {
+      if (gameStateRef.current === 'gameover') return
 
-    flushBankedCoins()
-    setEngineState('gameover')
-    playSoundRef.current('gameover')
+      flushBankedCoins()
+      setDevRunStatus({ isInRun: false })
+      setIsVictory(victory)
+      setEngineState('gameover')
+      playSoundRef.current(victory ? 'levelup' : 'gameover')
 
-    const survived = Math.floor(timeSurvivedRef.current)
-    const collected = coinsCollectedRef.current
-    const defeated = enemiesDefeatedRef.current
-    const computedScore = calculateScoreFormula(survived, collected)
+      const survived = Math.floor(timeSurvivedRef.current)
+      const collected = coinsCollectedRef.current
+      const defeated = enemiesDefeatedRef.current
+      const computedScore = calculateScoreFormula(survived, collected)
 
-    setTimeSurvived(survived)
-    setScore(computedScore)
-    setFinalScore(computedScore)
-    setFinalStats({
-      survivalSeconds: survived,
-      coinsCollected: collected,
-      enemiesDefeated: defeated
-    })
-
-    if (!hasSubmittedRunRef.current) {
-      hasSubmittedRunRef.current = true
-      const heroId = playerRef.current?.hero?.id || selectedHeroId || 'hero_01'
-      const profile = getOperativeProfile(user?.id)
-      const playerName =
-        (user?.user_metadata?.username as string | undefined) ||
-        (user?.email ? user.email.split('@')[0] : profile.username)
-
-      submitScore({
-        userId: user?.id || null,
-        playerName,
+      setTimeSurvived(survived)
+      setScore(computedScore)
+      setFinalScore(computedScore)
+      setFinalStats({
         survivalSeconds: survived,
         coinsCollected: collected,
-        enemiesDefeated: defeated,
-        damageFreeWaveStreak: longestDamageFreeStreakRef.current,
-        waveReached: waveRef.current,
-        heroUsed: heroId,
-        coinsAlreadyBanked: true
+        enemiesDefeated: defeated
       })
-        .then(({ newlyUnlocked }) => {
-          toast.success(`Mission logged! Final Score: ${computedScore.toLocaleString()}`)
-          for (const ach of newlyUnlocked) {
-            toast.info(`Achievement Unlocked: ${ach.achievement.title} (${ach.achievement.reward_badge})`)
-          }
+
+      if (!hasSubmittedRunRef.current) {
+        hasSubmittedRunRef.current = true
+        const heroId = playerRef.current?.hero?.id || selectedHeroId || 'hero_01'
+        const profile = getOperativeProfile(user?.id)
+        const playerName =
+          (user?.user_metadata?.username as string | undefined) ||
+          (user?.email ? user.email.split('@')[0] : profile.username)
+
+        submitScore({
+          userId: user?.id || null,
+          playerName,
+          survivalSeconds: survived,
+          coinsCollected: collected,
+          enemiesDefeated: defeated,
+          damageFreeWaveStreak: longestDamageFreeStreakRef.current,
+          waveReached: waveRef.current,
+          victory,
+          heroUsed: heroId,
+          coinsAlreadyBanked: true
         })
-        .catch(() => {
-          // Persisted locally by default
-        })
-    }
-  }, [flushBankedCoins, selectedHeroId, setEngineState, toast, user])
+          .then(({ newlyUnlocked }) => {
+            toast.success(
+              victory
+                ? `VICTORY! Wave 15 Cleared — Area 2 Unlocked! Score: ${computedScore.toLocaleString()}`
+                : `Mission logged! Final Score: ${computedScore.toLocaleString()}`
+            )
+            for (const ach of newlyUnlocked) {
+              toast.info(`Achievement Unlocked: ${ach.achievement.title} (${ach.achievement.reward_badge})`)
+            }
+          })
+          .catch(() => {
+            // Persisted locally by default
+          })
+      }
+    },
+    [flushBankedCoins, selectedHeroId, setEngineState, toast, user]
+  )
 
   const syncSummonsForUpgrade = useCallback(
     (upgrade: UpgradesRow, player: Player | null, level = 1) => {
       if (!player) return
       const pc = player.getCenter()
+      const heroId = player.hero?.id || selectedHeroId || 'hero_01'
+      const isEngineer = heroId === 'hero_03'
       const dmgMult = equippedBonusesRef.current.damageMultiplier
-      const rateMult = equippedBonusesRef.current.cooldownRateMultiplier
+      const rateMult =
+        equippedBonusesRef.current.cooldownRateMultiplier *
+        (isEngineer ? HERO_ABILITY_CONSTANTS.ENGINEER_SUMMON_FIRE_RATE_BONUS : 1)
       const scaledDmg = Math.max(1, Math.round(upgrade.damage * dmgMult))
 
       if (upgrade.id === 'upg_01') {
-        const desiredBots = level >= 5 ? 3 : level >= 3 ? 2 : 1
+        const desiredBots = getSummonCountForUpgrade(upgrade.id, level, heroId)
         let current = summonsRef.current.filter((s) => s.kind === 'companion_robot')
         while (current.length < desiredBots) {
           const offsetAngle = (current.length / desiredBots) * Math.PI * 2
@@ -425,7 +527,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           bot.level = level
         })
       } else if (upgrade.id === 'upg_14') {
-        const desiredEchoes = level >= 4 ? 2 : 1
+        const desiredEchoes = getSummonCountForUpgrade(upgrade.id, level, heroId)
         let current = summonsRef.current.filter((s) => s.kind === 'temporal_echo')
         while (current.length < desiredEchoes) {
           summonsRef.current.push(
@@ -449,7 +551,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           echo.level = level
         })
       } else if (upgrade.id === 'upg_20') {
-        const desiredTurrets = level >= 5 ? 2 : 1
+        const desiredTurrets = getSummonCountForUpgrade(upgrade.id, level, heroId)
         let current = summonsRef.current.filter((s) => s.kind === 'sentinel_turret')
         while (current.length < desiredTurrets) {
           const offsetAngle = current.length * Math.PI + 0.65
@@ -475,7 +577,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         })
       }
     },
-    []
+    [selectedHeroId]
   )
 
   const spawnEnemyForWave = useCallback(
@@ -483,63 +585,135 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const player = playerRef.current
       if (!player) return
 
+      const isWave15Boss =
+        forceBoss && waveNumber === WAVE_CONFIG.MAX_WAVE && !endlessModeRef.current
+      const bossArena = bossArenaRef.current
       const playerCenter = player.getCenter()
-      const angle = Math.random() * Math.PI * 2
-      const distance = forceBoss ? 320 : 260 + Math.random() * 200
-      const spawnX = Math.max(40, Math.min(ARENA_SIZE - 80, playerCenter.x + Math.cos(angle) * distance))
-      const spawnY = Math.max(40, Math.min(ARENA_SIZE - 80, playerCenter.y + Math.sin(angle) * distance))
 
-      let template = seedEnemies[0] // Spore Zombie
+      let spawnX: number
+      let spawnY: number
+      if (isWave15Boss && bossArena) {
+        spawnX = bossArena.left + bossArena.width / 2 - 46
+        spawnY = bossArena.top + 195 - 46
+      } else {
+        const angle = Math.random() * Math.PI * 2
+        const distance = forceBoss ? 320 : 260 + Math.random() * 200
+        spawnX = Math.max(40, Math.min(ARENA_SIZE - 80, playerCenter.x + Math.cos(angle) * distance))
+        spawnY = Math.max(40, Math.min(ARENA_SIZE - 80, playerCenter.y + Math.sin(angle) * distance))
+      }
+
+      const isAreaTwo = areaRef.current.id === 'astral_citadel'
+      let template = isAreaTwo ? AREA_TWO_ENEMIES[0] : seedEnemies[0]
       if (forceBoss) {
-        template = seedEnemies.find((e) => e.id === 'ene_04') || seedEnemies[3]
+        template = getAreaBossTemplateForWave(areaRef.current.id, waveNumber)
       } else {
         const rangedLimit = getWaveRangedSpawnLimit(waveNumber)
         const underRangedCap = allowRanged && rangedSpawnedInWaveRef.current < rangedLimit
         const waveProgress = Math.min(1, waveElapsedRef.current / WAVE_CONFIG.WAVE_DURATION_SECONDS)
         const expectedRangedSoFar = Math.floor(waveProgress * rangedLimit)
 
-        let idx: 0 | 1 | 2
-        if (underRangedCap && rangedSpawnedInWaveRef.current < expectedRangedSoFar) {
-          idx = 2
-        } else {
-          const canRollRanged =
-            underRangedCap && rangedSpawnedInWaveRef.current <= expectedRangedSoFar + 1
-          idx = selectEnemyTypeIndexForWave(waveNumber, Math.random(), canRollRanged)
-        }
+        if (isAreaTwo) {
+          const activeMiniBossCount = enemiesRef.current.filter(
+            (e) => e.isAlive && e.isMiniBoss && !e.isBoss
+          ).length
+          const miniBossCap = getAreaMiniBossCap(waveNumber)
+          const needsGuaranteedMiniBoss =
+            allowRanged && waveNumber >= 3 && waveElapsedRef.current >= 7 && activeMiniBossCount === 0
 
-        if (idx === 2) {
-          rangedSpawnedInWaveRef.current += 1
+          if (needsGuaranteedMiniBoss && miniBossCap > 0) {
+            template = AREA_TWO_ENEMIES[4]
+          } else if (underRangedCap && rangedSpawnedInWaveRef.current < expectedRangedSoFar) {
+            template = Math.random() < 0.5 ? AREA_TWO_ENEMIES[2] : AREA_TWO_ENEMIES[3]
+            rangedSpawnedInWaveRef.current += 1
+          } else {
+            const canRollRanged =
+              underRangedCap && rangedSpawnedInWaveRef.current <= expectedRangedSoFar + 1
+            const pick = selectAreaEnemyTemplateForWave('astral_citadel', waveNumber, {
+              roll: Math.random(),
+              subRoll: Math.random(),
+              canSpawnRanged: canRollRanged,
+              canSpawnMiniBoss: allowRanged && activeMiniBossCount < miniBossCap
+            })
+            template = pick.template
+            if (pick.isRanged) {
+              rangedSpawnedInWaveRef.current += 1
+            }
+          }
+        } else {
+          let idx: 0 | 1 | 2
+          if (underRangedCap && rangedSpawnedInWaveRef.current < expectedRangedSoFar) {
+            idx = 2
+          } else {
+            const canRollRanged =
+              underRangedCap && rangedSpawnedInWaveRef.current <= expectedRangedSoFar + 1
+            idx = selectEnemyTypeIndexForWave(waveNumber, Math.random(), canRollRanged)
+          }
+
+          if (idx === 2) {
+            rangedSpawnedInWaveRef.current += 1
+          }
+          template = seedEnemies[idx] || seedEnemies[0]
         }
-        template = seedEnemies[idx] || seedEnemies[0]
       }
+
+      const anchorPos =
+        isWave15Boss && bossArena
+          ? { x: bossArena.left + bossArena.width / 2, y: bossArena.top + 195 }
+          : null
 
       const enemy = new Enemy({
         x: spawnX,
         y: spawnY,
         enemyData: template,
         target: player,
-        isBoss: forceBoss
+        isBoss: forceBoss,
+        isStationaryBoss: isWave15Boss,
+        isFinalBoss: isWave15Boss,
+        anchorPos,
+        arenaBounds: isWave15Boss ? bossArena : null
       })
 
-      // Overtime & wave progression scaling
+      // Overtime, wave, & area progression scaling
       const scaling = getEnemyScaling(waveNumber, timeSurvivedRef.current)
-      enemy.maxHealth = Math.round(enemy.maxHealth * scaling.hpMultiplier)
-      enemy.health = enemy.maxHealth
-      enemy.baseSpeed *= scaling.speedMultiplier
-      enemy.speed = enemy.baseSpeed
-      enemy.damage = Math.round(enemy.damage * scaling.damageMultiplier)
-      enemy.powerScale = scaling.hpMultiplier
-      enemy.damageScale = scaling.damageMultiplier
-
-      if (forceBoss) {
-        const tier = Math.max(1, Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL))
-        enemy.bossTier = tier
+      const areaMeta = areaRef.current
+      if (isWave15Boss) {
+        const w15Hp = getWave15FinalBossHp(areaMeta.id)
+        enemy.maxHealth = w15Hp
+        enemy.health = w15Hp
+        enemy.damage = Math.round(
+          32 * Math.min(2.5, scaling.damageMultiplier * 0.7) * areaMeta.enemyHpMultiplier
+        )
+        enemy.powerScale = w15Hp / 2300
+        enemy.damageScale = Math.min(2.4, scaling.damageMultiplier * 0.6)
+        enemy.coinValue = Math.round(250 * areaMeta.coinBonusMultiplier)
+        enemy.bossTier = 3
         enemy.bossTitle =
-          tier >= 3
-            ? `APEX LEVIATHAN (W${waveNumber})`
-            : tier === 2
-              ? `OMEGA DREADNOUGHT (W${waveNumber})`
-              : `AEGIS COMMANDER (W${waveNumber})`
+          areaMeta.id === 'astral_citadel'
+            ? 'SOLAR ARCHON SERAPH — FINAL BOSS (W15)'
+            : 'OMEGA OVERLORD — FINAL BOSS (W15)'
+      } else {
+        enemy.maxHealth = Math.round(enemy.maxHealth * scaling.hpMultiplier * areaMeta.enemyHpMultiplier)
+        enemy.health = enemy.maxHealth
+        enemy.baseSpeed *= scaling.speedMultiplier * areaMeta.enemySpeedMultiplier
+        enemy.speed = enemy.baseSpeed
+        enemy.damage = Math.round(enemy.damage * scaling.damageMultiplier)
+        enemy.coinValue = Math.max(1, Math.round(enemy.coinValue * areaMeta.coinBonusMultiplier))
+        enemy.powerScale = scaling.hpMultiplier
+        enemy.damageScale = scaling.damageMultiplier
+
+        if (forceBoss) {
+          const tier = Math.max(1, Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL))
+          enemy.bossTier = tier
+          enemy.bossTitle = isAreaTwo
+            ? template.id === 'boss_a2_10'
+              ? `ASTRAL VORTEX COLOSSUS (W${waveNumber})`
+              : `EMERALD PRISM MONARCH (W${waveNumber})`
+            : tier >= 3
+              ? `APEX LEVIATHAN (W${waveNumber})`
+              : tier === 2
+                ? `OMEGA DREADNOUGHT (W${waveNumber})`
+                : `AEGIS COMMANDER (W${waveNumber})`
+        }
       }
 
       enemiesRef.current.push(enemy)
@@ -597,6 +771,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
       newPlayer.maxHealth += bonuses.bonusHp
       newPlayer.health = newPlayer.maxHealth
     }
+    basePlayerMaxHealthRef.current = newPlayer.maxHealth
+    if (isDevUserRef.current && devSettingsRef.current.healthMultiplier > 1) {
+      newPlayer.maxHealth = Math.round(
+        basePlayerMaxHealthRef.current * devSettingsRef.current.healthMultiplier
+      )
+      newPlayer.health = newPlayer.maxHealth
+    }
     newPlayer.speed *= bonuses.speedMultiplier
 
     const rect = containerRef.current?.getBoundingClientRect()
@@ -624,6 +805,17 @@ const GameContainer: React.FC<GameContainerProps> = ({
     playerProjectilesRef.current = []
     coinsRef.current = []
     summonsRef.current = []
+    chronoClonesRef.current = []
+    chronoCloneSpawnTimerRef.current =
+      HERO_ABILITY_CONSTANTS.CHRONO_CLONE_SPAWN_INTERVAL -
+      HERO_ABILITY_CONSTANTS.CHRONO_CLONE_FIRST_SPAWN_DELAY
+    chronoCloneNextIdRef.current = 1
+    dashCooldownRef.current = 0
+    dashTimerRef.current = 0
+    dashDirRef.current = { x: 1, y: 0 }
+    lastMoveDirRef.current = { x: 1, y: 0 }
+    dashAfterimagesRef.current = []
+    dashHitEnemiesRef.current.clear()
     activeBeamsRef.current = []
     voidVorticesRef.current = []
     burnZonesRef.current = []
@@ -648,9 +840,16 @@ const GameContainer: React.FC<GameContainerProps> = ({
     waveElapsedRef.current = 0
     breatherElapsedRef.current = 0
     isBreatherRef.current = false
+    endlessModeRef.current = false
+    clearedWave15BossRef.current = false
+    setIsEndlessMode(false)
     spawnAccumulatorRef.current = 0
     rangedSpawnedInWaveRef.current = 0
     bossSpawnedWaveRef.current = 0
+    bossArenaRef.current = null
+    finalBossSpawnedRef.current = false
+    announcedHalfTelegraphIdsRef.current.clear()
+    setIsVictory(false)
 
     timeSurvivedRef.current = 0
     coinsCollectedRef.current = 0
@@ -668,7 +867,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
     longestDamageFreeStreakRef.current = 0
     hasSubmittedRunRef.current = false
 
+    const abilitySpec = getHeroAbility(hero.id)
     setHeroName(loadoutName ? `${hero.name} (${loadoutName})` : hero.name)
+    setHeroAbilityTag(abilitySpec.shortTag)
+    setHasSpaceDash(hero.id === 'hero_05')
+    setDashCooldown(0)
     setHealth(newPlayer.health)
     setMaxHealth(newPlayer.maxHealth)
     setWave(1)
@@ -685,10 +888,69 @@ const GameContainer: React.FC<GameContainerProps> = ({
       clonedStartUpgrade.id === 'upg_11' || clonedStartUpgrade.id === 'upg_15'
     )
 
-    // Initial wave 1 swarm
-    const initialBurst = getWaveSpawnConfig(1, 0).waveBurst
-    for (let i = 0; i < initialBurst; i++) {
-      spawnEnemyForWave(1, false, false)
+    const warpToWaveInternal = (targetWave: number) => {
+      const safeWave = Math.max(1, Math.floor(targetWave))
+      const isW15 = safeWave === WAVE_CONFIG.MAX_WAVE
+      const isEndless = safeWave > WAVE_CONFIG.MAX_WAVE
+
+      enemiesRef.current = []
+      playerProjectilesRef.current = []
+      waveRef.current = safeWave
+      waveElapsedRef.current = 0
+      breatherElapsedRef.current = 0
+      isBreatherRef.current = false
+      endlessModeRef.current = isEndless
+      setIsEndlessMode(isEndless)
+      rangedSpawnedInWaveRef.current = 0
+      spawnAccumulatorRef.current = 0
+      waveTookDamageRef.current = false
+      setWave(safeWave)
+      setIsBreather(false)
+      setWaveTimeRemaining(WAVE_CONFIG.WAVE_DURATION_SECONDS)
+      setDevRunStatus({ isInRun: true, currentWave: safeWave, areaId: areaRef.current.id })
+
+      if (isW15) {
+        const aw = canvas.width
+        const ah = canvas.height
+        const pcNow = newPlayer.getCenter()
+        const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, pcNow.x - aw / 2))
+        const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, pcNow.y - ah / 2))
+        bossArenaRef.current = { left, top, width: aw, height: ah }
+        const bossAnchorX = left + aw / 2
+        const bossAnchorY = top + 195
+        if (Math.hypot(pcNow.x - bossAnchorX, pcNow.y - bossAnchorY) < 130) {
+          newPlayer.y = Math.min(top + ah - newPlayer.height - 40, top + 360)
+        }
+        finalBossSpawnedRef.current = true
+        bossSpawnedWaveRef.current = WAVE_CONFIG.MAX_WAVE
+        spawnEnemyForWave(WAVE_CONFIG.MAX_WAVE, true)
+      } else {
+        bossArenaRef.current = null
+        finalBossSpawnedRef.current = false
+        bossSpawnedWaveRef.current = safeWave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0 ? safeWave : 0
+        const burst = getWaveSpawnConfig(safeWave, timeSurvivedRef.current).waveBurst
+        for (let i = 0; i < burst; i++) {
+          spawnEnemyForWave(safeWave, false, false)
+        }
+        if (safeWave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0) {
+          spawnEnemyForWave(safeWave, true)
+        }
+      }
+    }
+
+    // Initial wave swarm (supports Dev startingWaveOverride)
+    const startWave =
+      isDevUserRef.current && devSettingsRef.current.startingWaveOverride > 1
+        ? devSettingsRef.current.startingWaveOverride
+        : 1
+    if (startWave > 1) {
+      warpToWaveInternal(startWave)
+    } else {
+      const initialBurst = getWaveSpawnConfig(1, 0).waveBurst
+      for (let i = 0; i < initialBurst; i++) {
+        spawnEnemyForWave(1, false, false)
+      }
+      setDevRunStatus({ isInRun: true, currentWave: 1, areaId: areaRef.current.id })
     }
 
     setEngineState('playing')
@@ -704,12 +966,108 @@ const GameContainer: React.FC<GameContainerProps> = ({
     user?.id
   ])
 
-  // Flush any earned battle coins when leaving the arena early
+  // Flush any earned battle coins and clear live Dev run state when leaving the arena
   useEffect(() => {
     return () => {
       flushBankedCoins()
+      setDevRunStatus({ isInRun: false })
     }
   }, [flushBankedCoins])
+
+  // Subscribe to authorized Dev Panel live actions (Coins, Health, Wave Skips)
+  useEffect(() => {
+    return subscribeDevActions((action) => {
+      if (!isDevUserRef.current) return
+      const player = playerRef.current
+
+      if (action.type === 'grant_coins') {
+        coinsCollectedRef.current += action.amount
+        coinsBankedRef.current += action.amount
+        setCoins(coinsCollectedRef.current)
+        return
+      }
+
+      if (!player) return
+
+      if (action.type === 'heal_full') {
+        player.heal(player.maxHealth)
+        setHealth(player.health)
+      } else if (action.type === 'set_health') {
+        const targetHp = Math.max(1, Math.round(action.amount))
+        player.maxHealth = Math.max(player.maxHealth, targetHp)
+        player.health = targetHp
+        setMaxHealth(player.maxHealth)
+        setHealth(player.health)
+      } else if (action.type === 'add_max_health') {
+        const bonus = Math.max(1, Math.round(action.amount))
+        basePlayerMaxHealthRef.current += bonus
+        player.maxHealth += bonus
+        player.heal(bonus)
+        setMaxHealth(player.maxHealth)
+        setHealth(player.health)
+      } else if (action.type === 'apply_health_multiplier') {
+        const nextMax = Math.max(1, Math.round(basePlayerMaxHealthRef.current * action.multiplier))
+        const ratio = player.maxHealth > 0 ? player.health / player.maxHealth : 1
+        player.maxHealth = nextMax
+        player.health = Math.max(1, Math.min(nextMax, Math.round(nextMax * ratio)))
+        setMaxHealth(player.maxHealth)
+        setHealth(player.health)
+      } else if (action.type === 'skip_wave') {
+        const canvas = canvasRef.current
+        const targetWave =
+          action.mode === 'delta'
+            ? Math.max(1, waveRef.current + Math.round(action.value))
+            : Math.max(1, Math.round(action.value))
+        const isW15 = targetWave === WAVE_CONFIG.MAX_WAVE
+        const isEndless = targetWave > WAVE_CONFIG.MAX_WAVE
+
+        enemiesRef.current = []
+        playerProjectilesRef.current = []
+        waveRef.current = targetWave
+        waveElapsedRef.current = 0
+        breatherElapsedRef.current = 0
+        isBreatherRef.current = false
+        endlessModeRef.current = isEndless
+        setIsEndlessMode(isEndless)
+        rangedSpawnedInWaveRef.current = 0
+        spawnAccumulatorRef.current = 0
+        waveTookDamageRef.current = false
+        setWave(targetWave)
+        setIsBreather(false)
+        setWaveTimeRemaining(WAVE_CONFIG.WAVE_DURATION_SECONDS)
+        setDevRunStatus({ isInRun: true, currentWave: targetWave, areaId: areaRef.current.id })
+
+        if (isW15 && canvas) {
+          const aw = canvas.width
+          const ah = canvas.height
+          const pcNow = player.getCenter()
+          const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, pcNow.x - aw / 2))
+          const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, pcNow.y - ah / 2))
+          bossArenaRef.current = { left, top, width: aw, height: ah }
+          const bossAnchorX = left + aw / 2
+          const bossAnchorY = top + 195
+          if (Math.hypot(pcNow.x - bossAnchorX, pcNow.y - bossAnchorY) < 130) {
+            player.y = Math.min(top + ah - player.height - 40, top + 360)
+          }
+          finalBossSpawnedRef.current = true
+          bossSpawnedWaveRef.current = WAVE_CONFIG.MAX_WAVE
+          spawnEnemyForWave(WAVE_CONFIG.MAX_WAVE, true)
+        } else {
+          bossArenaRef.current = null
+          finalBossSpawnedRef.current = false
+          bossSpawnedWaveRef.current = targetWave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0 ? targetWave : 0
+          const burst = getWaveSpawnConfig(targetWave, timeSurvivedRef.current).waveBurst
+          for (let i = 0; i < burst; i++) {
+            spawnEnemyForWave(targetWave, false, false)
+          }
+          if (targetWave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0) {
+            spawnEnemyForWave(targetWave, true)
+          }
+        }
+        playSoundRef.current('wave')
+      }
+    })
+  }, [spawnEnemyForWave])
 
   // Auto-start when mounted inside PlayView
   useEffect(() => {
@@ -742,9 +1100,70 @@ const GameContainer: React.FC<GameContainerProps> = ({
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Pause keyboard shortcut (Escape or P)
+  const triggerPaladinDash = useCallback(() => {
+    const player = playerRef.current
+    if (!player || !player.isAlive || gameStateRef.current !== 'playing') return
+    if (player.hero?.id !== 'hero_05') return
+    if (dashCooldownRef.current > 0 || dashTimerRef.current > 0) return
+
+    const kbMove = inputRef.current?.getMovementVector() || { x: 0, y: 0 }
+    const touchMove = touchDirRef.current
+    let dx = kbMove.x + touchMove.x
+    let dy = kbMove.y + touchMove.y
+    let mag = Math.hypot(dx, dy)
+    if (mag <= 0.05) {
+      dx = lastMoveDirRef.current.x
+      dy = lastMoveDirRef.current.y
+      mag = Math.hypot(dx, dy)
+    }
+    if (mag <= 0.05) {
+      dx = Math.cos(player.facingAngle)
+      dy = Math.sin(player.facingAngle)
+      mag = Math.hypot(dx, dy) || 1
+    }
+    const dir = { x: dx / mag, y: dy / mag }
+    dashDirRef.current = dir
+    dashTimerRef.current = HERO_ABILITY_CONSTANTS.PALADIN_DASH_DURATION
+    dashCooldownRef.current = HERO_ABILITY_CONSTANTS.PALADIN_DASH_COOLDOWN
+    dashHitEnemiesRef.current.clear()
+
+    player.facingAngle = Math.atan2(dir.y, dir.x)
+    player.isInvulnerable = true
+    player.invulnerabilityTimer = Math.max(
+      player.invulnerabilityTimer,
+      HERO_ABILITY_CONSTANTS.PALADIN_DASH_IFRAMES
+    )
+    setDashCooldown(HERO_ABILITY_CONSTANTS.PALADIN_DASH_COOLDOWN)
+
+    const pc = player.getCenter()
+    explosionsRef.current.push({
+      x: pc.x,
+      y: pc.y,
+      radius: 78,
+      timer: 0,
+      duration: 0.28,
+      color: 'rgba(250, 204, 21, 0.55)'
+    })
+    floatingTextsRef.current.push({
+      x: pc.x,
+      y: player.y - 14,
+      text: 'AEGIS DASH!',
+      color: '#FACC15',
+      timer: 0.75
+    })
+    playSoundRef.current('wave')
+  }, [])
+
+  // Pause (Escape/P) & Shield Paladin Spacebar Dash shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.key === ' ') {
+        if (gameStateRef.current === 'playing' && playerRef.current?.hero?.id === 'hero_05') {
+          e.preventDefault()
+          triggerPaladinDash()
+          return
+        }
+      }
       if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
         if (gameStateRef.current === 'playing') {
           setEngineState('paused')
@@ -761,27 +1180,47 @@ const GameContainer: React.FC<GameContainerProps> = ({
         inputRef.current = null
       }
     }
-  }, [setEngineState])
+  }, [setEngineState, triggerPaladinDash])
 
   // Main 60 FPS RequestAnimationFrame Simulation & Canvas Renderer
   useEffect(() => {
     let rafId = 0
     let lastTime = 0
 
-    const damageEnemy = (enemy: Enemy, amount: number, knockbackFrom?: { x: number; y: number }) => {
+    const damageEnemy = (
+      enemy: Enemy,
+      amount: number,
+      knockbackFrom?: { x: number; y: number },
+      options?: { isBurnTick?: boolean; color?: string }
+    ) => {
       if (!enemy.isAlive) return
-      const wasKilled = enemy.takeDamage(amount)
+      const devMult = isDevUserRef.current ? devSettingsRef.current.damageMultiplier : 1
+      const finalDamage = Math.max(1, Math.round(amount * devMult))
+      const wasKilled = enemy.takeDamage(finalDamage)
       playSoundRef.current('hit')
 
       floatingTextsRef.current.push({
         x: enemy.getCenter().x,
         y: enemy.y - 6,
-        text: `${Math.round(amount)}`,
-        color: '#FFFFFF',
+        text: `${Math.round(finalDamage)}`,
+        color: options?.color || (devMult > 1 ? '#FACC15' : '#FFFFFF'),
         timer: 0.45
       })
 
-      if (knockbackFrom) {
+      // Pyrotechnic Specialist: every weapon hit ignites the enemy for scorching burn damage
+      if (
+        !options?.isBurnTick &&
+        !wasKilled &&
+        !enemy.isSpawning &&
+        playerRef.current?.hero?.id === 'hero_06'
+      ) {
+        enemy.applyBurn(
+          computeHeroBurnPerTick(finalDamage),
+          HERO_ABILITY_CONSTANTS.PYRO_BURN_DURATION
+        )
+      }
+
+      if (knockbackFrom && !enemy.isStationaryBoss) {
         const ec = enemy.getCenter()
         const dx = ec.x - knockbackFrom.x
         const dy = ec.y - knockbackFrom.y
@@ -808,6 +1247,28 @@ const GameContainer: React.FC<GameContainerProps> = ({
           )
         }
 
+        // Victory trigger upon defeating the Wave 15 Final Boss!
+        if (enemy.isFinalBoss) {
+          coinsCollectedRef.current += enemy.coinValue
+          setCoins(coinsCollectedRef.current)
+          explosionsRef.current.push({
+            x: coinCenter.x,
+            y: coinCenter.y,
+            radius: 240,
+            timer: 0,
+            duration: 0.65,
+            color: 'rgba(250, 204, 21, 0.7)'
+          })
+          clearedWave15BossRef.current = true
+          if (areaRef.current.id === 'astral_citadel') {
+            playSoundRef.current('levelup')
+            setEngineState('victory_choice')
+          } else {
+            triggerEndGame(true)
+          }
+          return
+        }
+
         // Endless leveling: subtract threshold per level so player can never get stuck at level 10
         let leveled = false
         while (xpRef.current >= getXpForNextLevel(levelRef.current)) {
@@ -826,9 +1287,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
       }
     }
 
-    const damagePlayer = (amount: number, knockbackOrigin?: { x: number; y: number }) => {
+    const damagePlayer = (amount: number, knockbackOrigin?: { x: number; y: number }): boolean => {
       const player = playerRef.current
-      if (!player || !player.isAlive || player.isInvulnerable) return
+      if (!player || !player.isAlive || player.isInvulnerable) return false
+      if (isDevUserRef.current && devSettingsRef.current.godMode) return false
 
       // Check Defensive Matrix / Plasma Barrier cooldown
       const shieldReady = activeUpgradesRef.current.some(
@@ -870,11 +1332,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
               }
             }
           }
-          return
+          return true
         }
       }
 
-      const dmgReduction = equippedBonusesRef.current.damageReduction
+      const heroDr = getHeroDamageReduction(player.hero?.id || 'hero_01')
+      const dmgReduction = Math.min(0.85, equippedBonusesRef.current.damageReduction + heroDr)
       const finalIncomingDmg = Math.max(1, Math.round(amount * (1 - dmgReduction)))
       const killed = player.takeDamage(finalIncomingDmg)
       waveTookDamageRef.current = true
@@ -887,21 +1350,38 @@ const GameContainer: React.FC<GameContainerProps> = ({
         const dx = pc.x - knockbackOrigin.x
         const dy = pc.y - knockbackOrigin.y
         const len = Math.hypot(dx, dy) || 1
-        player.x = Math.max(0, Math.min(ARENA_SIZE - player.width, player.x + (dx / len) * 20))
-        player.y = Math.max(0, Math.min(ARENA_SIZE - player.height, player.y + (dy / len) * 20))
+        const ba = bossArenaRef.current
+        const minX = ba ? ba.left + 16 : 0
+        const maxX = ba ? ba.left + ba.width - player.width - 16 : ARENA_SIZE - player.width
+        const minY = ba ? ba.top + 16 : 0
+        const maxY = ba ? ba.top + ba.height - player.height - 16 : ARENA_SIZE - player.height
+        player.x = Math.max(minX, Math.min(maxX, player.x + (dx / len) * 20))
+        player.y = Math.max(minY, Math.min(maxY, player.y + (dy / len) * 20))
       }
 
       if (killed) {
-        triggerEndGame()
+        triggerEndGame(clearedWave15BossRef.current)
       }
+      return true
     }
 
-    const fireUpgrade = (upg: UpgradesRow, player: Player) => {
-      const pc = player.getCenter()
+    const executeWeaponFire = (
+      upg: UpgradesRow,
+      player: Player,
+      originCenter: { x: number; y: number },
+      damageScale = 1,
+      isCloneCast = false,
+      cloneId?: number
+    ) => {
+      const pc = originCenter
       const aliveEnemies = enemiesRef.current.filter((e) => e.isAlive)
       const lv = upgradeLevelsRef.current[upg.id] || 1
       const isLv5 = lv >= MAX_WEAPON_UPGRADE_LEVEL
-      const weaponDmg = Math.max(1, Math.round(upg.damage * equippedBonusesRef.current.damageMultiplier))
+      const scaledBaseDmg = Math.max(1, Math.round(upg.damage * damageScale))
+      const weaponDmg = Math.max(
+        1,
+        Math.round(scaledBaseDmg * equippedBonusesRef.current.damageMultiplier)
+      )
 
       // Nearest target within 620px
       let nearest: Enemy | null = null
@@ -1154,7 +1634,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
               damage: weaponDmg,
               timer: 0,
               duration: 1.35 + lv * 0.22,
-              hitCooldowns: new Map()
+              hitCooldowns: new Map(),
+              cloneId,
+              originX: pc.x,
+              originY: pc.y,
+              color: isCloneCast ? '#C084FC' : undefined
             })
           }
           playSoundRef.current('shoot')
@@ -1229,7 +1713,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
               damage: weaponDmg,
               timer: 0,
               duration: 1.15 + lv * 0.2,
-              hitCooldowns: new Map()
+              hitCooldowns: new Map(),
+              cloneId,
+              originX: pc.x,
+              originY: pc.y,
+              color: isCloneCast ? '#C084FC' : undefined
             })
           }
           playSoundRef.current('shoot')
@@ -1237,8 +1725,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
         }
         case 'upg_04': {
           // Magnet Pulse - radius 148 -> 176 -> 204 -> 232 -> 260px; Lv 2+ deals EMP pulse damage
-          for (const coin of coinsRef.current) {
-            coin.magnetize(pc)
+          if (!isCloneCast) {
+            for (const coin of coinsRef.current) {
+              coin.magnetize(pc)
+            }
           }
           const radius = 120 + lv * 28
           explosionsRef.current.push({
@@ -1247,10 +1737,14 @@ const GameContainer: React.FC<GameContainerProps> = ({
             radius,
             timer: 0,
             duration: 0.35,
-            color: isLv5 ? 'rgba(255, 215, 0, 0.55)' : 'rgba(255, 215, 0, 0.3)'
+            color: isCloneCast
+              ? 'rgba(192, 132, 252, 0.4)'
+              : isLv5
+                ? 'rgba(255, 215, 0, 0.55)'
+                : 'rgba(255, 215, 0, 0.3)'
           })
           if (lv >= 2) {
-            const pulseDmg = lv * 10
+            const pulseDmg = Math.max(1, Math.round(lv * 10 * damageScale))
             for (const e of aliveEnemies) {
               if (Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y) <= radius + e.width / 2) {
                 damageEnemy(e, pulseDmg, pc)
@@ -1303,13 +1797,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
           for (const item of sorted) {
             const targetPt = item.enemy.getCenter()
             chainPoints.push(targetPt)
-            damageEnemy(item.enemy, upg.damage, pc)
+            damageEnemy(item.enemy, scaledBaseDmg, pc)
           }
           if (chainPoints.length > 1) {
             attackEffectsRef.current.push({
               kind: 'lightning',
               points: chainPoints,
-              color: isLv5 ? '#FFD700' : '#00F0FF',
+              color: isCloneCast ? '#C084FC' : isLv5 ? '#FFD700' : '#00F0FF',
               timer: 0,
               duration: 0.22
             })
@@ -1340,13 +1834,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
               x: strike.x,
               y: strike.y,
               radius: strike.r,
-              color: isLv5 ? '#FFD700' : '#FF0055',
+              color: isCloneCast ? '#C084FC' : isLv5 ? '#FFD700' : '#FF0055',
               timer: 0,
               duration: 0.45
             })
             for (const e of aliveEnemies) {
               if (Math.hypot(e.getCenter().x - strike.x, e.getCenter().y - strike.y) <= strike.r + e.width / 2) {
-                damageEnemy(e, upg.damage, strike)
+                damageEnemy(e, scaledBaseDmg, strike)
               }
             }
           }
@@ -1354,6 +1848,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           return
         }
         case 'upg_09': {
+          if (isCloneCast) return
           // Emergency Nanites (0.6% -> 1.2% -> 1.8% -> 2.4% -> 5% Max HP)
           const healPct = isLv5 ? 0.05 : 0.006 * lv
           player.heal(Math.max(1, player.maxHealth * healPct))
@@ -1366,7 +1861,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
           const baseAngle = Math.atan2(ec.y - pc.y, ec.x - pc.x)
           const streamCount = lv
           const span = (streamCount - 1) * 0.14
-          const plumeDamage = Math.max(4, Math.round(upg.damage * (streamCount === 1 ? 1 : 0.65)))
+          const plumeDamage = Math.max(
+            isCloneCast ? 2 : 4,
+            Math.round(scaledBaseDmg * (streamCount === 1 ? 1 : 0.65))
+          )
           for (let i = 0; i < streamCount; i++) {
             const off = streamCount === 1 ? 0 : -span / 2 + (i / (streamCount - 1)) * span
             const a = baseAngle + off
@@ -1390,25 +1888,33 @@ const GameContainer: React.FC<GameContainerProps> = ({
           return
         }
         case 'upg_12': {
-          // Arc Slash - radius grows 97 -> 119 -> 141 -> 163 -> 185px every level
-          const slashRadius = 75 + lv * 22
+          // Arc Slash - Vanguard Blade gains Muramasa Bloodmoon Slash buff & VFX
+          const heroId = player.hero?.id || 'hero_01'
+          const arcCfg = getArcSlashConfig(scaledBaseDmg, lv, heroId)
+          const slashRadius = arcCfg.radius
           const slashAngle = nearest
             ? Math.atan2(nearest.getCenter().y - pc.y, nearest.getCenter().x - pc.x)
             : timeSurvivedRef.current * 4
           attackEffectsRef.current.push({
-            kind: 'slash',
+            kind: arcCfg.isMuramasa ? 'muramasa_slash' : 'slash',
             x: pc.x,
             y: pc.y,
             angle: slashAngle,
             radius: slashRadius,
-            color: isLv5 ? '#FF0055' : '#00F0FF',
+            color: isCloneCast
+              ? '#C084FC'
+              : arcCfg.isMuramasa
+                ? '#FF0055'
+                : isLv5
+                  ? '#FF0055'
+                  : '#00F0FF',
             timer: 0,
-            duration: 0.24
+            duration: arcCfg.isMuramasa ? 0.3 : 0.24
           })
           for (const e of aliveEnemies) {
             const d = Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y)
             if (d <= slashRadius + e.width / 2) {
-              damageEnemy(e, upg.damage, pc)
+              damageEnemy(e, arcCfg.damage, pc)
             }
           }
           playSoundRef.current('shoot')
@@ -1545,25 +2051,27 @@ const GameContainer: React.FC<GameContainerProps> = ({
           if (targets.length === 0) return
           for (const item of targets) {
             const ec = item.enemy.getCenter()
-            damageEnemy(item.enemy, upg.damage)
+            damageEnemy(item.enemy, scaledBaseDmg)
             attackEffectsRef.current.push({
               kind: 'siphon',
               from: ec,
               to: pc,
-              color: isLv5 ? '#FB7185' : '#F43F5E',
+              color: isCloneCast ? '#C084FC' : isLv5 ? '#FB7185' : '#F43F5E',
               timer: 0,
               duration: 0.3
             })
           }
-          const healAmount = targets.length * (lv >= 4 ? 3 : 2)
-          player.heal(healAmount)
-          floatingTextsRef.current.push({
-            x: pc.x,
-            y: pc.y - 24,
-            text: `+${healAmount} HP`,
-            color: '#FDA4AF',
-            timer: 0.65
-          })
+          if (!isCloneCast) {
+            const healAmount = targets.length * (lv >= 4 ? 3 : 2)
+            player.heal(healAmount)
+            floatingTextsRef.current.push({
+              x: pc.x,
+              y: pc.y - 24,
+              text: `+${healAmount} HP`,
+              color: '#FDA4AF',
+              timer: 0.65
+            })
+          }
           playSoundRef.current('shoot')
           return
         }
@@ -1578,7 +2086,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
               ? [baseAngle - 0.16, baseAngle + 0.16]
               : [baseAngle]
           const zoneRadius = 54 + lv * 18
-          const burnDamage = Math.max(4, Math.round(weaponDmg * (isLv5 ? 0.42 : 0.3 + lv * 0.025)))
+          const burnDamage = Math.max(
+            isCloneCast ? 2 : 4,
+            Math.round(weaponDmg * (isLv5 ? 0.42 : 0.3 + lv * 0.025))
+          )
           const burnDuration = 2.3 + lv * 0.35
 
           for (const a of angles) {
@@ -1620,6 +2131,73 @@ const GameContainer: React.FC<GameContainerProps> = ({
             })
           )
           playSoundRef.current('shoot')
+        }
+      }
+    }
+
+    const applyPostSpawnHeroEffects = (
+      startProjIdx: number,
+      origin: { x: number; y: number },
+      heroId: string,
+      isCloneCast: boolean
+    ) => {
+      const projectiles = playerProjectilesRef.current
+      if (startProjIdx >= projectiles.length) return
+
+      let lockPos: { x: number; y: number } | null = null
+      if (shouldApplyHomingForHero(heroId)) {
+        let bestDist = 720
+        for (const e of enemiesRef.current) {
+          if (!e.isAlive || e.isSpawning) continue
+          const ec = e.getCenter()
+          const d = Math.hypot(ec.x - origin.x, ec.y - origin.y)
+          if (d < bestDist) {
+            bestDist = d
+            lockPos = ec
+          }
+        }
+      }
+
+      for (let idx = startProjIdx; idx < projectiles.length; idx++) {
+        const proj = projectiles[idx]
+        if (shouldApplyHomingForHero(heroId)) {
+          proj.homingStrength = Math.max(
+            proj.homingStrength,
+            HERO_ABILITY_CONSTANTS.RANGER_HOMING_STRENGTH
+          )
+          if (!proj.homingTarget && lockPos) {
+            proj.homingTarget = lockPos
+          }
+        }
+        if (isCloneCast) {
+          proj.color = '#C084FC'
+          proj.baseColor = '#C084FC'
+        }
+      }
+    }
+
+    const fireUpgrade = (upg: UpgradesRow, player: Player) => {
+      const heroId = player.hero?.id || 'hero_01'
+      const playerCenter = player.getCenter()
+      const startProjIdx = playerProjectilesRef.current.length
+      executeWeaponFire(upg, player, playerCenter, 1, false)
+      applyPostSpawnHeroEffects(startProjIdx, playerCenter, heroId, false)
+
+      // Chrono Operative: active 3s clones copy every attack at 50% damage
+      if (heroId === 'hero_04' && chronoClonesRef.current.length > 0) {
+        for (const clone of chronoClonesRef.current) {
+          if (clone.timer >= clone.duration) continue
+          const cloneProjIdx = playerProjectilesRef.current.length
+          const cloneCenter = { x: clone.x, y: clone.y }
+          executeWeaponFire(
+            upg,
+            player,
+            cloneCenter,
+            HERO_ABILITY_CONSTANTS.CHRONO_CLONE_DAMAGE_RATIO,
+            true,
+            clone.id
+          )
+          applyPostSpawnHeroEffects(cloneProjIdx, cloneCenter, heroId, true)
         }
       }
     }
@@ -1681,52 +2259,109 @@ const GameContainer: React.FC<GameContainerProps> = ({
             moveY /= mag
           }
           player.update({ x: moveX, y: moveY }, deltaTime)
+          if (bossArenaRef.current) {
+            const ba = bossArenaRef.current
+            player.x = Math.max(ba.left + 16, Math.min(ba.left + ba.width - player.width - 16, player.x))
+            player.y = Math.max(ba.top + 16, Math.min(ba.top + ba.height - player.height - 16, player.y))
+          }
           const updatedCenter = player.getCenter()
           playerTrailRef.current.push({ x: updatedCenter.x, y: updatedCenter.y })
           if (playerTrailRef.current.length > 48) {
             playerTrailRef.current.shift()
           }
-          camera.update(updatedCenter.x, updatedCenter.y)
+          if (bossArenaRef.current) {
+            const ba = bossArenaRef.current
+            camera.update(ba.left + ba.width / 2, ba.top + ba.height / 2)
+          } else {
+            camera.update(updatedCenter.x, updatedCenter.y)
+          }
 
-          // 2. Wave + Breather State Machine (30s Active / 3s Breather)
+          // 2. Wave + Breather State Machine (30s Active / 3s Breather; Wave 15 Boss solo showdown; Endless 16+ in Area 2)
           if (isBreatherRef.current) {
             breatherElapsedRef.current += deltaTime
             if (breatherElapsedRef.current >= WAVE_CONFIG.BREATHER_DURATION_SECONDS) {
               isBreatherRef.current = false
               breatherElapsedRef.current = 0
-              waveRef.current += 1
+              if (waveRef.current < WAVE_CONFIG.MAX_WAVE || endlessModeRef.current) {
+                waveRef.current += 1
+              }
               waveElapsedRef.current = 0
               rangedSpawnedInWaveRef.current = 0
               waveTookDamageRef.current = false
               setIsBreather(false)
               setWave(waveRef.current)
+              setDevRunStatus({ currentWave: waveRef.current })
               playSoundRef.current('wave')
 
-              // Wave-start swarm reinforcement surge scaled per wave (melee first so ranged don't stack)
-              const waveCfg = getWaveSpawnConfig(waveRef.current, timeSurvivedRef.current)
-              for (let i = 0; i < waveCfg.waveBurst && enemiesRef.current.length < waveCfg.maxActiveEnemies; i++) {
-                spawnEnemyForWave(waveRef.current, false, false)
-              }
+              if (waveRef.current === WAVE_CONFIG.MAX_WAVE && !endlessModeRef.current) {
+                // Disable regular spawns & remove leftover regular adds for pure Wave 15 Final Boss duel
+                enemiesRef.current = enemiesRef.current.filter((e) => e.isBoss && e.isAlive)
 
-              // Boss alert on every 5th wave
-              if (waveRef.current % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0) {
-                spawnEnemyForWave(waveRef.current, true)
-                bossSpawnedWaveRef.current = waveRef.current
-                toast.warning(`Wave ${waveRef.current} BOSS INCOMING: Watch for red telegraph indicators!`)
+                // Lock visible Boss Arena around current screen and spawn stationary upper-center Wave 15 Final Boss
+                if (!bossArenaRef.current) {
+                  const aw = canvas.width
+                  const ah = canvas.height
+                  const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, updatedCenter.x - aw / 2))
+                  const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, updatedCenter.y - ah / 2))
+                  bossArenaRef.current = { left, top, width: aw, height: ah }
+                  // Ensure player is not spawned overlapping the upper-center boss perch
+                  const bossAnchorX = left + aw / 2
+                  const bossAnchorY = top + 195
+                  if (Math.hypot(updatedCenter.x - bossAnchorX, updatedCenter.y - bossAnchorY) < 130) {
+                    player.y = Math.min(top + ah - player.height - 40, top + 360)
+                  }
+                }
+                if (!finalBossSpawnedRef.current) {
+                  finalBossSpawnedRef.current = true
+                  bossSpawnedWaveRef.current = WAVE_CONFIG.MAX_WAVE
+                  spawnEnemyForWave(WAVE_CONFIG.MAX_WAVE, true)
+                  toast.warning(
+                    areaRef.current.id === 'astral_citadel'
+                      ? 'FINAL WAVE 15: Dodge closing side lasers, tracking strikes & bullet hell!'
+                      : 'FINAL WAVE 15: Dodge closing side lasers, tracking strikes & bullet hell!'
+                  )
+                }
+              } else {
+                // Wave-start swarm reinforcement surge scaled per wave (melee first so ranged don't stack)
+                if (shouldSpawnRegularEnemiesInWave(waveRef.current, endlessModeRef.current)) {
+                  const waveCfg = getWaveSpawnConfig(waveRef.current, timeSurvivedRef.current)
+                  for (
+                    let i = 0;
+                    i < waveCfg.waveBurst && enemiesRef.current.length < waveCfg.maxActiveEnemies;
+                    i++
+                  ) {
+                    spawnEnemyForWave(waveRef.current, false, false)
+                  }
+                }
+
+                // Boss alert every 5 waves (Wave 5, 10, and Endless Wave 20, 25, 30...)
+                if (waveRef.current % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0) {
+                  spawnEnemyForWave(waveRef.current, true)
+                  bossSpawnedWaveRef.current = waveRef.current
+                  toast.warning(`Wave ${waveRef.current} BOSS INCOMING: Watch for red telegraph indicators!`)
+                }
               }
             }
           } else {
             waveElapsedRef.current += deltaTime
 
-            // Continuous swarm spawning scaled strongly per wave
-            const waveCfg = getWaveSpawnConfig(waveRef.current, timeSurvivedRef.current)
-            spawnAccumulatorRef.current += waveCfg.spawnRate * deltaTime
-            while (spawnAccumulatorRef.current >= 1 && enemiesRef.current.length < waveCfg.maxActiveEnemies) {
-              spawnAccumulatorRef.current -= 1
-              spawnEnemyForWave(waveRef.current, false)
+            // Continuous swarm spawning (completely disabled during Wave 15 Final Boss showdown)
+            if (shouldSpawnRegularEnemiesInWave(waveRef.current, endlessModeRef.current)) {
+              const waveCfg = getWaveSpawnConfig(waveRef.current, timeSurvivedRef.current)
+              spawnAccumulatorRef.current += waveCfg.spawnRate * deltaTime
+              while (
+                spawnAccumulatorRef.current >= 1 &&
+                enemiesRef.current.length < waveCfg.maxActiveEnemies
+              ) {
+                spawnAccumulatorRef.current -= 1
+                spawnEnemyForWave(waveRef.current, false)
+              }
             }
 
-            if (waveElapsedRef.current >= WAVE_CONFIG.WAVE_DURATION_SECONDS) {
+            if (
+              (waveRef.current < WAVE_CONFIG.MAX_WAVE || endlessModeRef.current) &&
+              waveElapsedRef.current >= WAVE_CONFIG.WAVE_DURATION_SECONDS
+            ) {
               isBreatherRef.current = true
               breatherElapsedRef.current = 0
               setIsBreather(true)
@@ -1981,15 +2616,78 @@ const GameContainer: React.FC<GameContainerProps> = ({
               }
             }
 
-            // Boss big telegraphed attack collision check at trigger instant
+            // Mini-boss dodgeable AoE projectile detonation hits
+            if (enemy.aoeProjectiles.length > 0) {
+              for (const aoe of enemy.aoeProjectiles) {
+                if (aoe.hasDetonated && !aoe.hasDamagedPlayer) {
+                  aoe.hasDamagedPlayer = true
+                  if (checkEnemyAoeHit(aoe, playerCircle)) {
+                    damagePlayer(aoe.damage, { x: aoe.targetX, y: aoe.targetY })
+                  }
+                }
+              }
+            }
+
+            // Boss big telegraphed attack warning sound + active collision checks
             if (enemy.isBoss && enemy.telegraphs.length > 0) {
               for (const telegraph of enemy.telegraphs) {
-                if (telegraph.hasTriggered && !telegraph.hasDamagedPlayer) {
+                const isMajorWave15Warning =
+                  telegraph.kind === 'closing_side_lasers' ||
+                  telegraph.kind === 'pursuit_beam' ||
+                  telegraph.kind === 'bullet_hell' ||
+                  telegraph.kind === 'tracking_strikes' ||
+                  telegraph.kind === 'half_arena'
+
+                if (
+                  isMajorWave15Warning &&
+                  !telegraph.hasTriggered &&
+                  !announcedHalfTelegraphIdsRef.current.has(telegraph.id)
+                ) {
+                  announcedHalfTelegraphIdsRef.current.add(telegraph.id)
+                  playSoundRef.current('wave')
+                }
+
+                if (!telegraph.hasTriggered) continue
+
+                if (telegraph.kind === 'tracking_strikes' && telegraph.trackingBlasts) {
+                  // Evaluate each sequential target-lock blast independently when it detonates
+                  for (const blast of telegraph.trackingBlasts) {
+                    if (blast.hasDetonated && !blast.hasDamagedPlayer) {
+                      blast.hasDamagedPlayer = true
+                      if (
+                        Math.hypot(playerCircle.x - blast.x, playerCircle.y - blast.y) <=
+                        blast.radius + playerCircle.radius * 0.65
+                      ) {
+                        damagePlayer(telegraph.damage, { x: blast.x, y: blast.y })
+                      }
+                    }
+                  }
+                } else if (
+                  telegraph.kind === 'closing_side_lasers' ||
+                  telegraph.kind === 'pursuit_beam' ||
+                  telegraph.kind === 'mega_laser'
+                ) {
+                  // Sweeping/active beams stay lethal across frames and only lock out after actually landing
+                  if (!telegraph.hasDamagedPlayer && checkBossTelegraphHit(telegraph, playerCircle)) {
+                    const hitOrigin =
+                      telegraph.kind === 'closing_side_lasers' && telegraph.bounds
+                        ? {
+                            x: telegraph.bounds.left + telegraph.bounds.width / 2,
+                            y: playerCircle.y
+                          }
+                        : { x: telegraph.x, y: telegraph.y }
+                    if (damagePlayer(telegraph.damage, hitOrigin)) {
+                      telegraph.hasDamagedPlayer = true
+                      telegraph.hitCooldown = 0
+                    }
+                  }
+                } else if (!telegraph.hasDamagedPlayer) {
                   if (checkBossTelegraphHit(telegraph, playerCircle)) {
-                    telegraph.hasDamagedPlayer = true
-                    damagePlayer(telegraph.damage, { x: telegraph.x, y: telegraph.y })
+                    if (damagePlayer(telegraph.damage, { x: telegraph.x, y: telegraph.y })) {
+                      telegraph.hasDamagedPlayer = true
+                    }
                   } else {
-                    // Mark evaluated so the player isn't re-checked across remaining visual flash frames
+                    // Instant burst telegraphs evaluate once at trigger time
                     telegraph.hasDamagedPlayer = true
                   }
                 }
@@ -2111,14 +2809,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
         }
 
         // --- RENDER FRAME ---
-        ctx.fillStyle = '#0B0F19'
+        const currentArea = areaRef.current
+        ctx.fillStyle = currentArea.floorColor
         ctx.fillRect(0, 0, canvas.width, canvas.height)
 
         // Tactical Grid
         const gridSize = 64
         const startX = -(camera.x % gridSize)
         const startY = -(camera.y % gridSize)
-        ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)'
+        ctx.strokeStyle = currentArea.gridColor
         ctx.lineWidth = 1
         ctx.beginPath()
         for (let x = startX; x < canvas.width; x += gridSize) {
@@ -2131,11 +2830,38 @@ const GameContainer: React.FC<GameContainerProps> = ({
         }
         ctx.stroke()
 
+        // Area 2 Emerald Crystal Floor Nodes for distinctive landmark visuals
+        if (currentArea.id === 'astral_citadel') {
+          ctx.fillStyle = 'rgba(250, 204, 21, 0.14)'
+          for (let x = startX; x < canvas.width; x += gridSize * 2) {
+            for (let y = startY; y < canvas.height; y += gridSize * 2) {
+              ctx.beginPath()
+              ctx.moveTo(x, y - 4)
+              ctx.lineTo(x + 4, y)
+              ctx.lineTo(x, y + 4)
+              ctx.lineTo(x - 4, y)
+              ctx.closePath()
+              ctx.fill()
+            }
+          }
+        }
+
         // Arena Boundary
         const topLeft = camera.worldToScreen(0, 0)
-        ctx.strokeStyle = 'rgba(255, 0, 85, 0.5)'
+        ctx.strokeStyle = currentArea.borderColor
         ctx.lineWidth = 3
         ctx.strokeRect(topLeft.x, topLeft.y, ARENA_SIZE, ARENA_SIZE)
+
+        // Locked Wave 15 Final Boss Arena Containment Border
+        if (bossArenaRef.current) {
+          const ba = bossArenaRef.current
+          const baTopLeft = camera.worldToScreen(ba.left, ba.top)
+          ctx.save()
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.72)'
+          ctx.lineWidth = 4
+          ctx.strokeRect(baTopLeft.x + 2, baTopLeft.y + 2, ba.width - 4, ba.height - 4)
+          ctx.restore()
+        }
 
         // Cryo Aura Ring (radius grows from 133px at Lv 1 to 245px at Lv 5)
         const activeCryoLv = upgradeLevelsRef.current['upg_08'] || 0
@@ -2214,8 +2940,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
           ctx.restore()
         }
 
-        // Boss Floor Telegraph Indicators (rendered under characters so dodging stays clear)
+        // Boss & Mini-Boss Floor Telegraph Indicators (rendered under characters so dodging stays clear)
         for (const enemy of enemiesRef.current) {
+          if (enemy.aoeProjectiles.length > 0) {
+            enemy.drawAoeIndicators(ctx, camera)
+          }
           if (enemy.isBoss && enemy.telegraphs.length > 0) {
             enemy.drawTelegraphs(ctx, camera)
           }
@@ -2424,10 +3153,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
         // Active Boss Health Bar Banner
         const activeBoss = enemiesRef.current.find((e) => e.isBoss && e.isAlive)
         if (activeBoss) {
-          const barW = Math.min(420, canvas.width - 64)
+          const barW = Math.min(440, canvas.width - 64)
           const barH = 14
           const bx = (canvas.width - barW) / 2
-          const by = 82
+          const by = 122
           const hpPct = Math.max(0, Math.min(1, activeBoss.health / activeBoss.maxHealth))
           ctx.save()
           ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'
@@ -2582,6 +3311,45 @@ const GameContainer: React.FC<GameContainerProps> = ({
     }
   }, [setEngineState])
 
+  const handleContinueEndless = useCallback(() => {
+    const player = playerRef.current
+    endlessModeRef.current = true
+    setIsEndlessMode(true)
+    bossArenaRef.current = null
+    enemiesRef.current = []
+    waveRef.current = WAVE_CONFIG.MAX_WAVE + 1
+    waveElapsedRef.current = 0
+    breatherElapsedRef.current = 0
+    isBreatherRef.current = false
+    rangedSpawnedInWaveRef.current = 0
+    spawnAccumulatorRef.current = 0
+    waveTookDamageRef.current = false
+    setWave(waveRef.current)
+    setDevRunStatus({ currentWave: waveRef.current })
+    setIsBreather(false)
+    setWaveTimeRemaining(WAVE_CONFIG.WAVE_DURATION_SECONDS)
+
+    if (player) {
+      player.heal(player.maxHealth)
+      player.isInvulnerable = true
+      player.invulnerabilityTimer = 2.0
+      setHealth(player.health)
+    }
+
+    const waveCfg = getWaveSpawnConfig(waveRef.current, timeSurvivedRef.current)
+    for (
+      let i = 0;
+      i < waveCfg.waveBurst && enemiesRef.current.length < waveCfg.maxActiveEnemies;
+      i++
+    ) {
+      spawnEnemyForWave(waveRef.current, false, false)
+    }
+
+    setEngineState('playing')
+    playSoundRef.current('wave')
+    toast.success('ENDLESS MODE ENGAGED! Wave 16+ unlocked — bosses arrive every 5 waves!')
+  }, [setEngineState, spawnEnemyForWave, toast])
+
   const setTouchVector = (x: number, y: number) => {
     touchDirRef.current = { x, y }
   }
@@ -2624,7 +3392,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
           enemiesDefeated={enemiesDefeated}
           waveTimeRemaining={waveTimeRemaining}
           isBreather={isBreather}
+          isEndless={isEndlessMode}
           heroName={heroName}
+          areaName={activeArea.name}
           activeUpgrades={activeUpgradeNames}
           shieldActive={shieldActive}
           onPause={handlePauseToggle}
@@ -2708,10 +3478,61 @@ const GameContainer: React.FC<GameContainerProps> = ({
         />
       )}
 
+      {gameState === 'victory_choice' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/85 backdrop-blur-md z-50 p-4">
+          <div className="bg-slate-900 border-2 border-emerald-400 rounded-2xl p-7 max-w-lg w-full text-center shadow-[0_0_50px_rgba(52,211,153,0.28)]">
+            <div className="text-xs font-mono tracking-widest uppercase text-emerald-300 mb-2">
+              Astral Citadel • Wave 15 Cleared
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-yellow-300 mb-3">
+              SOLAR ARCHON DEFEATED!
+            </h2>
+            <p className="text-slate-200 text-sm sm:text-base mb-6">
+              You conquered the Astral Citadel Final Boss! Extract now to lock in your Victory, or
+              push into <span className="text-emerald-300 font-bold">Endless Mode</span> with
+              full HP, unlocked arena walls, and bosses every 5 waves.
+            </p>
+
+            <div className="grid grid-cols-3 gap-3 mb-6 bg-slate-800/80 rounded-xl p-3 border border-slate-700">
+              <div>
+                <div className="text-[11px] text-slate-400">TIME</div>
+                <div className="text-white font-bold font-mono">{timeSurvived}s</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-400">COINS</div>
+                <div className="text-yellow-400 font-bold font-mono">{coins}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-400">KILLS</div>
+                <div className="text-emerald-400 font-bold font-mono">{enemiesDefeated}</div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={handleContinueEndless}
+                className="w-full px-6 py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold text-base sm:text-lg rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+              >
+                GO ON FOREVER (ENDLESS WAVE 16+)
+              </button>
+              <button
+                onClick={() => triggerEndGame(true)}
+                className="w-full px-6 py-3.5 bg-slate-700 hover:bg-slate-600 text-white font-bold text-base rounded-xl transition-colors border border-slate-500"
+              >
+                CLAIM VICTORY & EXTRACT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {gameState === 'gameover' && (
         <GameOverScreen
           score={finalScore}
           stats={finalStats}
+          isVictory={isVictory}
+          isEndless={isEndlessMode}
+          waveReached={wave}
           onRestart={initRun}
           onQuit={() => {
             flushBankedCoins()

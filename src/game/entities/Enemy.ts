@@ -9,7 +9,23 @@ import { GAME_CONFIG } from '../../config/gameConstants'
 import { EnemiesRow } from '../../types/database'
 import { Player } from './Player'
 
-export type EnemyType = 'Swarm' | 'Fast Flanker' | 'Ranged Sniper' | 'Mini-Boss' | 'Boss'
+export type EnemyType =
+  | 'Swarm'
+  | 'Heavy Swarm'
+  | 'Fast Flanker'
+  | 'Ranged Sniper'
+  | 'Ranged Caster'
+  | 'Mini-Boss'
+  | 'Boss'
+
+export type HalfArenaDirection = 'left' | 'right' | 'top' | 'bottom'
+
+export interface BossArenaBounds {
+  left: number
+  top: number
+  width: number
+  height: number
+}
 
 export interface EnemyOptions {
   x?: number
@@ -24,6 +40,10 @@ export interface EnemyOptions {
   color?: string
   coinValue?: number
   isBoss?: boolean
+  isStationaryBoss?: boolean
+  isFinalBoss?: boolean
+  anchorPos?: Vector2 | null
+  arenaBounds?: BossArenaBounds | null
 }
 
 export interface EnemyProjectile {
@@ -37,9 +57,52 @@ export interface EnemyProjectile {
   color: string
   lifetime: number
   maxLifetime: number
+  homingTurnRate?: number
+  homingRemaining?: number
 }
 
-export type BossAttackKind = 'orbital_slam' | 'mega_laser' | 'bombardment_ring'
+export interface EnemyAoeProjectile {
+  id: string
+  startX: number
+  startY: number
+  targetX: number
+  targetY: number
+  currentX: number
+  currentY: number
+  arcOffsetY: number
+  radius: number
+  elapsed: number
+  flightDuration: number
+  activeTimer: number
+  activeDuration: number
+  damage: number
+  color: string
+  hasDetonated: boolean
+  hasDamagedPlayer: boolean
+}
+
+export type ClosingSideLaserMode = 'left' | 'right' | 'pincer'
+
+export type BossAttackKind =
+  | 'orbital_slam'
+  | 'mega_laser'
+  | 'bombardment_ring'
+  | 'half_arena'
+  | 'closing_side_lasers'
+  | 'tracking_strikes'
+  | 'pursuit_beam'
+  | 'bullet_hell'
+
+export interface TrackingBlastNode {
+  x: number
+  y: number
+  radius: number
+  elapsed: number
+  windup: number
+  active: number
+  hasDetonated: boolean
+  hasDamagedPlayer: boolean
+}
 
 export interface BossTelegraphAttack {
   id: string
@@ -49,9 +112,22 @@ export interface BossTelegraphAttack {
   endX?: number
   endY?: number
   angle?: number
+  turnRate?: number
   radius: number
   length?: number
+  halfDirection?: HalfArenaDirection
+  sideMode?: ClosingSideLaserMode
+  bounds?: BossArenaBounds
+  closingReachRatio?: number
+  zoneRect?: { x: number; y: number; width: number; height: number }
+  safeRect?: { x: number; y: number; width: number; height: number }
   subTargets?: Array<{ x: number; y: number; radius: number }>
+  trackingBlasts?: TrackingBlastNode[]
+  spawnTimer?: number
+  spawnsDone?: number
+  pulseTimer?: number
+  pulseCount?: number
+  hitCooldown?: number
   chargeTimer: number
   chargeDuration: number
   activeTimer: number
@@ -92,12 +168,18 @@ export class Enemy {
   
   /** Enemy data */
   enemyData: EnemiesRow | null
+  enemyId: string = ''
   type: EnemyType = 'Swarm'
   
   /** State */
   isAlive: boolean = true
   isActive: boolean = true
+  isMiniBoss: boolean = false
   isBoss: boolean = false
+  isStationaryBoss: boolean = false
+  isFinalBoss: boolean = false
+  anchorPos: Vector2 | null = null
+  arenaBounds: BossArenaBounds | null = null
   
   /** Target */
   target: Player | null = null
@@ -118,6 +200,13 @@ export class Enemy {
   shootCooldown: number = 0
   shootCooldownMax: number = 2
 
+  /** Dodgeable AoE Mortar Projectiles (used by Area 2 Mini-Boss) */
+  launchesAoeProjectiles: boolean = false
+  aoeProjectiles: EnemyAoeProjectile[] = []
+  aoeCooldown: number = 1.0
+  aoeCooldownMax: number = 2.6
+  private aoeCounter: number = 0
+
   /** Boss telegraphed big attacks */
   telegraphs: BossTelegraphAttack[] = []
   specialCooldown: number = 2.0
@@ -125,6 +214,8 @@ export class Enemy {
   bossTier: number = 1
   bossTitle: string = 'AEGIS COMMANDER'
   private specialAttackCounter: number = 0
+  private halfDirectionIndex: number = 0
+  private sideLaserModeIndex: number = 0
   
   /** Spawning & animation */
   spawnTime: number = 0
@@ -137,6 +228,11 @@ export class Enemy {
   private facingAngle: number = 0
   private hitFlashTimer: number = 0
   private attackPatternIndex: number = 0
+
+  /** Burn DoT status (applied by Pyrotechnic Specialist or fire weapons) */
+  burnTimer: number = 0
+  burnTickTimer: number = 0
+  burnDamagePerTick: number = 0
   
   /** Death animation */
   isDying: boolean = false
@@ -158,10 +254,15 @@ export class Enemy {
     this.coinValue = options.coinValue || 1
     this.enemyData = options.enemyData || null
     this.target = options.target || null
-    this.isBoss = options.isBoss || false
+    this.isBoss = options.isBoss || options.isStationaryBoss || options.isFinalBoss || false
+    this.isStationaryBoss = options.isStationaryBoss || false
+    this.isFinalBoss = options.isFinalBoss || false
+    this.anchorPos = options.anchorPos ? { ...options.anchorPos } : null
+    this.arenaBounds = options.arenaBounds ? { ...options.arenaBounds } : null
     
     // Apply enemy data if provided
     if (this.enemyData) {
+      this.enemyId = this.enemyData.id
       this.maxHealth = this.enemyData.hp
       this.health = this.maxHealth
       this.baseSpeed = this.enemyData.speed * GAME_CONFIG.BASE_PLAYER_SPEED
@@ -174,34 +275,116 @@ export class Enemy {
       
       // Special behaviors based on type
       switch (this.type) {
+        case 'Heavy Swarm':
+          this.color = '#34D399' // Armored sapphirestone emerald
+          this.baseColor = '#34D399'
+          this.width = 36
+          this.height = 36
+          this.movementPattern = 'chase'
+          this.damage = Math.max(12, Math.round(this.enemyData.hp * 0.18))
+          break
         case 'Fast Flanker':
-          this.color = '#FFD700' // Hazard gold
-          this.baseColor = '#FFD700'
+          this.color = this.enemyId === 'ene_a2_02' ? '#2DD4BF' : '#FFD700'
+          this.baseColor = this.color
+          if (this.enemyId === 'ene_a2_02') {
+            this.width = 24
+            this.height = 24
+          }
           this.movementPattern = 'zigzag'
-          this.zigzagAmplitude = 80
-          this.zigzagFrequency = 3
+          this.zigzagAmplitude = this.enemyId === 'ene_a2_02' ? 68 : 80
+          this.zigzagFrequency = this.enemyId === 'ene_a2_02' ? 3.5 : 3
           break
         case 'Ranged Sniper':
-          this.color = '#00F0FF' // Cyan
-          this.baseColor = '#00F0FF'
+          this.color = this.enemyId === 'ene_a2_03' ? '#34D399' : '#00F0FF'
+          this.baseColor = this.color
           this.movementPattern = 'flee'
           this.canShoot = true
-          this.shootCooldownMax = 2.0
-          this.attackRange = 300
+          this.shootCooldownMax = this.enemyId === 'ene_a2_03' ? 1.75 : 2.0
+          this.attackRange = this.enemyId === 'ene_a2_03' ? 330 : 300
+          this.zigzagDirection = Math.random() < 0.5 ? 1 : -1
+          break
+        case 'Ranged Caster':
+          this.color = '#E879F9' // Violet-gold Astral Arcanist
+          this.baseColor = '#E879F9'
+          this.width = 32
+          this.height = 32
+          this.movementPattern = 'flee'
+          this.canShoot = true
+          this.shootCooldownMax = 2.25
+          this.attackRange = 350
           this.zigzagDirection = Math.random() < 0.5 ? 1 : -1
           break
         case 'Mini-Boss':
         case 'Boss':
-          this.isBoss = true
-          this.color = '#FFD700' // Hazard gold for boss
-          this.baseColor = '#FFD700'
-          this.width = 68
-          this.height = 68
-          this.canShoot = true
-          this.shootCooldownMax = 1.5
-          this.attackRange = 520
-          this.specialCooldown = 1.6
-          this.specialCooldownMax = 3.6
+          if (this.enemyId === 'ene_a2_05') {
+            this.isMiniBoss = true
+            this.isBoss = Boolean(options.isBoss)
+            this.launchesAoeProjectiles = true
+            this.color = '#F59E0B'
+            this.baseColor = '#F59E0B'
+            this.width = this.isBoss ? 72 : 56
+            this.height = this.isBoss ? 72 : 56
+            this.movementPattern = 'chase'
+            this.damage = Math.max(16, Math.round(this.enemyData.hp * 0.08))
+            this.attackRange = 540
+            this.aoeCooldown = 0.9
+            this.aoeCooldownMax = this.isBoss ? 2.1 : 2.6
+            this.canShoot = this.isBoss
+            this.shootCooldownMax = 2.0
+            this.specialCooldown = 2.0
+            this.specialCooldownMax = 4.2
+          } else if (this.enemyId === 'boss_a2_05') {
+            this.isBoss = true
+            this.color = '#10B981' // Emerald Prism Monarch
+            this.baseColor = '#10B981'
+            this.width = 70
+            this.height = 70
+            this.canShoot = true
+            this.shootCooldownMax = 1.45
+            this.attackRange = 540
+            this.specialCooldown = 1.5
+            this.specialCooldownMax = 3.4
+          } else if (this.enemyId === 'boss_a2_10') {
+            this.isBoss = true
+            this.launchesAoeProjectiles = true
+            this.color = '#38BDF8' // Astral Vortex Colossus
+            this.baseColor = '#38BDF8'
+            this.width = 74
+            this.height = 74
+            this.canShoot = true
+            this.shootCooldownMax = 1.35
+            this.attackRange = 560
+            this.aoeCooldown = 1.0
+            this.aoeCooldownMax = 2.4
+            this.specialCooldown = 1.4
+            this.specialCooldownMax = 3.2
+          } else if (this.enemyId === 'boss_a2_15') {
+            this.isBoss = true
+            this.launchesAoeProjectiles = true
+            this.color = '#FACC15' // Solar Archon Seraph
+            this.baseColor = '#FACC15'
+            this.width = 92
+            this.height = 92
+            this.damage = 32
+            this.canShoot = true
+            this.shootCooldownMax = 1.5
+            this.attackRange = 1600
+            this.aoeCooldown = 1.1
+            this.aoeCooldownMax = 2.3
+            this.specialCooldown = 1.5
+            this.specialCooldownMax = 3.4
+          } else {
+            this.isBoss = true
+            this.color = '#FFD700' // Hazard gold for boss
+            this.baseColor = '#FFD700'
+            this.width = 68
+            this.height = 68
+            this.canShoot = true
+            this.shootCooldownMax = 1.5
+            this.attackRange = 520
+            this.specialCooldown = 1.6
+            this.specialCooldownMax = 3.6
+          }
           break
         default:
           this.color = '#FF0055' // Alert red for swarm
@@ -225,6 +408,26 @@ export class Enemy {
       this.attackRange = 520
       this.specialCooldown = 1.6
       this.specialCooldownMax = 3.6
+    }
+
+    // Wave 15 Stationary Upper-Center Boss adjustments
+    if (this.isStationaryBoss) {
+      this.isBoss = true
+      this.type = 'Boss'
+      this.width = 92
+      this.height = 92
+      this.baseSpeed = 0
+      this.speed = 0
+      this.velocity = Vector2.zero()
+      this.canShoot = true
+      this.shootCooldownMax = 1.65
+      this.attackRange = 1600
+      this.specialCooldown = 1.2
+      this.specialCooldownMax = 3.4
+      if (this.anchorPos) {
+        this.x = this.anchorPos.x - this.width / 2
+        this.y = this.anchorPos.y - this.height / 2
+      }
     }
   }
 
@@ -267,20 +470,28 @@ export class Enemy {
       this.shootCooldown -= deltaTime
     }
     
-    // Movement pattern
-    switch (this.movementPattern) {
-      case 'chase':
-        this.updateChase(deltaTime)
-        break
-      case 'zigzag':
-        this.updateZigzag(deltaTime)
-        break
-      case 'flee':
-        this.updateFlee(deltaTime)
-        break
-      case 'orbit':
-        this.updateOrbit(deltaTime)
-        break
+    // Movement pattern (stationary Wave 15 boss stays anchored in upper center)
+    if (this.isStationaryBoss) {
+      this.velocity = Vector2.zero()
+      if (this.anchorPos) {
+        this.x = this.anchorPos.x - this.width / 2
+        this.y = this.anchorPos.y - this.height / 2 + Math.sin(this.animTime * 2.2) * 3
+      }
+    } else {
+      switch (this.movementPattern) {
+        case 'chase':
+          this.updateChase(deltaTime)
+          break
+        case 'zigzag':
+          this.updateZigzag(deltaTime)
+          break
+        case 'flee':
+          this.updateFlee(deltaTime)
+          break
+        case 'orbit':
+          this.updateOrbit(deltaTime)
+          break
+      }
     }
 
     if (this.target) {
@@ -292,8 +503,10 @@ export class Enemy {
     }
     
     // Apply velocity with cryo slow multiplier
-    this.x += this.velocity.x * this.slowMultiplier * deltaTime
-    this.y += this.velocity.y * this.slowMultiplier * deltaTime
+    if (!this.isStationaryBoss) {
+      this.x += this.velocity.x * this.slowMultiplier * deltaTime
+      this.y += this.velocity.y * this.slowMultiplier * deltaTime
+    }
     this.slowMultiplier = 1.0
     
     // Range-based shooting
@@ -309,17 +522,52 @@ export class Enemy {
       }
     }
 
+    // Dodgeable AoE projectile launcher (Area 2 slow tanky mini-boss)
+    if (this.launchesAoeProjectiles) {
+      this.updateAoeProjectiles(deltaTime)
+      if (this.aoeCooldown > 0) {
+        this.aoeCooldown -= deltaTime
+      }
+      if (this.aoeCooldown <= 0 && this.target && this.target.isAlive) {
+        const distToTarget = Vector2.distance(this.getCenter(), this.target.getCenter())
+        if (distToTarget <= this.attackRange) {
+          this.launchAoeProjectile()
+          if (this.isBoss) {
+            const tc = this.target.getCenter()
+            this.launchAoeProjectile({
+              x: tc.x + (Math.random() < 0.5 ? -105 : 105),
+              y: tc.y + (Math.random() < 0.5 ? -75 : 75)
+            })
+          }
+          this.aoeCooldown = this.aoeCooldownMax
+        }
+      }
+    }
+
     // Boss big telegraphed dodgeable attacks
     if (this.isBoss) {
       this.updateTelegraphs(deltaTime)
       if (this.specialCooldown > 0) {
         this.specialCooldown -= deltaTime
       }
-      if (this.specialCooldown <= 0 && this.target && this.target.isAlive) {
+      const hasPendingMajorPattern =
+        this.isStationaryBoss &&
+        this.telegraphs.some(
+          (t) =>
+            !t.hasTriggered ||
+            t.kind === 'closing_side_lasers' ||
+            t.kind === 'bullet_hell' ||
+            t.kind === 'tracking_strikes' ||
+            t.kind === 'pursuit_beam'
+        )
+      if (this.specialCooldown <= 0 && !hasPendingMajorPattern && this.target && this.target.isAlive) {
         const distToTarget = Vector2.distance(this.getCenter(), this.target.getCenter())
-        if (distToTarget <= 560) {
+        const triggerRange = this.isStationaryBoss ? 1800 : 560
+        if (distToTarget <= triggerRange) {
           this.spawnTelegraphedAttack()
-          this.specialCooldown = Math.max(2.6, this.specialCooldownMax - (this.bossTier - 1) * 0.15)
+          this.specialCooldown = this.isStationaryBoss
+            ? 2.25
+            : Math.max(2.6, this.specialCooldownMax - (this.bossTier - 1) * 0.15)
         }
       }
     }
@@ -476,10 +724,30 @@ export class Enemy {
       this.attackPatternIndex++
       const radialDamage = Math.round(14 * Math.max(1, this.damageScale))
       const volleyDamage = Math.round(16 * Math.max(1, this.damageScale))
-      if (this.attackPatternIndex % 2 === 1) {
+      if (this.isStationaryBoss && this.attackPatternIndex % 3 === 1) {
+        // 3 Homing Seeker Orbs that curve and follow the player
+        const baseAngle = Math.atan2(direction.y, direction.x)
+        for (const offset of [-0.42, 0, 0.42]) {
+          const a = baseAngle + offset
+          this.projectiles.push({
+            x: startPos.x,
+            y: startPos.y,
+            width: 12,
+            height: 12,
+            speed: 225,
+            direction: { x: Math.cos(a), y: Math.sin(a) },
+            damage: radialDamage,
+            color: '#38BDF8',
+            lifetime: 0,
+            maxLifetime: 4.0,
+            homingTurnRate: 1.9,
+            homingRemaining: 2.3
+          })
+        }
+      } else if (this.attackPatternIndex % 2 === 1) {
         // Radial 8-bullet burst
         for (let i = 0; i < 8; i++) {
-          const angle = (i / 8) * Math.PI * 2
+          const angle = (i / 8) * Math.PI * 2 + this.attackPatternIndex * 0.2
           this.projectiles.push({
             x: startPos.x,
             y: startPos.y,
@@ -515,7 +783,46 @@ export class Enemy {
       return
     }
     
-    // Aegis Tech Drone red laser bolt
+    if (this.type === 'Ranged Caster') {
+      // Astral Arcanist: fires a 3-orb fanned arcane projectile burst
+      const baseAngle = Math.atan2(direction.y, direction.x)
+      const orbDamage = Math.round(11 * Math.max(1, this.damageScale))
+      for (const offset of [-0.22, 0, 0.22]) {
+        const a = baseAngle + offset
+        this.projectiles.push({
+          x: startPos.x,
+          y: startPos.y,
+          width: 9,
+          height: 9,
+          speed: 245,
+          direction: { x: Math.cos(a), y: Math.sin(a) },
+          damage: orbDamage,
+          color: '#E879F9',
+          lifetime: 0,
+          maxLifetime: 3.2
+        })
+      }
+      return
+    }
+
+    if (this.enemyId === 'ene_a2_03') {
+      // Prism Bolt Weaver: rapid emerald crystal lance bolt
+      this.projectiles.push({
+        x: startPos.x,
+        y: startPos.y,
+        width: 10,
+        height: 6,
+        speed: 325,
+        direction,
+        damage: Math.round(13 * Math.max(1, this.damageScale)),
+        color: '#34D399',
+        lifetime: 0,
+        maxLifetime: 3.0
+      })
+      return
+    }
+
+    // Area 1 Aegis Tech Drone red laser bolt
     this.projectiles.push({
       x: startPos.x,
       y: startPos.y,
@@ -531,22 +838,300 @@ export class Enemy {
   }
 
   /**
+   * Launches an arcing AoE mortar projectile with a clear dodgeable ground indicator
+   */
+  launchAoeProjectile(forcedTarget?: Vector2): EnemyAoeProjectile | null {
+    const start = this.getCenter()
+    const targetPos = forcedTarget ?? this.target?.getCenter()
+    if (!targetPos) return null
+
+    this.aoeCounter++
+    const clampedX = Math.max(64, Math.min(2000 - 64, targetPos.x))
+    const clampedY = Math.max(64, Math.min(2000 - 64, targetPos.y))
+    const radius = this.isBoss ? 96 : 84
+    const flightDuration = this.isBoss ? 1.35 : 1.45
+
+    const aoe: EnemyAoeProjectile = {
+      id: `aoe_${Date.now()}_${this.aoeCounter}`,
+      startX: start.x,
+      startY: start.y,
+      targetX: clampedX,
+      targetY: clampedY,
+      currentX: start.x,
+      currentY: start.y,
+      arcOffsetY: 0,
+      radius,
+      elapsed: 0,
+      flightDuration,
+      activeTimer: 0,
+      activeDuration: 0.38,
+      damage: Math.round(24 * Math.max(1, this.damageScale)),
+      color:
+        this.enemyId === 'boss_a2_10'
+          ? '#38BDF8'
+          : this.enemyId === 'boss_a2_15'
+            ? '#FACC15'
+            : '#F97316',
+      hasDetonated: false,
+      hasDamagedPlayer: false
+    }
+
+    this.aoeProjectiles.push(aoe)
+    return aoe
+  }
+
+  private updateAoeProjectiles(deltaTime: number): void {
+    for (let i = this.aoeProjectiles.length - 1; i >= 0; i--) {
+      const aoe = this.aoeProjectiles[i]
+      if (!aoe.hasDetonated) {
+        aoe.elapsed += deltaTime
+        const progress = Math.max(0, Math.min(1, aoe.elapsed / aoe.flightDuration))
+        aoe.currentX = aoe.startX + (aoe.targetX - aoe.startX) * progress
+        aoe.currentY = aoe.startY + (aoe.targetY - aoe.startY) * progress
+        aoe.arcOffsetY = Math.sin(progress * Math.PI) * 82
+        if (aoe.elapsed >= aoe.flightDuration) {
+          aoe.elapsed = aoe.flightDuration
+          aoe.currentX = aoe.targetX
+          aoe.currentY = aoe.targetY
+          aoe.arcOffsetY = 0
+          aoe.hasDetonated = true
+          aoe.activeTimer = 0
+        }
+      } else {
+        aoe.activeTimer += deltaTime
+        if (aoe.activeTimer >= aoe.activeDuration) {
+          this.aoeProjectiles.splice(i, 1)
+        }
+      }
+    }
+  }
+
+  /**
    * Spawns a large telegraphed boss attack with clear floor/beam warning indicators
    */
-  spawnTelegraphedAttack(forcedKind?: BossAttackKind): BossTelegraphAttack | null {
+  spawnTelegraphedAttack(
+    forcedKind?: BossAttackKind,
+    forcedHalfDir?: HalfArenaDirection,
+    forcedSideMode?: ClosingSideLaserMode
+  ): BossTelegraphAttack | null {
     if (!this.target) return null
 
     this.specialAttackCounter++
-    const kinds: BossAttackKind[] = ['orbital_slam', 'mega_laser', 'bombardment_ring']
-    const kind = forcedKind || kinds[(this.specialAttackCounter - 1) % kinds.length]
     const bossCenter = this.getCenter()
     const targetCenter = this.target.getCenter()
     const id = `boss_atk_${Date.now()}_${this.specialAttackCounter}`
     const tierBoost = Math.max(0, this.bossTier - 1)
 
+    let kind: BossAttackKind
+    if (forcedKind) {
+      kind = forcedKind
+    } else if (this.isStationaryBoss) {
+      const finalCycle: BossAttackKind[] = [
+        'closing_side_lasers',
+        'tracking_strikes',
+        'bullet_hell',
+        'closing_side_lasers',
+        'pursuit_beam',
+        'bullet_hell'
+      ]
+      kind = finalCycle[(this.specialAttackCounter - 1) % finalCycle.length]
+    } else {
+      const kinds: BossAttackKind[] = ['orbital_slam', 'mega_laser', 'bombardment_ring']
+      kind = kinds[(this.specialAttackCounter - 1) % kinds.length]
+    }
+
     let telegraph: BossTelegraphAttack
 
-    if (kind === 'mega_laser') {
+    if (kind === 'closing_side_lasers') {
+      const bounds: BossArenaBounds = this.arenaBounds ?? {
+        left: Math.max(0, bossCenter.x - 640),
+        top: Math.max(0, bossCenter.y - 195),
+        width: 1280,
+        height: 720
+      }
+      const sideModes: ClosingSideLaserMode[] = ['left', 'right', 'pincer']
+      const sideMode = forcedSideMode ?? sideModes[this.sideLaserModeIndex++ % sideModes.length]
+      const closingReachRatio = 0.5 // Sweeps exactly half way across the arena
+
+      let safeRect: { x: number; y: number; width: number; height: number }
+      if (sideMode === 'left') {
+        safeRect = {
+          x: bounds.left + bounds.width * closingReachRatio,
+          y: bounds.top,
+          width: bounds.width * (1 - closingReachRatio),
+          height: bounds.height
+        }
+      } else if (sideMode === 'right') {
+        safeRect = {
+          x: bounds.left,
+          y: bounds.top,
+          width: bounds.width * (1 - closingReachRatio),
+          height: bounds.height
+        }
+      } else {
+        // Pincer: upper-left half + lower-right half, leaving upper-right & lower-left safe
+        safeRect = {
+          x: bounds.left + bounds.width * closingReachRatio,
+          y: bounds.top,
+          width: bounds.width * (1 - closingReachRatio),
+          height: bounds.height * 0.5
+        }
+      }
+
+      telegraph = {
+        id,
+        kind: 'closing_side_lasers',
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2,
+        radius: bounds.width * closingReachRatio,
+        sideMode,
+        bounds,
+        closingReachRatio,
+        safeRect,
+        hitCooldown: 0,
+        chargeTimer: 0,
+        chargeDuration: 1.25,
+        activeTimer: 0,
+        activeDuration: 1.65,
+        damage: Math.round(34 * Math.max(1, this.damageScale * 0.72)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'tracking_strikes') {
+      const blastRadius = 82
+      telegraph = {
+        id,
+        kind: 'tracking_strikes',
+        x: targetCenter.x,
+        y: targetCenter.y,
+        radius: blastRadius,
+        trackingBlasts: [
+          {
+            x: targetCenter.x,
+            y: targetCenter.y,
+            radius: blastRadius,
+            elapsed: 0,
+            windup: 0.78,
+            active: 0.34,
+            hasDetonated: false,
+            hasDamagedPlayer: false
+          }
+        ],
+        spawnTimer: 0,
+        spawnsDone: 1,
+        chargeTimer: 0,
+        chargeDuration: 0.05,
+        activeTimer: 0,
+        activeDuration: 3.15,
+        damage: Math.round(28 * Math.max(1, this.damageScale * 0.7)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'pursuit_beam') {
+      const angle = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
+      const length = 1280
+      telegraph = {
+        id,
+        kind: 'pursuit_beam',
+        x: bossCenter.x,
+        y: bossCenter.y,
+        endX: bossCenter.x + Math.cos(angle) * length,
+        endY: bossCenter.y + Math.sin(angle) * length,
+        angle,
+        turnRate: 0.68,
+        radius: 34,
+        length,
+        hitCooldown: 0,
+        chargeTimer: 0,
+        chargeDuration: 1.35,
+        activeTimer: 0,
+        activeDuration: 0.72,
+        damage: Math.round(28 * Math.max(1, this.damageScale * 0.72)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'bullet_hell') {
+      telegraph = {
+        id,
+        kind: 'bullet_hell',
+        x: bossCenter.x,
+        y: bossCenter.y,
+        radius: 110,
+        pulseTimer: 0.2,
+        pulseCount: 0,
+        chargeTimer: 0,
+        chargeDuration: 0.95,
+        activeTimer: 0,
+        activeDuration: 3.3,
+        damage: Math.round(13 * Math.max(1, this.damageScale * 0.65)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'half_arena') {
+      const bounds: BossArenaBounds = this.arenaBounds ?? {
+        left: Math.max(0, bossCenter.x - 640),
+        top: Math.max(0, bossCenter.y - 128),
+        width: 1280,
+        height: 720
+      }
+      const halfDirs: HalfArenaDirection[] = ['left', 'bottom', 'right', 'top']
+      const halfDirection = forcedHalfDir ?? halfDirs[this.halfDirectionIndex++ % halfDirs.length]
+
+      let zoneRect: { x: number; y: number; width: number; height: number }
+      let safeRect: { x: number; y: number; width: number; height: number }
+
+      if (halfDirection === 'left') {
+        zoneRect = { x: bounds.left, y: bounds.top, width: bounds.width / 2, height: bounds.height }
+        safeRect = {
+          x: bounds.left + bounds.width / 2,
+          y: bounds.top,
+          width: bounds.width / 2,
+          height: bounds.height
+        }
+      } else if (halfDirection === 'right') {
+        zoneRect = {
+          x: bounds.left + bounds.width / 2,
+          y: bounds.top,
+          width: bounds.width / 2,
+          height: bounds.height
+        }
+        safeRect = { x: bounds.left, y: bounds.top, width: bounds.width / 2, height: bounds.height }
+      } else if (halfDirection === 'top') {
+        zoneRect = { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height / 2 }
+        safeRect = {
+          x: bounds.left,
+          y: bounds.top + bounds.height / 2,
+          width: bounds.width,
+          height: bounds.height / 2
+        }
+      } else {
+        zoneRect = {
+          x: bounds.left,
+          y: bounds.top + bounds.height / 2,
+          width: bounds.width,
+          height: bounds.height / 2
+        }
+        safeRect = { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height / 2 }
+      }
+
+      telegraph = {
+        id,
+        kind: 'half_arena',
+        x: zoneRect.x + zoneRect.width / 2,
+        y: zoneRect.y + zoneRect.height / 2,
+        radius: Math.max(zoneRect.width, zoneRect.height) / 2,
+        halfDirection,
+        zoneRect,
+        safeRect,
+        chargeTimer: 0,
+        chargeDuration: 2.05,
+        activeTimer: 0,
+        activeDuration: 0.48,
+        damage: Math.round(36 * Math.max(1, this.damageScale * 0.72)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'mega_laser') {
       const angle = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
       const length = 660 + Math.min(140, tierBoost * 35)
       telegraph = {
@@ -557,7 +1142,7 @@ export class Enemy {
         endX: bossCenter.x + Math.cos(angle) * length,
         endY: bossCenter.y + Math.sin(angle) * length,
         angle,
-        radius: 32 + Math.min(10, tierBoost * 2), // Half-width of laser lane (64px+ wide beam)
+        radius: 32 + Math.min(10, tierBoost * 2),
         length,
         chargeTimer: 0,
         chargeDuration: 1.35,
@@ -570,35 +1155,43 @@ export class Enemy {
     } else if (kind === 'bombardment_ring') {
       const zoneRadius = 86 + Math.min(20, tierBoost * 5)
       const zoneCount = Math.min(6, 4 + tierBoost)
+      const minX = this.arenaBounds ? this.arenaBounds.left + 64 : 80
+      const maxX = this.arenaBounds ? this.arenaBounds.left + this.arenaBounds.width - 64 : 1920
+      const minY = this.arenaBounds ? this.arenaBounds.top + 140 : 80
+      const maxY = this.arenaBounds ? this.arenaBounds.top + this.arenaBounds.height - 64 : 1920
+      const clampX = (vx: number) => Math.max(minX, Math.min(maxX, vx))
+      const clampY = (vy: number) => Math.max(minY, Math.min(maxY, vy))
+
+      const cx = clampX(targetCenter.x)
+      const cy = clampY(targetCenter.y)
       const subTargets: Array<{ x: number; y: number; radius: number }> = [
-        { x: targetCenter.x, y: targetCenter.y, radius: zoneRadius }
+        { x: cx, y: cy, radius: zoneRadius }
       ]
       for (let i = 1; i < zoneCount; i++) {
         const a = ((i - 1) / (zoneCount - 1)) * Math.PI * 2 + this.specialAttackCounter * 0.5
         const dist = 145 + (i % 2) * 35
         subTargets.push({
-          x: Math.max(80, Math.min(1920, targetCenter.x + Math.cos(a) * dist)),
-          y: Math.max(80, Math.min(1920, targetCenter.y + Math.sin(a) * dist)),
+          x: clampX(cx + Math.cos(a) * dist),
+          y: clampY(cy + Math.sin(a) * dist),
           radius: zoneRadius
         })
       }
       telegraph = {
         id,
         kind: 'bombardment_ring',
-        x: targetCenter.x,
-        y: targetCenter.y,
+        x: cx,
+        y: cy,
         radius: zoneRadius,
         subTargets,
         chargeTimer: 0,
-        chargeDuration: 1.5,
+        chargeDuration: this.isStationaryBoss ? 1.65 : 1.5,
         activeTimer: 0,
         activeDuration: 0.4,
-        damage: Math.round(28 * Math.max(1, this.damageScale)),
+        damage: Math.round(28 * Math.max(1, this.damageScale * (this.isStationaryBoss ? 0.72 : 1))),
         hasTriggered: false,
         hasDamagedPlayer: false
       }
     } else {
-      // Orbital Shockwave Slam
       const radius = 145 + Math.min(45, tierBoost * 12)
       telegraph = {
         id,
@@ -621,11 +1214,56 @@ export class Enemy {
   }
 
   /**
-   * Advances telegraph windup timers and active impact visuals
+   * Advances telegraph windup timers, tracking mechanics, bullet hell curtains, and active sweeps
    */
   private updateTelegraphs(deltaTime: number): void {
+    const bossCenter = this.getCenter()
+    const targetCenter = this.target?.getCenter() ?? null
+
     for (let i = this.telegraphs.length - 1; i >= 0; i--) {
       const t = this.telegraphs[i]
+
+      if (t.kind === 'pursuit_beam') {
+        t.x = bossCenter.x
+        t.y = bossCenter.y
+        const shouldTrack =
+          Boolean(targetCenter && !t.hasTriggered && t.chargeDuration - t.chargeTimer > 0.3)
+        if (shouldTrack && targetCenter) {
+          const desiredAngle = Math.atan2(targetCenter.y - t.y, targetCenter.x - t.x)
+          const curAngle = t.angle ?? desiredAngle
+          let diff = desiredAngle - curAngle
+          while (diff > Math.PI) diff -= Math.PI * 2
+          while (diff < -Math.PI) diff += Math.PI * 2
+          const rate = (t.turnRate ?? 0.68) * 1.15
+          const maxStep = rate * deltaTime
+          const nextAngle =
+            Math.abs(diff) <= maxStep ? desiredAngle : curAngle + Math.sign(diff) * maxStep
+          t.angle = nextAngle
+          const len = t.length ?? 1280
+          t.endX = t.x + Math.cos(nextAngle) * len
+          t.endY = t.y + Math.sin(nextAngle) * len
+        } else {
+          // Keep beam anchored on boss at the locked angle once tracking stops (0.3s before fire + active fire)
+          const lockedAngle = t.angle ?? 0
+          const len = t.length ?? 1280
+          t.endX = t.x + Math.cos(lockedAngle) * len
+          t.endY = t.y + Math.sin(lockedAngle) * len
+        }
+        if (t.hasTriggered && t.hasDamagedPlayer) {
+          t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
+          if (t.hitCooldown >= 0.5) {
+            t.hitCooldown = 0
+            t.hasDamagedPlayer = false
+          }
+        }
+      } else if (t.kind === 'closing_side_lasers' && t.hasTriggered && t.hasDamagedPlayer) {
+        t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
+        if (t.hitCooldown >= 0.55) {
+          t.hitCooldown = 0
+          t.hasDamagedPlayer = false
+        }
+      }
+
       if (!t.hasTriggered) {
         t.chargeTimer += deltaTime
         if (t.chargeTimer >= t.chargeDuration) {
@@ -635,6 +1273,76 @@ export class Enemy {
         }
       } else {
         t.activeTimer += deltaTime
+
+        if (t.kind === 'tracking_strikes' && t.trackingBlasts) {
+          t.spawnTimer = (t.spawnTimer ?? 0) + deltaTime
+          const maxSpawns = 5
+          if ((t.spawnsDone ?? 1) < maxSpawns && t.spawnTimer >= 0.5 && targetCenter) {
+            t.spawnTimer -= 0.5
+            t.spawnsDone = (t.spawnsDone ?? 1) + 1
+            t.trackingBlasts.push({
+              x: targetCenter.x,
+              y: targetCenter.y,
+              radius: t.radius,
+              elapsed: 0,
+              windup: 0.75,
+              active: 0.34,
+              hasDetonated: false,
+              hasDamagedPlayer: false
+            })
+          }
+          for (const blast of t.trackingBlasts) {
+            blast.elapsed += deltaTime
+            if (!blast.hasDetonated && blast.elapsed >= blast.windup) {
+              blast.hasDetonated = true
+            }
+          }
+        } else if (t.kind === 'bullet_hell') {
+          t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
+          const interval = 0.21
+          while (t.pulseTimer >= interval) {
+            t.pulseTimer -= interval
+            t.pulseCount = (t.pulseCount ?? 0) + 1
+            const pulseIdx = t.pulseCount
+            const spiralDir = pulseIdx <= 8 ? 1 : -1
+            const baseRot = pulseIdx * 0.29 * spiralDir
+            const spokes = 10
+            for (let k = 0; k < spokes; k++) {
+              const ang = baseRot + (k / spokes) * Math.PI * 2
+              this.projectiles.push({
+                x: bossCenter.x,
+                y: bossCenter.y,
+                width: 10,
+                height: 10,
+                speed: 215,
+                direction: { x: Math.cos(ang), y: Math.sin(ang) },
+                damage: t.damage,
+                color: k % 2 === 0 ? '#FF0055' : '#FACC15',
+                lifetime: 0,
+                maxLifetime: 5.5
+              })
+            }
+            if (pulseIdx % 3 === 0 && targetCenter) {
+              const aim = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
+              for (const offset of [-0.14, 0.14]) {
+                const a = aim + offset
+                this.projectiles.push({
+                  x: bossCenter.x,
+                  y: bossCenter.y,
+                  width: 11,
+                  height: 11,
+                  speed: 265,
+                  direction: { x: Math.cos(a), y: Math.sin(a) },
+                  damage: t.damage,
+                  color: '#38BDF8',
+                  lifetime: 0,
+                  maxLifetime: 4.5
+                })
+              }
+            }
+          }
+        }
+
         if (t.activeTimer >= t.activeDuration) {
           this.telegraphs.splice(i, 1)
         }
@@ -643,11 +1351,26 @@ export class Enemy {
   }
 
   /**
-   * Update all projectiles
+   * Update all projectiles (including optional homing seekers that curve toward player)
    */
   private updateProjectiles(deltaTime: number): void {
+    const targetCenter = this.target && this.target.isAlive ? this.target.getCenter() : null
+
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const proj = this.projectiles[i]
+      if (proj.homingTurnRate && proj.homingRemaining && proj.homingRemaining > 0 && targetCenter) {
+        proj.homingRemaining -= deltaTime
+        const currentAngle = Math.atan2(proj.direction.y, proj.direction.x)
+        const desiredAngle = Math.atan2(targetCenter.y - proj.y, targetCenter.x - proj.x)
+        let diff = desiredAngle - currentAngle
+        while (diff > Math.PI) diff -= Math.PI * 2
+        while (diff < -Math.PI) diff += Math.PI * 2
+        const step = proj.homingTurnRate * deltaTime
+        const nextAngle =
+          Math.abs(diff) <= step ? desiredAngle : currentAngle + Math.sign(diff) * step
+        proj.direction = { x: Math.cos(nextAngle), y: Math.sin(nextAngle) }
+      }
+
       proj.x += proj.direction.x * proj.speed * deltaTime
       proj.y += proj.direction.y * proj.speed * deltaTime
       proj.lifetime += deltaTime
@@ -734,6 +1457,7 @@ export class Enemy {
       this.isDying = true
       this.deathTimer = 0
       this.telegraphs = []
+      this.aoeProjectiles = []
       return true
     }
     
@@ -747,6 +1471,32 @@ export class Enemy {
     if (!this.isAlive) return
     this.health += amount
     if (this.health > this.maxHealth) this.health = this.maxHealth
+  }
+
+  /**
+   * Ignite enemy with a stacking/refreshing burn DoT
+   */
+  applyBurn(damagePerTick: number, duration = 3.0): void {
+    if (!this.isAlive || this.isSpawning) return
+    const safeDmg = Math.max(1, Math.round(damagePerTick))
+    this.burnDamagePerTick = Math.max(this.burnDamagePerTick, safeDmg)
+    this.burnTimer = Math.max(this.burnTimer, duration)
+  }
+
+  /**
+   * Advance burn timer and return burn tick damage every 0.5s (0 if no tick this frame)
+   */
+  tickBurn(deltaTime: number): number {
+    if (!this.isAlive || this.isSpawning || this.burnTimer <= 0 || this.burnDamagePerTick <= 0) {
+      return 0
+    }
+    this.burnTimer = Math.max(0, this.burnTimer - deltaTime)
+    this.burnTickTimer += deltaTime
+    if (this.burnTickTimer >= 0.5) {
+      this.burnTickTimer -= 0.5
+      return this.burnDamagePerTick
+    }
+    return 0
   }
 
   /**
@@ -780,6 +1530,77 @@ export class Enemy {
   }
 
   /**
+   * Draw dodgeable AoE projectile landing warning circles & detonation bursts on the floor
+   */
+  drawAoeIndicators(ctx: CanvasRenderingContext2D, camera: Camera): void {
+    if (!this.isAlive || this.aoeProjectiles.length === 0) return
+
+    for (const aoe of this.aoeProjectiles) {
+      const sp = camera.worldToScreen(aoe.targetX, aoe.targetY)
+      const r = Math.max(14, aoe.radius)
+
+      ctx.save()
+      if (!aoe.hasDetonated) {
+        const progress = Math.max(0, Math.min(1, aoe.elapsed / aoe.flightDuration))
+        const pulse = 0.72 + 0.28 * Math.sin(this.animTime * 20)
+
+        // Floor hazard circle
+        ctx.fillStyle = `rgba(249, 115, 22, ${0.15 + progress * 0.18})`
+        ctx.beginPath()
+        ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+        ctx.fill()
+
+        // Expanding inner charge circle indicating exact detonation timing
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.28)'
+        ctx.beginPath()
+        ctx.arc(sp.x, sp.y, Math.max(4, r * progress), 0, Math.PI * 2)
+        ctx.fill()
+
+        // Pulsing dashed warning border
+        ctx.strokeStyle = `rgba(255, 59, 92, ${0.9 * pulse})`
+        ctx.lineWidth = 3
+        ctx.setLineDash([9, 6])
+        ctx.beginPath()
+        ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.setLineDash([])
+
+        // Crosshair marker at impact center
+        ctx.strokeStyle = 'rgba(254, 240, 138, 0.85)'
+        ctx.lineWidth = 1.8
+        const cross = r * 0.28
+        ctx.beginPath()
+        ctx.moveTo(sp.x - cross, sp.y)
+        ctx.lineTo(sp.x + cross, sp.y)
+        ctx.moveTo(sp.x, sp.y - cross)
+        ctx.lineTo(sp.x, sp.y + cross)
+        ctx.stroke()
+
+        const remainingSec = Math.max(0, aoe.flightDuration - aoe.elapsed).toFixed(1)
+        ctx.fillStyle = '#FEF08A'
+        ctx.font = 'bold 11px monospace'
+        ctx.textAlign = 'center'
+        ctx.fillText(`⚠ AOE BLAST (${remainingSec}s)`, sp.x, sp.y - r - 8)
+      } else {
+        const impactProgress = Math.max(0, Math.min(1, aoe.activeTimer / aoe.activeDuration))
+        const alpha = Math.max(0, 1 - impactProgress)
+        const blastR = Math.max(10, r * (0.85 + impactProgress * 0.28))
+        ctx.globalAlpha = alpha
+        ctx.fillStyle = 'rgba(249, 115, 22, 0.58)'
+        ctx.beginPath()
+        ctx.arc(sp.x, sp.y, blastR, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = '#FEF08A'
+        ctx.lineWidth = 3.5
+        ctx.beginPath()
+        ctx.arc(sp.x, sp.y, blastR, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+      ctx.restore()
+    }
+  }
+
+  /**
    * Draw telegraphed boss attack warning indicators & detonations on the arena floor
    */
   drawTelegraphs(ctx: CanvasRenderingContext2D, camera: Camera): void {
@@ -791,7 +1612,234 @@ export class Enemy {
         ? Math.max(0, Math.min(1, t.activeTimer / t.activeDuration))
         : 0
 
-      if (t.kind === 'mega_laser') {
+      if (t.kind === 'closing_side_lasers' && t.bounds) {
+        const b = t.bounds
+        const reach = t.closingReachRatio ?? 0.5
+        const mode = t.sideMode ?? 'left'
+        const bTopLeft = camera.worldToScreen(b.left, b.top)
+        const bx = bTopLeft.x
+        const by = bTopLeft.y
+        const bw = b.width
+        const bh = b.height
+        const pulse = 0.72 + 0.28 * Math.sin(this.animTime * 20)
+
+        ctx.save()
+        // Faint center 50% marker so crossing past half the screen is unmistakably clear
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.24)'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([6, 6])
+        ctx.beginPath()
+        ctx.moveTo(bx + bw * 0.5, by)
+        ctx.lineTo(bx + bw * 0.5, by + bh)
+        ctx.stroke()
+        ctx.setLineDash([])
+
+        // Draw planned danger lanes (extending past 50% width!)
+        const laneRects = getClosingSideLaserTrackRects(t)
+        for (const lr of laneRects) {
+          const sp = camera.worldToScreen(lr.x, lr.y)
+          ctx.fillStyle = `rgba(255, 0, 85, ${t.hasTriggered ? 0.12 : 0.14 + chargeProgress * 0.14})`
+          ctx.fillRect(sp.x, sp.y, lr.width, lr.height)
+          ctx.strokeStyle = `rgba(250, 204, 21, ${0.75 * pulse})`
+          ctx.lineWidth = 2.5
+          ctx.setLineDash([12, 8])
+          ctx.strokeRect(sp.x + 1, sp.y + 1, lr.width - 2, lr.height - 2)
+          ctx.setLineDash([])
+        }
+
+        // Draw Safe Pocket Hint
+        if (!t.hasTriggered && t.safeRect) {
+          const sr = camera.worldToScreen(t.safeRect.x, t.safeRect.y)
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.08)'
+          ctx.fillRect(sr.x, sr.y, t.safeRect.width, t.safeRect.height)
+          ctx.fillStyle = 'rgba(110, 231, 183, 0.92)'
+          ctx.font = 'bold 13px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText('✓ SAFE ZONE', sr.x + t.safeRect.width / 2, sr.y + t.safeRect.height / 2)
+        }
+
+        if (!t.hasTriggered) {
+          const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
+          const label =
+            mode === 'left'
+              ? `◀◀ CLOSING LEFT LASER (HALF SCREEN) • ${rem}s`
+              : mode === 'right'
+                ? `CLOSING RIGHT LASER (HALF SCREEN) ▶▶ • ${rem}s`
+                : `◀ DUAL PINCER LASERS (HALF EACH SIDE) ▶ • ${rem}s`
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.86)'
+          ctx.fillRect(bx + bw / 2 - 205, by + bh * 0.5 - 22, 410, 42)
+          ctx.strokeStyle = '#FF0055'
+          ctx.lineWidth = 2
+          ctx.strokeRect(bx + bw / 2 - 205, by + bh * 0.5 - 22, 410, 42)
+          ctx.fillStyle = '#FEF08A'
+          ctx.font = 'bold 13px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(label, bx + bw / 2, by + bh * 0.5 + 4)
+
+          // Glowing emitter bars warming up on the outer side edge(s)
+          ctx.fillStyle = '#FF0055'
+          if (mode === 'left' || mode === 'pincer') {
+            ctx.fillRect(bx, by, 10 + chargeProgress * 12, mode === 'pincer' ? bh * 0.5 : bh)
+          }
+          if (mode === 'right' || mode === 'pincer') {
+            const w = 10 + chargeProgress * 12
+            const yOff = mode === 'pincer' ? by + bh * 0.5 : by
+            const h = mode === 'pincer' ? bh * 0.5 : bh
+            ctx.fillRect(bx + bw - w, yOff, w, h)
+          }
+        } else {
+          // Active sweeping laser walls closing inward from side edges past half the screen!
+          const activeRects = getClosingSideLaserRects(t)
+          const fadeOut =
+            impactProgress > 0.85 ? Math.max(0.15, 1 - (impactProgress - 0.85) / 0.15) : 1
+          ctx.globalAlpha = fadeOut
+          for (const ar of activeRects) {
+            const sp = camera.worldToScreen(ar.x, ar.y)
+            ctx.fillStyle = 'rgba(255, 0, 85, 0.72)'
+            ctx.fillRect(sp.x, sp.y, ar.width, ar.height)
+            ctx.fillStyle = 'rgba(250, 204, 21, 0.48)'
+            ctx.fillRect(sp.x + 6, sp.y + 6, Math.max(0, ar.width - 12), Math.max(0, ar.height - 12))
+            ctx.fillStyle = '#FFFFFF'
+            // Intense leading laser beam edge sweeping inward
+            const leadX =
+              mode === 'right' || (mode === 'pincer' && ar.y > b.top + b.height * 0.2)
+                ? sp.x
+                : sp.x + Math.max(0, ar.width - 8)
+            ctx.fillRect(leadX, sp.y, Math.min(8, ar.width), ar.height)
+          }
+          void reach
+        }
+        ctx.restore()
+      } else if (t.kind === 'tracking_strikes' && t.trackingBlasts) {
+        for (const blast of t.trackingBlasts) {
+          const sp = camera.worldToScreen(blast.x, blast.y)
+          const r = Math.max(12, blast.radius)
+          ctx.save()
+          if (!blast.hasDetonated) {
+            const p = Math.max(0, Math.min(1, blast.elapsed / blast.windup))
+            ctx.fillStyle = 'rgba(249, 115, 22, 0.18)'
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.fillStyle = 'rgba(255, 0, 85, 0.28)'
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, Math.max(4, r * p), 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.strokeStyle = '#FACC15'
+            ctx.lineWidth = 2.5
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+            ctx.stroke()
+
+            ctx.fillStyle = '#FEF08A'
+            ctx.font = 'bold 10px monospace'
+            ctx.textAlign = 'center'
+            ctx.fillText('TARGET LOCK', sp.x, sp.y + 3)
+          } else if (blast.elapsed < blast.windup + blast.active) {
+            const blastP = (blast.elapsed - blast.windup) / blast.active
+            ctx.globalAlpha = Math.max(0, 1 - blastP)
+            ctx.fillStyle = 'rgba(255, 0, 85, 0.72)'
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, r * (0.9 + blastP * 0.25), 0, Math.PI * 2)
+            ctx.fill()
+            ctx.strokeStyle = '#FFFFFF'
+            ctx.lineWidth = 3
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
+      } else if (t.kind === 'bullet_hell') {
+        const sp = camera.worldToScreen(t.x, t.y)
+        ctx.save()
+        if (!t.hasTriggered) {
+          const r = 74 + Math.sin(this.animTime * 20) * 8
+          ctx.strokeStyle = '#FF0055'
+          ctx.lineWidth = 3
+          ctx.setLineDash([10, 6])
+          ctx.beginPath()
+          ctx.arc(sp.x, sp.y, r, this.animTime * 3, this.animTime * 3 + Math.PI * 2)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.fillStyle = '#FEF08A'
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText('⚠ BULLET HELL BARRAGE!', sp.x, sp.y + r + 18)
+        } else {
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)'
+          ctx.lineWidth = 2.5
+          ctx.beginPath()
+          ctx.arc(sp.x, sp.y, 68 + Math.sin(this.animTime * 16) * 5, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        ctx.restore()
+      } else if (t.kind === 'half_arena' && t.zoneRect) {
+        const zr = t.zoneRect
+        const topLeft = camera.worldToScreen(zr.x, zr.y)
+        const sx = topLeft.x
+        const sy = topLeft.y
+        const sw = zr.width
+        const sh = zr.height
+
+        if (!t.hasTriggered) {
+          const pulse = 0.72 + 0.28 * Math.sin(this.animTime * 20)
+          const remainingSec = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
+
+          if (t.safeRect) {
+            const safeTopLeft = camera.worldToScreen(t.safeRect.x, t.safeRect.y)
+            ctx.save()
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.07)'
+            ctx.fillRect(safeTopLeft.x, safeTopLeft.y, t.safeRect.width, t.safeRect.height)
+            ctx.strokeStyle = 'rgba(52, 211, 153, 0.42)'
+            ctx.lineWidth = 2
+            ctx.setLineDash([12, 8])
+            ctx.strokeRect(
+              safeTopLeft.x + 2,
+              safeTopLeft.y + 2,
+              t.safeRect.width - 4,
+              t.safeRect.height - 4
+            )
+            ctx.setLineDash([])
+            ctx.fillStyle = 'rgba(110, 231, 183, 0.88)'
+            ctx.font = 'bold 13px monospace'
+            ctx.textAlign = 'center'
+            ctx.fillText(
+              '✓ SAFE ZONE',
+              safeTopLeft.x + t.safeRect.width / 2,
+              safeTopLeft.y + t.safeRect.height / 2
+            )
+            ctx.restore()
+          }
+
+          ctx.save()
+          ctx.fillStyle = `rgba(255, 0, 85, ${0.16 + chargeProgress * 0.2})`
+          ctx.fillRect(sx, sy, sw, sh)
+          ctx.strokeStyle = `rgba(255, 0, 85, ${0.95 * pulse})`
+          ctx.lineWidth = 4
+          ctx.setLineDash([16, 8])
+          ctx.strokeRect(sx + 2, sy + 2, sw - 4, sh - 4)
+          ctx.setLineDash([])
+
+          const labelCx = sx + sw / 2
+          const labelCy =
+            t.halfDirection === 'top'
+              ? sy + Math.max(sh * 0.62, 160)
+              : sy + sh / 2
+          ctx.fillStyle = '#FEF08A'
+          ctx.font = 'bold 13px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(`⚠ HALF-ARENA BLAST (${remainingSec}s)`, labelCx, labelCy)
+          ctx.restore()
+        } else {
+          const alpha = Math.max(0, 1 - impactProgress)
+          ctx.save()
+          ctx.globalAlpha = alpha
+          ctx.fillStyle = 'rgba(255, 0, 85, 0.72)'
+          ctx.fillRect(sx, sy, sw, sh)
+          ctx.restore()
+        }
+      } else if (t.kind === 'mega_laser' || t.kind === 'pursuit_beam') {
         const start = camera.worldToScreen(t.x, t.y)
         const angle = t.angle ?? 0
         const len = t.length ?? 660
@@ -802,39 +1850,54 @@ export class Enemy {
         ctx.rotate(angle)
 
         if (!t.hasTriggered) {
+          const isPursuitLocked =
+            t.kind === 'pursuit_beam' && t.chargeDuration - t.chargeTimer <= 0.3
           const pulse = 0.7 + 0.3 * Math.sin(this.animTime * 22)
-          // Red danger corridor background
-          ctx.fillStyle = `rgba(255, 0, 85, ${0.14 + chargeProgress * 0.14})`
+          ctx.fillStyle = isPursuitLocked
+            ? 'rgba(255, 0, 85, 0.32)'
+            : `rgba(255, 0, 85, ${0.14 + chargeProgress * 0.14})`
           ctx.fillRect(0, -halfW, len, halfW * 2)
 
-          // Expanding inner charge bar showing when laser fires
-          ctx.fillStyle = `rgba(250, 204, 21, ${0.22 + chargeProgress * 0.25})`
+          ctx.fillStyle = isPursuitLocked
+            ? 'rgba(255, 255, 255, 0.35)'
+            : `rgba(250, 204, 21, ${0.22 + chargeProgress * 0.25})`
           const innerH = Math.max(2, halfW * 2 * chargeProgress)
           ctx.fillRect(0, -innerH / 2, len, innerH)
 
-          // Dashed danger rails
-          ctx.strokeStyle = `rgba(255, 0, 85, ${0.65 * pulse})`
-          ctx.lineWidth = 2.5
-          ctx.setLineDash([12, 8])
+          ctx.strokeStyle = isPursuitLocked
+            ? '#FFFFFF'
+            : `rgba(255, 0, 85, ${0.65 * pulse})`
+          ctx.lineWidth = isPursuitLocked ? 3 : 2.5
+          if (!isPursuitLocked) ctx.setLineDash([12, 8])
           ctx.strokeRect(0, -halfW, len, halfW * 2)
           ctx.setLineDash([])
 
-          // Center laser sightline
-          ctx.strokeStyle = '#FACC15'
-          ctx.lineWidth = 1.5
+          ctx.strokeStyle = isPursuitLocked ? '#00F0FF' : '#FACC15'
+          ctx.lineWidth = isPursuitLocked ? 2.5 : 1.5
           ctx.beginPath()
           ctx.moveTo(0, 0)
           ctx.lineTo(len, 0)
           ctx.stroke()
 
-          // Warning label along corridor
-          ctx.fillStyle = '#FEF08A'
+          ctx.fillStyle = isPursuitLocked ? '#FFFFFF' : '#FEF08A'
           ctx.font = 'bold 12px monospace'
           ctx.textAlign = 'center'
-          ctx.fillText('⚠ MEGA LASER - DODGE!', Math.min(260, len * 0.45), -halfW - 8)
+          ctx.fillText(
+            t.kind === 'pursuit_beam'
+              ? isPursuitLocked
+                ? '⚠ BEAM LOCKED - DODGE NOW!'
+                : '⚠ TRACKING LASER - LOCKING AIM...'
+              : '⚠ MEGA LASER - DODGE!',
+            Math.min(280, len * 0.45),
+            -halfW - 8
+          )
         } else {
-          // Active hyper-laser blast
-          const alpha = Math.max(0, 1 - impactProgress)
+          const alpha =
+            t.kind === 'pursuit_beam'
+              ? impactProgress > 0.8
+                ? Math.max(0.2, 1 - (impactProgress - 0.8) / 0.2)
+                : 0.95
+              : Math.max(0, 1 - impactProgress)
           ctx.globalAlpha = alpha
           ctx.fillStyle = '#FF0055'
           ctx.fillRect(0, -halfW * 1.15, len, halfW * 2.3)
@@ -959,7 +2022,68 @@ export class Enemy {
     ctx.rotate(this.facingAngle)
 
     switch (this.type) {
+      case 'Heavy Swarm': {
+        // Citadel Golem: slow, chunky sapphirestone carapace with glowing emerald crystal core
+        const lumber = Math.sin(this.animTime * 6) * 1.8
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#1E3A5F'
+        ctx.strokeStyle = '#34D399'
+        ctx.lineWidth = 2.4
+        ctx.beginPath()
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2
+          const px = Math.cos(a) * r * 0.9
+          const py = Math.sin(a) * r * 0.9
+          if (i === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+
+        // Armored shoulder gauntlets
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#0F172A'
+        ctx.strokeStyle = '#6EE7B7'
+        ctx.lineWidth = 1.6
+        ctx.fillRect(0, -r * 0.95 + lumber, r * 0.72, 6)
+        ctx.strokeRect(0, -r * 0.95 + lumber, r * 0.72, 6)
+        ctx.fillRect(0, r * 0.95 - 6 - lumber, r * 0.72, 6)
+        ctx.strokeRect(0, r * 0.95 - 6 - lumber, r * 0.72, 6)
+
+        // Glowing emerald crystal heart
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#10B981'
+        ctx.beginPath()
+        ctx.moveTo(r * 0.35, 0)
+        ctx.lineTo(0, -r * 0.34)
+        ctx.lineTo(-r * 0.35, 0)
+        ctx.lineTo(0, r * 0.34)
+        ctx.closePath()
+        ctx.fill()
+        break
+      }
+
       case 'Fast Flanker': {
+        if (this.enemyId === 'ene_a2_02') {
+          // Zephyr Shardling: razor-winged high-speed cyan crystal swarmer
+          const flutter = Math.sin(this.animTime * 28) * 3.5
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#0F766E'
+          ctx.strokeStyle = '#5EEAD4'
+          ctx.lineWidth = 1.8
+          ctx.beginPath()
+          ctx.moveTo(r * 1.05, 0)
+          ctx.lineTo(-r * 0.5, -r * 0.9 + flutter)
+          ctx.lineTo(-r * 0.15, 0)
+          ctx.lineTo(-r * 0.5, r * 0.9 - flutter)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          ctx.fillStyle = '#99F6E4'
+          ctx.beginPath()
+          ctx.arc(r * 0.25, 0, 2.5, 0, Math.PI * 2)
+          ctx.fill()
+          break
+        }
+
         // Acidic Chitin Bug: animated 6 scuttling legs + chitin carapace + mandibles
         ctx.strokeStyle = isFlashing ? '#FFFFFF' : '#CA8A04'
         ctx.lineWidth = 2
@@ -1003,6 +2127,33 @@ export class Enemy {
       }
 
       case 'Ranged Sniper': {
+        if (this.enemyId === 'ene_a2_03') {
+          // Prism Bolt Weaver: faceted sapphire diamond ranged spire + spinning emerald ring
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#064E3B'
+          ctx.strokeStyle = '#34D399'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(r * 0.95, 0)
+          ctx.lineTo(0, -r * 0.72)
+          ctx.lineTo(-r * 0.85, 0)
+          ctx.lineTo(0, r * 0.72)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.7)'
+          ctx.lineWidth = 1.6
+          ctx.beginPath()
+          ctx.arc(0, 0, r * 0.55, this.animTime * 8, this.animTime * 8 + Math.PI * 1.35)
+          ctx.stroke()
+
+          ctx.fillStyle = '#A7F3D0'
+          ctx.beginPath()
+          ctx.arc(r * 0.35, 0, 3.6, 0, Math.PI * 2)
+          ctx.fill()
+          break
+        }
+
         // Aegis Tech Drone: angular V-wing hunter chassis + spinning rotor pods + laser lens
         ctx.fillStyle = isFlashing ? '#FFFFFF' : '#0F172A'
         ctx.strokeStyle = '#00F0FF'
@@ -1033,8 +2184,222 @@ export class Enemy {
         break
       }
 
+      case 'Ranged Caster': {
+        // Astral Arcanist: hovering violet-gold rune octagon firing 3-orb fans
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#3B0764'
+        ctx.strokeStyle = '#E879F9'
+        ctx.lineWidth = 2.2
+        ctx.beginPath()
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + this.animTime * 1.4
+          const px = Math.cos(a) * r * 0.78
+          const py = Math.sin(a) * r * 0.78
+          if (i === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+
+        // Twin glowing gold arc emitters
+        ctx.strokeStyle = '#FACC15'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.arc(0, 0, r * 0.98, -0.75, 0.75)
+        ctx.stroke()
+
+        ctx.fillStyle = '#F0ABFC'
+        ctx.beginPath()
+        ctx.arc(r * 0.25, 0, 4.2, 0, Math.PI * 2)
+        ctx.fill()
+        break
+      }
+
       case 'Mini-Boss':
       case 'Boss': {
+        if (this.enemyId === 'ene_a2_05') {
+          // Astral Bastion Warden: heavy golden-amber fortress hull + twin shoulder AoE mortars
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#1E293B'
+          ctx.strokeStyle = '#F59E0B'
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2
+            const px = Math.cos(a) * r * 0.9
+            const py = Math.sin(a) * r * 0.9
+            if (i === 0) ctx.moveTo(px, py)
+            else ctx.lineTo(px, py)
+          }
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Twin shoulder AoE mortar cannons
+          ctx.fillStyle = '#475569'
+          ctx.strokeStyle = '#F97316'
+          ctx.lineWidth = 2
+          ctx.fillRect(-r * 0.2, -r * 0.98, r * 0.85, 8)
+          ctx.strokeRect(-r * 0.2, -r * 0.98, r * 0.85, 8)
+          ctx.fillRect(-r * 0.2, r * 0.98 - 8, r * 0.85, 8)
+          ctx.strokeRect(-r * 0.2, r * 0.98 - 8, r * 0.85, 8)
+
+          // Glowing orange-emerald citadel furnace core
+          const pulse = 5.5 + Math.sin(this.animTime * 6) * 2
+          ctx.fillStyle = '#F97316'
+          ctx.beginPath()
+          ctx.arc(0, 0, pulse + 3, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#34D399'
+          ctx.beginPath()
+          ctx.arc(0, 0, pulse * 0.55, 0, Math.PI * 2)
+          ctx.fill()
+          break
+        }
+
+        if (this.enemyId === 'boss_a2_05') {
+          // Emerald Prism Monarch (Area 2 W5 Boss): radiant emerald hexagonal citadel prism + 6 orbiting shard blades
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#064E3B'
+          ctx.strokeStyle = '#34D399'
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2
+            const px = Math.cos(a) * r * 0.92
+            const py = Math.sin(a) * r * 0.92
+            if (i === 0) ctx.moveTo(px, py)
+            else ctx.lineTo(px, py)
+          }
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Inner sapphire facet diamond
+          ctx.fillStyle = '#0F766E'
+          ctx.strokeStyle = '#FACC15'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(0, -r * 0.56)
+          ctx.lineTo(r * 0.56, 0)
+          ctx.lineTo(0, r * 0.56)
+          ctx.lineTo(-r * 0.56, 0)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Orbiting emerald prism blades
+          for (let i = 0; i < 6; i++) {
+            const oa = this.animTime * 2.5 + (i * Math.PI) / 3
+            const ox = Math.cos(oa) * (r + 8)
+            const oy = Math.sin(oa) * (r + 8)
+            ctx.fillStyle = i % 2 === 0 ? '#34D399' : '#38BDF8'
+            ctx.beginPath()
+            ctx.arc(ox, oy, 4, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          break
+        }
+
+        if (this.enemyId === 'boss_a2_10') {
+          // Astral Vortex Colossus (Area 2 W10 & Endless Boss): celestial star dreadnought + twin mortar pods
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#1E1B4B'
+          ctx.strokeStyle = '#38BDF8'
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          for (let i = 0; i < 10; i++) {
+            const a = (i / 10) * Math.PI * 2 + this.animTime * 0.4
+            const rad = i % 2 === 0 ? r * 0.95 : r * 0.62
+            const px = Math.cos(a) * rad
+            const py = Math.sin(a) * rad
+            if (i === 0) ctx.moveTo(px, py)
+            else ctx.lineTo(px, py)
+          }
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Swirling astral singularity core
+          const vortexPulse = 7 + Math.sin(this.animTime * 7) * 2
+          ctx.fillStyle = '#A855F7'
+          ctx.beginPath()
+          ctx.arc(0, 0, vortexPulse + 4, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#38BDF8'
+          ctx.beginPath()
+          ctx.arc(0, 0, vortexPulse * 0.65, 0, Math.PI * 2)
+          ctx.fill()
+
+          // 4 orbiting void-cyan beacons
+          for (let i = 0; i < 4; i++) {
+            const oa = -this.animTime * 2.6 + (i * Math.PI) / 2
+            const ox = Math.cos(oa) * (r + 9)
+            const oy = Math.sin(oa) * (r + 9)
+            ctx.fillStyle = '#F0ABFC'
+            ctx.beginPath()
+            ctx.arc(ox, oy, 4.2, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          break
+        }
+
+        if (this.enemyId === 'boss_a2_15') {
+          // Solar Archon Seraph (Area 2 W15 Final Boss): celestial winged golden crown + blinding solar core
+          ctx.save()
+          const wingBeat = Math.sin(this.animTime * 4) * 5
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#78350F'
+          ctx.strokeStyle = '#FACC15'
+          ctx.lineWidth = 3
+          // Twin seraphic solar wings
+          for (const side of [-1, 1]) {
+            ctx.beginPath()
+            ctx.moveTo(0, side * r * 0.35)
+            ctx.lineTo(-r * 0.85, side * (r * 1.08 + wingBeat))
+            ctx.lineTo(r * 0.4, side * (r * 0.9 + wingBeat))
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+          }
+          ctx.restore()
+
+          // Central decagonal solar fortress
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#312E81'
+          ctx.strokeStyle = '#FACC15'
+          ctx.lineWidth = 3.5
+          ctx.beginPath()
+          for (let i = 0; i < 10; i++) {
+            const a = (i / 10) * Math.PI * 2
+            const px = Math.cos(a) * r * 0.84
+            const py = Math.sin(a) * r * 0.84
+            if (i === 0) ctx.moveTo(px, py)
+            else ctx.lineTo(px, py)
+          }
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Radiant solar heart
+          const solarPulse = 9 + Math.sin(this.animTime * 8) * 2.5
+          ctx.fillStyle = '#F97316'
+          ctx.beginPath()
+          ctx.arc(0, 0, solarPulse + 5, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#FEF08A'
+          ctx.beginPath()
+          ctx.arc(0, 0, solarPulse * 0.72, 0, Math.PI * 2)
+          ctx.fill()
+
+          // 6 orbiting emerald-gold crown seals
+          for (let i = 0; i < 6; i++) {
+            const oa = this.animTime * 2.1 + (i * Math.PI) / 3
+            const ox = Math.cos(oa) * (r + 10)
+            const oy = Math.sin(oa) * (r + 10)
+            ctx.fillStyle = i % 2 === 0 ? '#FACC15' : '#34D399'
+            ctx.beginPath()
+            ctx.arc(ox, oy, 4.5, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          break
+        }
+
         // Aegis Commander Drone: octagonal dreadnought hull + 4 orbiting shield pylons + pulsing core
         ctx.fillStyle = isFlashing ? '#FFFFFF' : '#1E1B4B'
         ctx.strokeStyle = '#FFD700'
@@ -1124,6 +2489,24 @@ export class Enemy {
 
     ctx.restore()
 
+    // Active Burn flame aura on ignited enemies
+    if (this.burnTimer > 0) {
+      ctx.save()
+      for (let f = 0; f < 3; f++) {
+        const a = this.animTime * 6 + (f * Math.PI * 2) / 3
+        const fx = cx + Math.cos(a) * (r * 0.55)
+        const fy = cy + Math.sin(a) * (r * 0.35) - 4 - Math.abs(Math.sin(this.animTime * 14 + f)) * 6
+        ctx.fillStyle = f % 2 === 0 ? '#FB923C' : '#FACC15'
+        ctx.beginPath()
+        ctx.moveTo(fx - 4, fy + 5)
+        ctx.lineTo(fx, fy - 7)
+        ctx.lineTo(fx + 4, fy + 5)
+        ctx.closePath()
+        ctx.fill()
+      }
+      ctx.restore()
+    }
+
     // Boss charging indicator ring around boss chassis
     if (this.isBoss && this.telegraphs.some((t) => !t.hasTriggered)) {
       ctx.strokeStyle = '#FF0055'
@@ -1133,24 +2516,29 @@ export class Enemy {
       ctx.stroke()
     }
 
-    // Boss Nameplate
+    // Boss / Mini-Boss Nameplate
     if (this.isBoss) {
       ctx.fillStyle = '#FFD700'
       ctx.font = 'bold 11px monospace'
       ctx.textAlign = 'center'
       ctx.fillText(this.bossTitle || 'COMMANDER BOSS', cx, screenY - 14)
+    } else if (this.isMiniBoss) {
+      ctx.fillStyle = '#FBBF24'
+      ctx.font = 'bold 10px monospace'
+      ctx.textAlign = 'center'
+      ctx.fillText('WARDEN MINI-BOSS', cx, screenY - 13)
     }
 
     // Health bar with dark backing
     const healthPercent = Math.max(0, Math.min(1, this.health / this.maxHealth))
-    if (healthPercent < 1 || this.isBoss) {
+    if (healthPercent < 1 || this.isBoss || this.isMiniBoss) {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
       ctx.fillRect(screenX - 1, screenY - 9, this.width + 2, 6)
-      ctx.fillStyle = this.isBoss ? '#FFD700' : '#FF0055'
+      ctx.fillStyle = this.isBoss ? '#FFD700' : this.isMiniBoss ? '#F97316' : '#FF0055'
       ctx.fillRect(screenX, screenY - 8, this.width * healthPercent, 4)
     }
 
-    // Enemy Laser Projectiles
+    // Enemy Laser / Arcane Projectiles
     for (const proj of this.projectiles) {
       const { x: projX, y: projY } = camera.worldToScreen(proj.x, proj.y)
       const angle = Math.atan2(proj.direction.y, proj.direction.x)
@@ -1164,6 +2552,35 @@ export class Enemy {
       ctx.fillStyle = '#FFFFFF'
       ctx.beginPath()
       ctx.arc(2, 0, Math.max(1.5, proj.height * 0.2), 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    // Airborne Arcing AoE Mortar Bombs (heading toward ground indicators)
+    for (const aoe of this.aoeProjectiles) {
+      if (aoe.hasDetonated) continue
+      const groundScreen = camera.worldToScreen(aoe.currentX, aoe.currentY)
+      const orbY = groundScreen.y - aoe.arcOffsetY
+      ctx.save()
+      // Ground shadow under arcing mortar
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+      ctx.beginPath()
+      ctx.ellipse(groundScreen.x, groundScreen.y, 10, 5, 0, 0, Math.PI * 2)
+      ctx.fill()
+
+      // Fiery mortar core
+      ctx.fillStyle = '#F97316'
+      ctx.beginPath()
+      ctx.arc(groundScreen.x, orbY, 10, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#FEF08A'
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.arc(groundScreen.x, orbY, 10, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.fillStyle = '#FFFFFF'
+      ctx.beginPath()
+      ctx.arc(groundScreen.x - 2, orbY - 2, 4, 0, Math.PI * 2)
       ctx.fill()
       ctx.restore()
     }
@@ -1209,13 +2626,124 @@ export class Enemy {
 }
 
 /**
+ * Checks whether a target circle is caught inside a detonating enemy AoE projectile indicator
+ */
+export function checkEnemyAoeHit(
+  aoe: EnemyAoeProjectile,
+  targetCircle: { x: number; y: number; radius: number }
+): boolean {
+  const dx = targetCircle.x - aoe.targetX
+  const dy = targetCircle.y - aoe.targetY
+  return Math.hypot(dx, dy) <= aoe.radius + targetCircle.radius * 0.65
+}
+
+/**
+ * Returns full planned track rectangles for a closing_side_lasers attack (reaching 50% across arena)
+ */
+export function getClosingSideLaserTrackRects(
+  telegraph: BossTelegraphAttack
+): Array<{ x: number; y: number; width: number; height: number }> {
+  const b = telegraph.bounds
+  if (!b) return []
+  const reach = telegraph.closingReachRatio ?? 0.5
+  const mode = telegraph.sideMode ?? 'left'
+  const w = b.width * reach
+
+  if (mode === 'left') {
+    return [{ x: b.left, y: b.top, width: w, height: b.height }]
+  }
+  if (mode === 'right') {
+    return [{ x: b.left + b.width - w, y: b.top, width: w, height: b.height }]
+  }
+  // pincer: left closes upper half to center, right closes lower half to center
+  return [
+    { x: b.left, y: b.top, width: w, height: b.height * 0.5 },
+    { x: b.left + b.width - w, y: b.top + b.height * 0.5, width: w, height: b.height * 0.5 }
+  ]
+}
+
+/**
+ * Returns the active sweeping rectangles of closing_side_lasers at current activeTimer progress
+ */
+export function getClosingSideLaserRects(
+  telegraph: BossTelegraphAttack,
+  forcedProgress?: number
+): Array<{ x: number; y: number; width: number; height: number }> {
+  const b = telegraph.bounds
+  if (!b) return []
+  const reach = telegraph.closingReachRatio ?? 0.5
+  const mode = telegraph.sideMode ?? 'left'
+  const sweepDuration = Math.max(0.1, telegraph.activeDuration * 0.8)
+  const rawProgress =
+    forcedProgress !== undefined
+      ? forcedProgress
+      : telegraph.hasTriggered
+        ? Math.min(1, telegraph.activeTimer / sweepDuration)
+        : 0
+  const progress = Math.max(0, Math.min(1, rawProgress))
+  const curW = b.width * reach * progress
+
+  if (mode === 'left') {
+    return [{ x: b.left, y: b.top, width: curW, height: b.height }]
+  }
+  if (mode === 'right') {
+    return [{ x: b.left + b.width - curW, y: b.top, width: curW, height: b.height }]
+  }
+  return [
+    { x: b.left, y: b.top, width: curW, height: b.height * 0.5 },
+    { x: b.left + b.width - curW, y: b.top + b.height * 0.5, width: curW, height: b.height * 0.5 }
+  ]
+}
+
+/**
  * Checks whether a player circle is caught inside a triggered boss telegraphed attack
  */
 export function checkBossTelegraphHit(
   telegraph: BossTelegraphAttack,
   targetCircle: { x: number; y: number; radius: number }
 ): boolean {
-  if (telegraph.kind === 'mega_laser') {
+  if (telegraph.kind === 'bullet_hell') {
+    return false // Projectiles are checked via enemy.projectiles collisions
+  }
+
+  if (telegraph.kind === 'closing_side_lasers') {
+    const rects = getClosingSideLaserRects(telegraph)
+    const effectiveR = targetCircle.radius * 0.7
+    for (const r of rects) {
+      if (r.width <= 0 || r.height <= 0) continue
+      const closestX = Math.max(r.x, Math.min(targetCircle.x, r.x + r.width))
+      const closestY = Math.max(r.y, Math.min(targetCircle.y, r.y + r.height))
+      const dx = targetCircle.x - closestX
+      const dy = targetCircle.y - closestY
+      if (dx * dx + dy * dy <= effectiveR * effectiveR) {
+        return true
+      }
+    }
+    return false
+  }
+
+  if (telegraph.kind === 'tracking_strikes' && telegraph.trackingBlasts) {
+    for (const blast of telegraph.trackingBlasts) {
+      if (blast.hasDetonated && !blast.hasDamagedPlayer) {
+        if (Math.hypot(targetCircle.x - blast.x, targetCircle.y - blast.y) <= blast.radius + targetCircle.radius * 0.65) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  if (telegraph.kind === 'half_arena' && telegraph.zoneRect) {
+    const r = telegraph.zoneRect
+    const closestX = Math.max(r.x, Math.min(targetCircle.x, r.x + r.width))
+    const closestY = Math.max(r.y, Math.min(targetCircle.y, r.y + r.height))
+    const dx = targetCircle.x - closestX
+    const dy = targetCircle.y - closestY
+    const effectiveR = targetCircle.radius * 0.55
+    return dx * dx + dy * dy <= effectiveR * effectiveR
+  }
+
+  if (telegraph.kind === 'mega_laser' || telegraph.kind === 'pursuit_beam') {
     const x1 = telegraph.x
     const y1 = telegraph.y
     const x2 = telegraph.endX ?? x1 + Math.cos(telegraph.angle ?? 0) * (telegraph.length ?? 660)
@@ -1289,7 +2817,7 @@ export function resolveEnemyCollisions(
       const acx = a.x + a.width / 2
       const acy = a.y + a.height / 2
       const rA = Math.max(8, a.width / 2)
-      const invMassA = a.isBoss ? 0.2 : 1.0
+      const invMassA = a.isStationaryBoss ? 0 : a.isBoss ? 0.2 : a.isMiniBoss ? 0.35 : 1.0
       const gx = Math.floor(acx / cellSize)
       const gy = Math.floor(acy / cellSize)
 
@@ -1328,8 +2856,9 @@ export function resolveEnemyCollisions(
               overlap = minDist - dist
             }
 
-            const invMassB = b.isBoss ? 0.2 : 1.0
+            const invMassB = b.isStationaryBoss ? 0 : b.isBoss ? 0.2 : b.isMiniBoss ? 0.35 : 1.0
             const totalInvMass = invMassA + invMassB
+            if (totalInvMass <= 0) continue
             const pushA = (overlap * invMassA) / totalInvMass
             const pushB = (overlap * invMassB) / totalInvMass
 
@@ -1345,6 +2874,7 @@ export function resolveEnemyCollisions(
 
   for (let i = 0; i < n; i++) {
     const e = active[i]
+    if (e.isStationaryBoss) continue
     e.x = Math.max(padding, Math.min(e.x, arenaSize - e.width - padding))
     e.y = Math.max(padding, Math.min(e.y, arenaSize - e.height - padding))
   }

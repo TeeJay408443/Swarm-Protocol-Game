@@ -63,3 +63,22 @@ export {
   stopMusic
 } from './AudioService'
 export type { AudioSettings, SoundType, AudioServiceConfig } from './AudioService'
+
+// Hero Mastery Service
+export {
+  HERO_MASTERY_TIERS,
+  getHeroMasteryTiers,
+  computeHeroMasteryBonuses,
+  formatMasteryBonusSummary,
+  evaluateHeroMasteryProgress,
+  getHeroMasteryAccountState,
+  getHeroMasteryProgress,
+  recordHeroRoundsCompleted,
+  useHeroMastery
+} from './heroMastery'
+export type {
+  HeroMasteryBonuses,
+  HeroMasteryTier,
+  HeroMasteryProgress,
+  HeroMasteryAccountState
+} from './heroMastery'

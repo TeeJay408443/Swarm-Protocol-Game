@@ -364,10 +364,10 @@ export function getUpgradeLevelPerkHint(upgradeId: string, targetLevel: number):
       4: '173px high-gravity singularity'
     },
     upg_18: {
-      1: 'Fires 4 radial ice shards',
-      2: 'Fires 6 radial shards + 2 pierces',
-      3: 'Fires 8 radial shards + 3 pierces',
-      4: 'Fires 10 radial shards + 4 pierces'
+      1: 'Fires 4 radial ice shards (0.85s freeze)',
+      2: 'Fires 6 radial shards + 2 pierces (1.0s freeze)',
+      3: 'Fires 8 radial shards + 3 pierces (1.15s freeze)',
+      4: 'Fires 10 radial shards + 4 pierces (1.3s freeze)'
     },
     upg_19: {
       1: 'Drains 2 enemies within 146px',
@@ -446,6 +446,78 @@ export function getUpgradeLevelPerkHint(upgradeId: string, targetLevel: number):
       2: 'Faster muzzle velocity & tighter burst',
       3: '3-round pulse rifle burst',
       4: '4-round piercing carbine volley'
+    },
+    wpn_cryo_railgun: {
+      1: 'Fires 1 piercing cryo rail slug (5 pierces)',
+      2: 'Wider cryo shatter burst + faster cycle',
+      3: 'Fires twin parallel cryo railguns',
+      4: 'High-impact frost shatter rails (8 pierces)'
+    },
+    wpn_solar_flail: {
+      1: 'Launches 1 spinning boomerang solar mace + fire pool',
+      2: 'Longer chain reach & wider scorching fire area',
+      3: 'Launches twin spinning solar maces in formation',
+      4: 'Blazing magma trail + high-impact return smash'
+    },
+    wpn_void_reaper: {
+      1: 'Abyssal scythe cleave + 90px void vortex',
+      2: 'Wider 126px scythe sweep & deeper vortex pull',
+      3: 'Launches twin void vortices on cleave',
+      4: 'Massive 165px singularity reaper cleave'
+    },
+    wpn_muramasa: {
+      1: 'Sweeps 176px Calamity crimson crescent wave',
+      2: '202px Bloodmoon blade wave + fierce damage',
+      3: '228px wide Muramasa cleave tearing through waves',
+      4: '254px hyper-crimson katana sweep (Vanguard Pair Boost)'
+    },
+    wpn_grim_reaper: {
+      1: 'Summons 1 Grim Reaper throwing scythes & draining HP',
+      2: 'Reaper siphons 2 enemies & throws faster scythes',
+      3: 'Throws twin spinning scythes per Reaper attack',
+      4: 'Drains 3 enemies for soul heal (Tech Engineer +1 Reaper)'
+    },
+    wpn_permafrost_spire: {
+      1: 'Fires freezing frost lance (1.5s freeze)',
+      2: 'Wider 64px ice burst & 1.65s solid freeze',
+      3: 'Launches twin parallel permafrost lances',
+      4: 'Twin 7-pierce cryo lances freezing packs for 1.9s'
+    },
+    upg_a2_01: {
+      1: 'Spawns 1 bouncing arena tornado (78px cyclone)',
+      2: 'Faster cyclone travel & wider 92px suction',
+      3: 'Spawns 2 bouncing tornadoes across the arena',
+      4: 'Twin 108px high-velocity cyclones with stronger pull'
+    },
+    upg_a2_02: {
+      1: 'Deploys 1 walking Laser Strider firing aimed beams',
+      2: 'Longer 306px aimed laser beam & boosted damage',
+      3: 'Deploys 2nd Laser Strider firing non-orbiting beams',
+      4: 'Overcharged 362px aimed Citadel disintegration beams'
+    },
+    upg_a2_03: {
+      1: 'Throws 1 piercing spear (5 pierces + 84px end burst)',
+      2: '7-target spear pierce + wider 102px AoE burst',
+      3: 'Hurls twin piercing spears + 120px shock burst',
+      4: 'Throws 3 crystal spears (10 pierces + 138px burst)'
+    },
+    upg_a2_04: {
+      1: 'Calls 1 falling starfall meteor (96px crater)',
+      2: 'Calls twin meteors + wider 114px blast crater',
+      3: 'Drops 3 staggered starfall meteors on clusters',
+      4: 'Calls 4 blazing meteors (142px crater shockwave)'
+    },
+    upg_a2_05: {
+      1: '2 orbiting emerald prism blades slice nearby foes',
+      2: 'Adds 3rd orbiting blade & faster spin speed',
+      3: '4 spinning prism blades + wider 137px orbit',
+      4: '5 high-speed gold-edged prism chakram blades'
+    },
+    upg_a2_06: {
+      1: 'Fires 1 Cryo-Nova frost orb freezing packs (1.5s)',
+      2: 'Fires twin frost orbs + 1.65s solid freeze',
+      3: 'Twin piercing Cryo-Nova orbs (114px freeze blast)',
+      4: 'Launches 3 frost orbs freezing swarms for 2.0s'
     }
   }
 
@@ -484,7 +556,19 @@ export function getUpgradeOverdriveHint(upgradeId: string): string {
     wpn_rusty_pistol: 'LV 5 OVERDRIVE: Salvaged 3-slug piercing scrap burst',
     wpn_misfire_coil: 'LV 5 OVERDRIVE: Overvolted 5-target 240px chain spark',
     wpn_bent_launcher: 'LV 5 OVERDRIVE: 3-shell 72px jury-rigged cluster mortar',
-    wpn_pulse_carbine: 'LV 5 OVERDRIVE: 5-round high-velocity piercing carbine barrage'
+    wpn_pulse_carbine: 'LV 5 OVERDRIVE: 5-round high-velocity piercing carbine barrage',
+    wpn_cryo_railgun: 'LV 5 OVERDRIVE: Tri-barrel 10-pierce sub-zero shatter rail volley',
+    wpn_solar_flail: 'LV 5 OVERDRIVE: Launches 3 spinning solar maces scorching wide magma arenas',
+    wpn_void_reaper: 'LV 5 OVERDRIVE: Cataclysmic 200px reaper arc + twin singularities',
+    wpn_muramasa: 'LV 5 OVERDRIVE: Dual/Triple Calamity Muramasa crescent waves obliterating entire screens',
+    wpn_grim_reaper: 'LV 5 OVERDRIVE: Twin/Triple Grim Reapers hurling 3 scythes & siphoning HP to you',
+    wpn_permafrost_spire: 'LV 5 OVERDRIVE: Tri-lance glacial barrage freezing enemies solid for 2.1s',
+    upg_a2_01: 'LV 5 OVERDRIVE: Spawns 3 hyper-cyclones bouncing wildly with crackling storm cores',
+    upg_a2_02: 'LV 5 OVERDRIVE: Twin Apex Laser Striders sweep 3-beam non-orbiting laser arrays',
+    upg_a2_03: 'LV 5 OVERDRIVE: Hurls 4 Golden Astral Spears (14 pierces) erupting in 160px supernovas',
+    upg_a2_04: 'LV 5 OVERDRIVE: 5 Starfall Meteors bombard the arena leaving 164px super-craters',
+    upg_a2_05: 'LV 5 OVERDRIVE: 6 Golden Prism Chakrams orbit at hypersonic speed shredding swarms',
+    upg_a2_06: 'LV 5 OVERDRIVE: 4 Permafrost Cryo-Nova orbs freeze entire waves solid for 2.2s'
   }
   return hints[upgradeId] || 'LV 5 OVERDRIVE: Massive damage, speed, and evolved weapon pattern'
 }

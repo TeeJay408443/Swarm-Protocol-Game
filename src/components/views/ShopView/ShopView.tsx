@@ -1,12 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../../ui/Button'
-import { Modal } from '../../ui/Modal'
 import { useToast } from '../../ui/ToastContainer'
 import { useSupabase } from '../../../hooks/useSupabase'
 import {
-  type CrateOpenResult,
-  type GearRarity,
   getTotalStackCount,
   MAX_EQUIPPED_ACCESSORIES,
   RARITY_META,
@@ -17,13 +14,9 @@ import {
   type SupplyCrateTier,
   useShopState
 } from '../../../services/shop'
+import { CrateOpeningOverlay, type CrateOpeningPayload } from './CrateOpeningOverlay'
 
 type ShopFilter = 'all' | 'crates' | 'accessory'
-
-function computeWeaponDps(damage: number, cooldownSeconds: number): string {
-  if (cooldownSeconds <= 0) return `${damage}/tick`
-  return `${(damage / cooldownSeconds).toFixed(1)} DPS`
-}
 
 function formatOddsPct(weight: number | undefined): string {
   if (!weight) return '0%'
@@ -38,7 +31,8 @@ function getCrateSummaryOdds(crate: SupplyCrateTier) {
   const rarePlus =
     (crate.rarityWeights.rare || 0) +
     (crate.rarityWeights.epic || 0) +
-    (crate.rarityWeights.legendary || 0)
+    (crate.rarityWeights.legendary || 0) +
+    (crate.rarityWeights.mythic || 0)
   return {
     bad,
     common,
@@ -46,6 +40,7 @@ function getCrateSummaryOdds(crate: SupplyCrateTier) {
     rare: crate.rarityWeights.rare || 0,
     epic: crate.rarityWeights.epic || 0,
     legendary: crate.rarityWeights.legendary || 0,
+    mythic: crate.rarityWeights.mythic || 0,
     rarePlus
   }
 }
@@ -56,9 +51,10 @@ export function ShopView() {
   const { user } = useSupabase()
   const effectiveUserId = user?.id || 'guest_user'
 
-  const { shopState, buyItem, openCrate } = useShopState(effectiveUserId)
+  const { shopState, buyItem, openCrate, openCrates } = useShopState(effectiveUserId)
   const [filter, setFilter] = useState<ShopFilter>('all')
-  const [crateResult, setCrateResult] = useState<CrateOpenResult | null>(null)
+  const [crateOverlay, setCrateOverlay] = useState<CrateOpeningPayload | null>(null)
+  const overlaySeqRef = useRef(1)
 
   const directAccessories = useMemo(
     () => SHOP_ACCESSORIES.filter((a) => !a.crateOnly),
@@ -91,27 +87,67 @@ export function ShopView() {
     }
   }
 
-  const handleOpenCrate = (crateId: string) => {
+  const handleOpenCrate = (crateId: string, count: number = 1) => {
+    if (count > 1) {
+      const batch = openCrates(crateId, count)
+      if (!batch.success || !batch.crate) {
+        if (batch.error) toast.warning(batch.error)
+        return
+      }
+      setCrateOverlay({
+        key: overlaySeqRef.current++,
+        crate: batch.crate,
+        drops: batch.drops,
+        highestRarity: batch.highestRarity || 'common',
+        hasMythic: batch.hasMythic,
+        hasLegendary: batch.hasLegendary
+      })
+      if (batch.hasMythic) {
+        toast.success(`MYTHIC DROP pulled from ${count}× ${batch.crate.name}!`)
+      } else if (batch.hasLegendary) {
+        toast.success(`Legendary gear pulled from ${count}× ${batch.crate.name}!`)
+      } else {
+        toast.info(`Opened ${count}× ${batch.crate.name}!`)
+      }
+      return
+    }
+
     const result = openCrate(crateId)
-    if (!result.success) {
+    if (!result.success || !result.crate || !result.item || !result.rarity) {
       if (result.error) toast.warning(result.error)
       return
     }
-    setCrateResult(result)
-    if (result.item) {
-      if (result.isDuplicate) {
-        toast.info(
-          `Stacked ${result.item.name} (0★ · ×${result.totalOwnedCount || 1} owned) — fuse duplicates in Armory!`
-        )
-      } else if (result.isBadGear) {
-        toast.warning(
-          `Crate rolled ${result.item.name} (0★ · ${RARITY_META[result.item.rarity].label}).`
-        )
-      } else {
-        toast.success(
-          `Unlocked ${result.item.name} (0★ · ${RARITY_META[result.item.rarity].label})!`
-        )
-      }
+    setCrateOverlay({
+      key: overlaySeqRef.current++,
+      crate: result.crate,
+      drops: [
+        {
+          item: result.item,
+          rarity: result.rarity,
+          stars: result.stars ?? 0,
+          isNewUnlock: Boolean(result.isNewUnlock),
+          isBadGear: Boolean(result.isBadGear),
+          isDuplicate: Boolean(result.isDuplicate),
+          newCount: result.newCount ?? 1,
+          totalOwnedCount: result.totalOwnedCount ?? 1
+        }
+      ],
+      highestRarity: result.rarity,
+      hasMythic: result.rarity === 'mythic',
+      hasLegendary: result.rarity === 'legendary'
+    })
+    if (result.isDuplicate) {
+      toast.info(
+        `Stacked ${result.item.name} (0★ · ×${result.totalOwnedCount || 1} owned) — fuse duplicates in Armory!`
+      )
+    } else if (result.isBadGear) {
+      toast.warning(
+        `Crate rolled ${result.item.name} (0★ · ${RARITY_META[result.item.rarity].label}).`
+      )
+    } else {
+      toast.success(
+        `Unlocked ${result.item.name} (0★ · ${RARITY_META[result.item.rarity].label})!`
+      )
     }
   }
 
@@ -119,7 +155,8 @@ export function ShopView() {
   const showAccessories = filter === 'all' || filter === 'accessory'
 
   const renderCrateCard = (crate: SupplyCrateTier) => {
-    const canAfford = shopState.balance >= crate.price
+    const canAffordOne = shopState.balance >= crate.price
+    const canAffordTen = shopState.balance >= crate.price * 10
     const shortfall = Math.max(0, crate.price - shopState.balance)
     const odds = getCrateSummaryOdds(crate)
 
@@ -141,12 +178,18 @@ export function ShopView() {
 
           <div className="border-t border-b border-gray-800 py-3 mb-4 space-y-1.5 text-xs tabular-nums">
             <div className="flex justify-between">
-              <span className="text-red-400">Scrap / Faulty (Bad Gear)</span>
-              <span className="font-semibold text-red-400">{formatOddsPct(odds.bad)}</span>
+              <span className={odds.bad === 0 ? 'text-gray-500' : 'text-red-400'}>
+                Scrap / Faulty (Bad Gear)
+              </span>
+              <span className={`font-semibold ${odds.bad === 0 ? 'text-gray-500' : 'text-red-400'}`}>
+                {odds.bad === 0 ? 'Excluded (0%)' : formatOddsPct(odds.bad)}
+              </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-300">Common</span>
-              <span className="font-semibold text-gray-300">{formatOddsPct(odds.common)}</span>
+              <span className={odds.common === 0 ? 'text-gray-500' : 'text-gray-300'}>Common</span>
+              <span className={`font-semibold ${odds.common === 0 ? 'text-gray-500' : 'text-gray-300'}`}>
+                {odds.common === 0 ? 'Excluded (0%)' : formatOddsPct(odds.common)}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-emerald-400">Uncommon</span>
@@ -164,20 +207,39 @@ export function ShopView() {
               <span className="text-hazard-gold">Legendary</span>
               <span className="font-semibold text-hazard-gold">{formatOddsPct(odds.legendary)}</span>
             </div>
+            <div className="flex justify-between">
+              <span className={odds.mythic > 0 ? 'text-rose-400 font-semibold' : 'text-gray-500'}>
+                Mythic
+              </span>
+              <span className={`font-semibold ${odds.mythic > 0 ? 'text-rose-400' : 'text-gray-500'}`}>
+                {formatOddsPct(odds.mythic)}
+              </span>
+            </div>
           </div>
         </div>
 
-        <Button
-          variant={canAfford ? 'primary' : 'secondary'}
-          size="sm"
-          className="w-full"
-          disabled={!canAfford}
-          onClick={() => handleOpenCrate(crate.id)}
-        >
-          {canAfford
-            ? `Open Crate • ${crate.price.toLocaleString()} Coins`
-            : `Need ${shortfall.toLocaleString()} More Coins`}
-        </Button>
+        <div className="space-y-2">
+          <Button
+            variant={canAffordOne ? 'primary' : 'secondary'}
+            size="sm"
+            className="w-full"
+            disabled={!canAffordOne}
+            onClick={() => handleOpenCrate(crate.id, 1)}
+          >
+            {canAffordOne
+              ? `Open 1 • ${crate.price.toLocaleString()} Coins`
+              : `Need ${shortfall.toLocaleString()} More Coins`}
+          </Button>
+          <Button
+            variant={canAffordTen ? 'secondary' : 'ghost'}
+            size="sm"
+            className="w-full"
+            disabled={!canAffordTen}
+            onClick={() => handleOpenCrate(crate.id, 10)}
+          >
+            {`Open ×10 • ${(crate.price * 10).toLocaleString()} Coins`}
+          </Button>
+        </div>
       </article>
     )
   }
@@ -263,10 +325,6 @@ export function ShopView() {
       </article>
     )
   }
-
-  const droppedRarityMeta = crateResult?.rarity
-    ? RARITY_META[crateResult.rarity as GearRarity]
-    : null
 
   return (
     <div className="min-h-screen bg-slate-carbon text-white p-6">
@@ -358,7 +416,7 @@ export function ShopView() {
                 stack at 0★ so you can fuse gear up to 5★ in the Armory.
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
               {SUPPLY_CRATES.map(renderCrateCard)}
             </div>
           </section>
@@ -381,109 +439,17 @@ export function ShopView() {
         )}
       </div>
 
-      {/* Crate Drop Reveal Modal */}
-      <Modal
-        isOpen={Boolean(crateResult?.success && crateResult?.item)}
-        onClose={() => setCrateResult(null)}
-        title={crateResult?.crate ? `${crateResult.crate.name} Opened` : 'Supply Crate Result'}
-        size="sm"
-      >
-        {crateResult?.item && droppedRarityMeta && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between text-xs font-mono uppercase">
-              <span style={{ color: droppedRarityMeta.color }} className="font-bold">
-                {droppedRarityMeta.label} ·{' '}
-                {crateResult.item.kind === 'weapon' ? 'Weapon' : 'Accessory'}
-              </span>
-              {crateResult.isDuplicate ? (
-                <span className="text-hazard-gold font-semibold tabular-nums">
-                  Stacked · ×{crateResult.totalOwnedCount || 1} Owned (0★)
-                </span>
-              ) : (
-                <span className="text-emerald-400 font-semibold">New Unlock · 0★</span>
-              )}
-            </div>
-
-            <div>
-              <h3 className="text-2xl font-bold text-white">{crateResult.item.name}</h3>
-              <p className="text-xs font-mono text-gray-400 mt-0.5">☆☆☆☆☆ · 0★ Base Drop</p>
-              <p className="text-sm text-gray-300 mt-2">{crateResult.item.function_desc}</p>
-            </div>
-
-            {crateResult.item.kind === 'weapon' ? (
-              <div className="grid grid-cols-3 gap-2 text-center border-t border-b border-gray-700 py-3">
-                <div>
-                  <p className="text-[11px] uppercase text-gray-400">Damage</p>
-                  <p className="text-sm font-bold text-white tabular-nums">
-                    {crateResult.item.damage}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase text-gray-400">Cooldown</p>
-                  <p className="text-sm font-bold text-white tabular-nums">
-                    {crateResult.item.cooldown_s}s
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase text-gray-400">Output</p>
-                  <p className="text-sm font-bold text-hazard-gold tabular-nums">
-                    {computeWeaponDps(crateResult.item.damage, crateResult.item.cooldown_s)}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="border-t border-b border-gray-700 py-3">
-                <p className="text-xs uppercase text-gray-400 mb-1">Modifier (0★)</p>
-                <p
-                  className={`text-sm font-semibold ${
-                    crateResult.isBadGear ? 'text-red-400' : 'text-cyan-accent'
-                  }`}
-                >
-                  {crateResult.item.statSummary}
-                </p>
-              </div>
-            )}
-
-            <p className="text-xs text-gray-400">
-              {crateResult.newCount && crateResult.newCount >= 2
-                ? `You have ×${crateResult.newCount} copies at 0★—ready to fuse into 1★ in the Armory Fusion Forge!`
-                : 'Collect 2 matching copies at the same star tier to fuse them stronger (up to 5★).'}
-            </p>
-
-            {crateResult.isBadGear && (
-              <p className="text-xs text-red-300">
-                Bad gear drop: weaker or flawed performance. Fuse duplicates to shrink penalties or salvage in the Armory for {crateResult.item.salvageValue} Coins.
-              </p>
-            )}
-
-            <div className="flex flex-wrap justify-end gap-2 pt-2">
-              {crateResult.crate && shopState.balance >= crateResult.crate.price && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleOpenCrate(crateResult.crate!.id)}
-                >
-                  Open Another ({crateResult.crate.price} Coins)
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  const canFuseNow = (crateResult.newCount ?? 0) >= 2
-                  setCrateResult(null)
-                  navigate(canFuseNow ? '/armory?tab=forge' : '/armory?tab=inventory')
-                }}
-              >
-                {crateResult.newCount && crateResult.newCount >= 2 ? 'Fuse in Armory' : 'Open Armory'}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setCrateResult(null)}>
-                Close
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {/* Animated Crate Drop Reveal Overlay */}
+      <CrateOpeningOverlay
+        payload={crateOverlay}
+        balance={shopState.balance}
+        onClose={() => setCrateOverlay(null)}
+        onOpenMore={(crateId, count) => handleOpenCrate(crateId, count)}
+        onNavigateArmory={(tab) => {
+          setCrateOverlay(null)
+          navigate(`/armory?tab=${tab}`)
+        }}
+      />
     </div>
   )
 }

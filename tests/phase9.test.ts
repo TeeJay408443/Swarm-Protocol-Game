@@ -35,9 +35,27 @@ import {
   shouldSpawnRegularEnemiesInWave,
   WAVE_15_FINAL_BOSS_BASE_HP
 } from '../src/config/arenas'
+import {
+  computeHeroBurnPerTick,
+  getArcSlashConfig,
+  getGrimReaperWeaponConfig,
+  getHeroAbility,
+  getHeroDamageReduction,
+  getMuramasaWeaponConfig,
+  getPairedHeroArcSlashBonus,
+  getSummonCountForUpgrade,
+  HERO_ABILITY_CONSTANTS,
+  resolveStartingUpgradeIds,
+  shouldApplyHomingForHero
+} from '../src/config/heroAbilities'
+import {
+  AREA_TWO_UPGRADES,
+  getAvailableRunUpgrades,
+  isAreaTwoUpgradesUnlocked
+} from '../src/config/areaUpgrades'
 import { heroes, enemies, upgrades, achievements } from '../src/db/seedData'
 import { validateSeedData } from '../src/db/validateSeed'
-import { getEnemies } from '../src/services/database'
+import { getEnemies, getUpgrades } from '../src/services/database'
 import {
   calculateScoreFormula,
   estimateWaveFromSeconds,
@@ -102,6 +120,7 @@ import {
   isBadGearRarity,
   MAX_EQUIPPED_ACCESSORIES,
   MAX_GEAR_STARS,
+  openMultipleSupplyCrates,
   openSupplyCrate,
   pickRarityFromCrate,
   purchaseShopItem,
@@ -112,6 +131,15 @@ import {
   SUPPLY_CRATES,
   toggleEquipAccessory
 } from '../src/services/shop'
+import {
+  computeHeroMasteryBonuses,
+  evaluateHeroMasteryProgress,
+  formatMasteryBonusSummary,
+  getHeroMasteryProgress,
+  getHeroMasteryTiers,
+  HERO_MASTERY_TIERS,
+  recordHeroRoundsCompleted
+} from '../src/services/heroMastery'
 import { createLoadout, getExtendedLoadout } from '../src/services/loadouts'
 
 describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
@@ -574,15 +602,18 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
   it('credits Battle Coins from combat, blocks direct weapon buys, sells accessories, and equips crate gear in Armory', async () => {
     const shopTestUser = `shop_user_${Date.now()}`
 
-    // Canonical seed upgrade count is 21 (including Inferno Fireball) while shop exposes 10 crate weapons + 10 accessories
+    // Canonical seed upgrade count is 21 (including Inferno Fireball) while shop exposes 16 crate weapons + 14 accessories
     assert.equal(upgrades.length, 21)
-    assert.equal(SHOP_WEAPONS.length, 10)
-    assert.equal(SHOP_ACCESSORIES.length, 10)
-    assert.equal(shopWeaponsAsUpgrades().length, 10)
+    assert.equal(SHOP_WEAPONS.length, 16)
+    assert.equal(SHOP_ACCESSORIES.length, 14)
+    assert.equal(shopWeaponsAsUpgrades().length, 16)
 
-    // Higher Shop pricing verified
+    // Higher Shop pricing & Celestial Seeker Swarm Epic rarity verified
     assert.ok((getShopItemById('wpn_plasma_lance')?.price ?? 0) >= 200)
-    assert.ok((getShopItemById('wpn_celestial_swarm')?.price ?? 0) >= 2000)
+    assert.ok((getShopItemById('wpn_void_reaper')?.price ?? 0) >= 2000)
+    assert.equal(getShopWeaponById('wpn_celestial_swarm')?.rarity, 'epic')
+    assert.equal(getShopWeaponById('wpn_celestial_swarm')?.tierLabel, 'Epic')
+    assert.equal(getShopWeaponById('wpn_celestial_swarm')?.accentColor, '#C084FC')
 
     // Initial empty wallet
     const initial = getShopAccountState(shopTestUser)
@@ -718,7 +749,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
 
   it('opens Supply Crates with bad-item risk, rarer high-tier drops, 0★ stacking duplicates, and Armory salvaging', () => {
     const crateUser = `crate_user_${Date.now()}`
-    assert.equal(SUPPLY_CRATES.length, 3)
+    assert.equal(SUPPLY_CRATES.length, 4)
 
     const salvageCrate = getSupplyCrateById('crate_salvage')!
     const apexCrate = getSupplyCrateById('crate_apex')!
@@ -732,7 +763,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const apexHighWeight =
       (apexCrate.rarityWeights.rare || 0) +
       (apexCrate.rarityWeights.epic || 0) +
-      (apexCrate.rarityWeights.legendary || 0)
+      (apexCrate.rarityWeights.legendary || 0) +
+      (apexCrate.rarityWeights.mythic || 0)
 
     assert.ok(salvageBadWeight > 0.45)
     assert.ok(salvageHighWeight < 0.1)
@@ -766,8 +798,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(dupResult.totalOwnedCount, 2)
     assert.equal(dupResult.refundCoins, 0)
 
-    // Deterministic roll 3: Apex crate high roll yields Legendary gear
-    const rollsLegend = [0.99, 0.1]
+    // Deterministic roll 3: Apex crate roll in [0.955, 0.99) yields Legendary gear
+    const rollsLegend = [0.97, 0.1]
     let idxLeg = 0
     const legendResult = openSupplyCrate(crateUser, 'crate_apex', () => rollsLegend[idxLeg++] ?? 0)
     assert.equal(legendResult.success, true)
@@ -1323,6 +1355,483 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(reset.settings.healthMultiplier, 1)
     assert.equal(reset.settings.godMode, false)
   })
+
+  it('equips all 6 reworked heroes with distinct signature abilities', () => {
+    assert.equal(heroes.length, 6)
+    for (const h of heroes) {
+      const spec = getHeroAbility(h.id)
+      assert.equal(spec.heroId, h.id)
+      assert.ok(spec.abilityName.length > 0 && spec.shortTag.length > 0)
+    }
+
+    // 1. Vanguard Blade (hero_01): Buffed Muramasa Arc Slash (larger radius, higher damage, faster cooldown)
+    const vanguardArc = getArcSlashConfig(40, 1, 'hero_01')
+    const standardArc = getArcSlashConfig(40, 1, 'hero_02')
+    assert.equal(vanguardArc.isMuramasa, true)
+    assert.equal(standardArc.isMuramasa, false)
+    assert.ok(vanguardArc.radius > standardArc.radius)
+    assert.ok(vanguardArc.damage > standardArc.damage)
+    assert.ok(vanguardArc.cooldownScale < 1)
+
+    // 2. Outpost Ranger (hero_02): Homing guidance applied to ALL projectiles
+    assert.equal(shouldApplyHomingForHero('hero_02'), true)
+    assert.equal(shouldApplyHomingForHero('hero_01'), false)
+    const homingBullet = new Projectile({
+      x: 100,
+      y: 100,
+      direction: { x: 1, y: 0 },
+      speed: 400,
+      damage: 25,
+      type: 'Basic',
+      homingTarget: { x: 100, y: 260 },
+      homingStrength: HERO_ABILITY_CONSTANTS.RANGER_HOMING_STRENGTH
+    })
+    homingBullet.update(0.1)
+    assert.ok(homingBullet.direction.y > 0.2, 'Outpost Ranger projectile must steer toward enemy target')
+
+    // 3. Tech Engineer (hero_03): Extra minions (+2 drones, +1 echoes/turrets) & +15% minion fire rate
+    assert.equal(getSummonCountForUpgrade('upg_01', 1, 'hero_03'), 3)
+    assert.equal(getSummonCountForUpgrade('upg_01', 1, 'hero_01'), 1)
+    assert.equal(getSummonCountForUpgrade('upg_01', 5, 'hero_03'), 5)
+    assert.equal(getSummonCountForUpgrade('upg_14', 1, 'hero_03'), 2)
+    assert.equal(getSummonCountForUpgrade('upg_20', 1, 'hero_03'), 2)
+    assert.ok(HERO_ABILITY_CONSTANTS.ENGINEER_SUMMON_FIRE_RATE_BONUS > 1)
+
+    // 4. Chrono Operative (hero_04): 3-second clones copying player attacks at 50% damage
+    assert.equal(HERO_ABILITY_CONSTANTS.CHRONO_CLONE_DURATION, 3.0)
+    assert.equal(HERO_ABILITY_CONSTANTS.CHRONO_CLONE_DAMAGE_RATIO, 0.5)
+
+    // 5. Shield Paladin (hero_05): 25% damage reduction + 10s Spacebar dash
+    assert.equal(getHeroDamageReduction('hero_05'), 0.25)
+    assert.equal(getHeroDamageReduction('hero_01'), 0)
+    assert.equal(HERO_ABILITY_CONSTANTS.PALADIN_DASH_COOLDOWN, 10.0)
+
+    // 6. Pyrotechnic Specialist (hero_06): Burn DoT applied on every hit
+    const paladinTargetPlayer = new Player({ x: 100, y: 100, hero: heroes[5] })
+    const burnDummy = new Enemy({
+      x: 200,
+      y: 100,
+      enemyData: enemies[0],
+      target: paladinTargetPlayer
+    })
+    burnDummy.isSpawning = false
+    const perTick = computeHeroBurnPerTick(50)
+    assert.equal(perTick, 15) // 30% of 50 = 15
+    burnDummy.applyBurn(perTick, HERO_ABILITY_CONSTANTS.PYRO_BURN_DURATION)
+    assert.equal(burnDummy.burnTimer, 3.0)
+    assert.equal(burnDummy.tickBurn(0.25), 0)
+    assert.equal(burnDummy.tickBurn(0.3), 15)
+
+    // 7. Heroes keep their starting weapon even when a Shop weapon and/or Loadout weapon is equipped
+    const vanguardWithShopWeapon = resolveStartingUpgradeIds({
+      heroStartingUpgradeId: 'upg_12',
+      equippedWeaponId: 'wpn_plasma_lance'
+    })
+    assert.deepEqual(vanguardWithShopWeapon, ['upg_12', 'wpn_plasma_lance'])
+
+    const vanguardWithLoadoutAndShopWeapon = resolveStartingUpgradeIds({
+      heroStartingUpgradeId: 'upg_12',
+      loadoutUpgradeId: 'wpn_chrono_gatling',
+      equippedWeaponId: 'wpn_plasma_lance'
+    })
+    assert.deepEqual(vanguardWithLoadoutAndShopWeapon, [
+      'upg_12',
+      'wpn_chrono_gatling',
+      'wpn_plasma_lance'
+    ])
+
+    // Deduplicates if loadout/equipped already matches hero's starter or each other
+    const dedupedStarter = resolveStartingUpgradeIds({
+      heroStartingUpgradeId: 'upg_12',
+      loadoutUpgradeId: 'upg_12',
+      equippedWeaponId: 'wpn_plasma_lance'
+    })
+    assert.deepEqual(dedupedStarter, ['upg_12', 'wpn_plasma_lance'])
+  })
+
+  it('provides 2000-coin Mythic crate (4% mythic, 10% legendary, no common/scrap), 1% mythic in 3rd crate, new weapons/gears, and Mythic Muramasa Vanguard pairing', () => {
+    const apexCrate = getSupplyCrateById('crate_apex')!
+    assert.ok(apexCrate)
+    assert.equal(apexCrate.rarityWeights.mythic, 0.01)
+    assert.equal(pickRarityFromCrate(apexCrate, 0.995), 'mythic')
+
+    const mythicCrate = getSupplyCrateById('crate_mythic')!
+    assert.ok(mythicCrate)
+    assert.equal(mythicCrate.price, 2000)
+    assert.equal(mythicCrate.rarityWeights.mythic, 0.04)
+    assert.equal(mythicCrate.rarityWeights.legendary, 0.1)
+    assert.equal(mythicCrate.rarityWeights.common || 0, 0)
+    assert.equal(mythicCrate.rarityWeights.scrap || 0, 0)
+    assert.equal(mythicCrate.rarityWeights.faulty || 0, 0)
+
+    // Sweeping deterministic roll range across [0, 1) never returns scrap, faulty, or common
+    for (let i = 0; i < 200; i++) {
+      const r = i / 200
+      const rarity = pickRarityFromCrate(mythicCrate, r)
+      assert.notEqual(rarity, 'scrap')
+      assert.notEqual(rarity, 'faulty')
+      assert.notEqual(rarity, 'common')
+    }
+    assert.equal(pickRarityFromCrate(mythicCrate, 0.965), 'mythic')
+    assert.equal(pickRarityFromCrate(mythicCrate, 0.92), 'legendary')
+
+    // Verify new weapons & accessories exist with proper rarities and Overdrive hints
+    const newWeaponIds = ['wpn_cryo_railgun', 'wpn_solar_flail', 'wpn_void_reaper', 'wpn_muramasa']
+    for (const id of newWeaponIds) {
+      const wpn = getShopWeaponById(id)
+      assert.ok(wpn, `Expected weapon ${id} to exist`)
+      assert.ok(getUpgradeOverdriveHint(id).includes('LV 5 OVERDRIVE'))
+    }
+    const solarFlail = getShopWeaponById('wpn_solar_flail')!
+    assert.equal(solarFlail.rarity, 'legendary')
+    assert.equal(solarFlail.tierLabel, 'Legendary')
+    assert.equal(solarFlail.accentColor, '#FFD700')
+    assert.ok(solarFlail.special.toLowerCase().includes('fire area'))
+    assert.ok(getUpgradeOverdriveHint('wpn_solar_flail').toLowerCase().includes('solar mace'))
+
+    const newAccIds = [
+      'acc_aegis_plating',
+      'acc_chrono_accelerator',
+      'acc_berserker_crest',
+      'acc_calamity_heart'
+    ]
+    for (const id of newAccIds) {
+      assert.ok(getShopAccessoryById(id), `Expected accessory ${id} to exist`)
+    }
+
+    // Verify Muramasa is Mythic tier, crate-only, high base damage, and drops from the 2000-coin crate 1% roll
+    const muramasa = getShopWeaponById('wpn_muramasa')!
+    assert.equal(muramasa.rarity, 'mythic')
+    assert.equal(muramasa.crateOnly, true)
+    assert.equal(muramasa.pairedHeroId, 'hero_01')
+    assert.ok(muramasa.damage >= 120)
+
+    const calamityHeart = getShopAccessoryById('acc_calamity_heart')!
+    assert.equal(calamityHeart.rarity, 'mythic')
+    assert.equal(calamityHeart.crateOnly, true)
+
+    const mythicUser = `mythic_user_${Date.now()}`
+    creditShopCoins(mythicUser, 2000)
+    // First mythic item in SHOP_CATALOG is wpn_muramasa (index 0 -> second rng roll 0.01)
+    const rolls = [0.995, 0.01]
+    let rIdx = 0
+    const openRes = openSupplyCrate(mythicUser, 'crate_mythic', () => rolls[rIdx++] ?? 0)
+    assert.equal(openRes.success, true)
+    assert.equal(openRes.rarity, 'mythic')
+    assert.equal(openRes.item?.id, 'wpn_muramasa')
+    assert.equal(openRes.state.balance, 0)
+
+    // Direct purchase of Mythic Muramasa / Calamity Heart remains blocked
+    assert.equal(purchaseShopItem(mythicUser, 'wpn_muramasa').success, false)
+    assert.equal(purchaseShopItem(mythicUser, 'acc_calamity_heart').success, false)
+
+    // Equipping Mythic Muramasa pairs with Vanguard Blade (hero_01) for huge damage, wider cleave, faster cooldown, extra wave
+    const otherHeroMuramasa = getMuramasaWeaponConfig(138, 1, 'hero_02')
+    const vanguardMuramasa = getMuramasaWeaponConfig(138, 1, 'hero_01')
+    assert.equal(otherHeroMuramasa.isPairedHero, false)
+    assert.equal(vanguardMuramasa.isPairedHero, true)
+    assert.ok(vanguardMuramasa.damage > otherHeroMuramasa.damage * 1.4)
+    assert.ok(vanguardMuramasa.radius > otherHeroMuramasa.radius)
+    assert.ok(vanguardMuramasa.cooldownScale < 1)
+    assert.ok(vanguardMuramasa.waveCount > otherHeroMuramasa.waveCount)
+
+    // Vanguard Blade keeping starter Arc Slash + equipped Muramasa triggers Arc Slash resonance bonus too
+    const pairedStarters = resolveStartingUpgradeIds({
+      heroStartingUpgradeId: 'upg_12',
+      equippedWeaponId: 'wpn_muramasa'
+    })
+    assert.deepEqual(pairedStarters, ['upg_12', 'wpn_muramasa'])
+    assert.equal(getPairedHeroArcSlashBonus('hero_01', pairedStarters), 1.25)
+    assert.equal(getPairedHeroArcSlashBonus('hero_02', pairedStarters), 1)
+  })
+
+  it('tracks Hero Mastery rounds per hero and unlocks passive stat bonuses across all 6 heroes', () => {
+    const masteryUser = `mastery_user_${Date.now()}`
+    const otherUser = `mastery_other_${Date.now()}`
+
+    // Every hero defines 5 ordered Mastery tiers with positive passive bonuses
+    for (const hero of heroes) {
+      const tiers = getHeroMasteryTiers(hero.id)
+      assert.equal(tiers.length, 5)
+      assert.ok(HERO_MASTERY_TIERS[hero.id])
+      for (let i = 1; i < tiers.length; i++) {
+        assert.ok(tiers[i].requiredRounds > tiers[i - 1].requiredRounds)
+      }
+    }
+
+    // Initially 0 rounds -> Rank 0, zero bonuses
+    const initProgress = getHeroMasteryProgress(masteryUser, 'hero_01')
+    assert.equal(initProgress.roundsCompleted, 0)
+    assert.equal(initProgress.currentTier, 0)
+    assert.equal(initProgress.nextTier?.tier, 1)
+    assert.equal(initProgress.roundsToNextTier, 3)
+    assert.equal(initProgress.totalBonuses.damageMultiplier, 0)
+
+    // Clearing 2 rounds keeps Tier 1 locked
+    const twoRounds = recordHeroRoundsCompleted(masteryUser, 'hero_01', 2)
+    assert.equal(twoRounds.unlockedNewTier, null)
+    assert.equal(twoRounds.progress.currentTier, 0)
+    assert.equal(twoRounds.progress.roundsToNextTier, 1)
+
+    // Clearing 1 more round reaches 3 -> unlocks Tier 1 (+12% damage for Vanguard Blade)
+    const threeRounds = recordHeroRoundsCompleted(masteryUser, 'hero_01', 1)
+    assert.ok(threeRounds.unlockedNewTier)
+    assert.equal(threeRounds.unlockedNewTier?.tier, 1)
+    assert.equal(threeRounds.progress.currentTier, 1)
+    assert.equal(threeRounds.progress.totalBonuses.damageMultiplier, 0.12)
+    assert.ok(formatMasteryBonusSummary(threeRounds.progress.totalBonuses).includes('+12% Dmg'))
+
+    // Other heroes for same user and same hero for different user remain unaffected
+    assert.equal(getHeroMasteryProgress(masteryUser, 'hero_05').roundsCompleted, 0)
+    assert.equal(getHeroMasteryProgress(otherUser, 'hero_01').roundsCompleted, 0)
+
+    // Shield Paladin (hero_05) full mastery at 40 rounds grants HP, DR, regen & damage passives
+    const paladinFull = evaluateHeroMasteryProgress('hero_05', 40)
+    assert.equal(paladinFull.currentTier, 5)
+    assert.equal(paladinFull.nextTier, null)
+    assert.equal(paladinFull.progressPercent, 100)
+    assert.equal(paladinFull.totalBonuses.bonusHp, 100) // 35 + 65
+    assert.equal(paladinFull.totalBonuses.damageReduction, 0.18) // 0.08 + 0.10
+    assert.equal(paladinFull.totalBonuses.hpRegenPerSec, 3.0) // 1.5 + 1.5
+    assert.equal(paladinFull.totalBonuses.damageMultiplier, 0.18)
+
+    // Zero rounds yields zero bonuses
+    const emptyBonuses = computeHeroMasteryBonuses('hero_05', 0)
+    assert.equal(emptyBonuses.bonusHp, 0)
+    assert.equal(emptyBonuses.damageReduction, 0)
+  })
+
+  it('opens 10 Supply Crates at once with stacked drops, Mythic detection, and atomic balance checks', () => {
+    const batchUser = `batch_crate_user_${Date.now()}`
+
+    // Insufficient coins fails atomically without altering balance or inventory
+    creditShopCoins(batchUser, 2500) // enough for 1 Mythic crate (2000), not 10 (20000)
+    const failBatch = openMultipleSupplyCrates(batchUser, 'crate_mythic', 10)
+    assert.equal(failBatch.success, false)
+    assert.equal(failBatch.drops.length, 0)
+    assert.equal(getShopAccountState(batchUser).balance, 2500)
+
+    // Top up for 10x Mythic crate open (20,000 coins total -> 2,500 remaining)
+    creditShopCoins(batchUser, 20000)
+
+    // Deterministic roll sequence: 1st crate drops Mythic Muramasa (0.995, 0.01), next 9 drop Legendary/Epic/Rare
+    const seq = [0.995, 0.01, 0.92, 0.2]
+    let seqIdx = 0
+    const batchRes = openMultipleSupplyCrates(
+      batchUser,
+      'crate_mythic',
+      10,
+      () => seq[seqIdx++ % seq.length]
+    )
+
+    assert.equal(batchRes.success, true)
+    assert.equal(batchRes.countRequested, 10)
+    assert.equal(batchRes.totalCost, 20000)
+    assert.equal(batchRes.drops.length, 10)
+    assert.equal(batchRes.hasMythic, true)
+    assert.equal(batchRes.hasLegendary, true)
+    assert.equal(batchRes.highestRarity, 'mythic')
+    assert.equal(batchRes.drops[0].rarity, 'mythic')
+    assert.equal(batchRes.drops[0].item.id, 'wpn_muramasa')
+    assert.equal(batchRes.state.balance, 2500)
+    assert.ok(getTotalStackCount(batchRes.state, 'wpn_muramasa') >= 1)
+  })
+
+  it('promotes Abyssal Prism Beam to Legendary and unlocks Area 2 upgrades upon reaching Area 2', async () => {
+    const prismBeam = getShopWeaponById('wpn_abyss_beam')!
+    assert.ok(prismBeam)
+    assert.equal(prismBeam.rarity, 'legendary')
+    assert.equal(prismBeam.tierLabel, 'Legendary')
+    assert.equal(prismBeam.accentColor, '#FFD700')
+
+    // Area 2 exclusive upgrades stay locked in Area 1 before Wave 15 is cleared
+    assert.equal(
+      isAreaTwoUpgradesUnlocked({ areaId: 'carbon_sector', wave15Cleared: false }),
+      false
+    )
+    const beforeUnlock = getAvailableRunUpgrades({
+      areaId: 'carbon_sector',
+      wave15Cleared: false
+    })
+    assert.equal(beforeUnlock.length, upgrades.length)
+    assert.equal(beforeUnlock.some((u) => u.id === 'upg_a2_01'), false)
+
+    // Unlocking Area 2 (entering Astral Citadel OR beating Wave 15) unlocks all 5 Area 2 upgrades
+    assert.equal(
+      isAreaTwoUpgradesUnlocked({ areaId: 'astral_citadel', wave15Cleared: false }),
+      true
+    )
+    assert.equal(
+      isAreaTwoUpgradesUnlocked({ areaId: 'carbon_sector', wave15Cleared: true }),
+      true
+    )
+    const afterUnlock = getAvailableRunUpgrades({
+      areaId: 'astral_citadel',
+      wave15Cleared: true
+    })
+    assert.equal(afterUnlock.length, upgrades.length + AREA_TWO_UPGRADES.length)
+    for (const a2Upg of AREA_TWO_UPGRADES) {
+      assert.ok(afterUnlock.some((u) => u.id === a2Upg.id))
+      assert.ok(getUpgradeLevelPerkHint(a2Upg.id, 1).length > 0)
+      assert.ok(getUpgradeOverdriveHint(a2Upg.id).includes('LV 5 OVERDRIVE'))
+    }
+
+    // Codex getUpgrades includes Area 2 upgrades cleanly
+    const codexUpgrades = await getUpgrades()
+    assert.equal(codexUpgrades.length, upgrades.length + AREA_TWO_UPGRADES.length)
+
+    // Vanguard Laser Strider (upg_a2_02): walks near player and fires piercing laser bolts (+ Engineer bonus)
+    assert.equal(getSummonCountForUpgrade('upg_a2_02', 1, 'hero_01'), 1)
+    assert.equal(getSummonCountForUpgrade('upg_a2_02', 3, 'hero_01'), 2)
+    assert.equal(getSummonCountForUpgrade('upg_a2_02', 1, 'hero_03'), 2)
+    assert.equal(getSummonCountForUpgrade('upg_a2_02', 3, 'hero_03'), 3)
+
+    const hero = heroes[0]
+    const player = new Player({ x: 500, y: 500, hero })
+    const dummyEnemy = new Enemy({
+      x: 680,
+      y: 500,
+      enemyData: enemies[0],
+      target: player
+    })
+    dummyEnemy.isSpawning = false
+
+    const strider = new Summon({
+      kind: 'laser_strider',
+      upgradeId: 'upg_a2_02',
+      x: 500,
+      y: 500,
+      damage: 34,
+      cooldown: 0.25,
+      level: 5
+    })
+    strider.cooldownTimer = 0.01
+    const striderShot = strider.update(0.05, player, [dummyEnemy], [])
+    assert.ok(striderShot?.beams && striderShot.beams.length === 3)
+    assert.equal(striderShot?.beams?.[0]?.angularSpeed, 0)
+    assert.ok((striderShot?.beams?.[0]?.length ?? 0) >= 350)
+
+    const striderLv1 = new Summon({
+      kind: 'laser_strider',
+      upgradeId: 'upg_a2_02',
+      x: 500,
+      y: 500,
+      damage: 34,
+      cooldown: 0.25,
+      level: 1
+    })
+    striderLv1.cooldownTimer = 0.01
+    const striderLv1Shot = striderLv1.update(0.05, player, [dummyEnemy], [])
+    assert.equal(striderLv1Shot?.beams?.length, 1)
+    assert.equal(striderLv1Shot?.beams?.[0]?.angularSpeed, 0)
+
+    // Astral Javelin (upg_a2_03): Spear pierces enemies cleanly and explodes only at the end
+    const spear = new Projectile({
+      x: 100,
+      y: 100,
+      direction: { x: 1, y: 0 },
+      speed: 620,
+      damage: 58,
+      type: 'Spear',
+      maxPierces: 3,
+      explosionRadius: 110,
+      explodeAtEnd: true
+    })
+    assert.equal(spear.hitEntity(), false) // pierce 1
+    assert.equal(spear.isAlive, true)
+    assert.equal(spear.isExploding, false)
+    assert.equal(spear.hitEntity(), false) // pierce 2
+    assert.equal(spear.hitEntity(), false) // pierce 3
+    assert.equal(spear.hitEntity(), true) // final hit -> end burst explosion!
+    assert.equal(spear.isAlive, false)
+    assert.equal(spear.isExploding, true)
+    assert.equal(spear.explosionRadius, 110)
+  })
+
+  it('adds Mythic Grim Reaper Tech Engineer weapon (scythes + life steal) and Frost Freeze attacks', () => {
+    // 1. Mythic Grim Reaper weapon catalog & Tech Engineer (hero_03) pairing
+    const reaperWpn = getShopWeaponById('wpn_grim_reaper')!
+    assert.ok(reaperWpn)
+    assert.equal(reaperWpn.rarity, 'mythic')
+    assert.equal(reaperWpn.crateOnly, true)
+    assert.equal(reaperWpn.pairedHeroId, 'hero_03')
+    assert.ok(getUpgradeLevelPerkHint('wpn_grim_reaper', 2).length > 0)
+    assert.ok(getUpgradeOverdriveHint('wpn_grim_reaper').includes('LV 5 OVERDRIVE'))
+
+    const nonEngReaper = getGrimReaperWeaponConfig(88, 1, 'hero_01')
+    const engReaper = getGrimReaperWeaponConfig(88, 1, 'hero_03')
+    assert.equal(nonEngReaper.isPairedHero, false)
+    assert.equal(engReaper.isPairedHero, true)
+    assert.equal(nonEngReaper.reaperCount, 1)
+    assert.equal(engReaper.reaperCount, 2) // Tech Engineer extra summon bonus!
+    assert.equal(getSummonCountForUpgrade('wpn_grim_reaper', 5, 'hero_03'), 3)
+    assert.ok(engReaper.damage > nonEngReaper.damage * 1.4)
+    assert.ok(engReaper.cooldownScale < 1)
+    assert.ok(engReaper.healPerTarget > nonEngReaper.healPerTarget)
+
+    // Grim Reaper summon throws Scythe projectiles and siphons nearby enemies
+    const engHero = heroes.find((h) => h.id === 'hero_03') || heroes[0]
+    const engPlayer = new Player({ x: 400, y: 400, hero: engHero })
+    const victim = new Enemy({
+      x: 520,
+      y: 400,
+      enemyData: enemies[0],
+      target: engPlayer
+    })
+    victim.isSpawning = false
+    const grimSummon = new Summon({
+      kind: 'grim_reaper',
+      upgradeId: 'wpn_grim_reaper',
+      x: 440,
+      y: 400,
+      damage: engReaper.damage,
+      cooldown: 0.4,
+      level: 3,
+      isPairedHero: true,
+      scytheCount: 2,
+      siphonTargetCount: 2,
+      healPerTarget: engReaper.healPerTarget
+    })
+    grimSummon.cooldownTimer = 0.01
+    const grimAction = grimSummon.update(0.05, engPlayer, [victim], [])
+    assert.equal(grimAction?.projectile?.type, 'Scythe')
+    assert.equal(grimAction?.extraProjectiles?.length, 1)
+    assert.ok(grimAction?.siphon && grimAction.siphon.targets.length === 1)
+    assert.ok((grimAction?.siphon?.healAmount ?? 0) >= 4)
+
+    // 2. Frost Freeze status + Glacier Permafrost Spire (wpn_permafrost_spire) + Permafrost Cryo-Nova (upg_a2_06)
+    const frostWeapon = getShopWeaponById('wpn_permafrost_spire')!
+    assert.ok(frostWeapon)
+    assert.equal(frostWeapon.rarity, 'epic')
+    assert.ok(getUpgradeLevelPerkHint('wpn_permafrost_spire', 1).toLowerCase().includes('freeze'))
+    assert.ok(getUpgradeOverdriveHint('wpn_permafrost_spire').includes('LV 5 OVERDRIVE'))
+    assert.ok(AREA_TWO_UPGRADES.some((u) => u.id === 'upg_a2_06'))
+    assert.ok(getUpgradeLevelPerkHint('upg_a2_06', 1).toLowerCase().includes('freez'))
+
+    const frozenTarget = new Enemy({
+      x: 600,
+      y: 400,
+      enemyData: enemies[0],
+      target: engPlayer
+    })
+    frozenTarget.isSpawning = false
+    const startX = frozenTarget.x
+    const startY = frozenTarget.y
+    frozenTarget.applyFreeze(1.5)
+    assert.ok(frozenTarget.freezeTimer >= 1.45)
+    frozenTarget.update(0.25, engPlayer)
+    // Movement is halted while frozen!
+    assert.equal(frozenTarget.x, startX)
+    assert.equal(frozenTarget.y, startY)
+    // Advance past freeze timer -> enemy unfreezes cleanly and resumes chasing
+    frozenTarget.update(1.4, engPlayer)
+    assert.equal(frozenTarget.freezeTimer, 0)
+    frozenTarget.update(0.1, engPlayer)
+    assert.ok(frozenTarget.x !== startX || frozenTarget.y !== startY)
+  })
 })
+
+
+
 
 

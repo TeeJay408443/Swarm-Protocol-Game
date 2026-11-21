@@ -9,7 +9,12 @@ import { Enemy } from './Enemy'
 import { Player } from './Player'
 import type { ProjectileType } from './Projectile'
 
-export type SummonKind = 'companion_robot' | 'temporal_echo' | 'sentinel_turret'
+export type SummonKind =
+  | 'companion_robot'
+  | 'temporal_echo'
+  | 'sentinel_turret'
+  | 'laser_strider'
+  | 'grim_reaper'
 
 export interface SummonAttackResult {
   projectile?: {
@@ -36,6 +41,24 @@ export interface SummonAttackResult {
     width: number
     height: number
   }>
+  beams?: Array<{
+    angle: number
+    length: number
+    duration: number
+    damage: number
+    color: string
+    angularSpeed?: number
+  }>
+  siphon?: {
+    targets: Array<{
+      x: number
+      y: number
+      damage: number
+      enemy: Enemy
+    }>
+    healAmount: number
+    color: string
+  }
   pulse?: {
     x: number
     y: number
@@ -55,6 +78,10 @@ export interface SummonOptions {
   level?: number
   slotIndex?: number
   totalSlots?: number
+  isPairedHero?: boolean
+  scytheCount?: number
+  siphonTargetCount?: number
+  healPerTarget?: number
 }
 
 export class Summon {
@@ -68,8 +95,13 @@ export class Summon {
   cooldownTimer: number = 0.15
   slotIndex: number
   totalSlots: number
+  isPairedHero: boolean
+  scytheCount: number
+  siphonTargetCount: number
+  healPerTarget: number
   aimAngle: number = 0
   private animTime: number = Math.random() * Math.PI * 2
+  private scytheSwingTimer: number = 0
   private trailHistory: Array<{ x: number; y: number }> = []
   private afterimages: Array<{ x: number; y: number; alpha: number }> = []
 
@@ -83,6 +115,13 @@ export class Summon {
     this.level = Math.max(1, Math.min(5, options.level ?? 1))
     this.slotIndex = options.slotIndex ?? 0
     this.totalSlots = Math.max(1, options.totalSlots ?? 1)
+    this.isPairedHero = Boolean(options.isPairedHero)
+    this.scytheCount = Math.max(1, options.scytheCount ?? (this.level >= 5 ? 3 : this.level >= 3 ? 2 : 1))
+    this.siphonTargetCount = Math.max(
+      1,
+      options.siphonTargetCount ?? (this.level >= 4 ? 3 : this.level >= 2 ? 2 : 1)
+    )
+    this.healPerTarget = Math.max(1, options.healPerTarget ?? (this.level >= 5 ? 3 : 2))
   }
 
   update(
@@ -92,7 +131,23 @@ export class Summon {
     playerTrail: ReadonlyArray<{ x: number; y: number }>
   ): SummonAttackResult | null {
     this.animTime += deltaTime
+    if (this.scytheSwingTimer > 0) {
+      this.scytheSwingTimer = Math.max(0, this.scytheSwingTimer - deltaTime)
+    }
     const pc = player.getCenter()
+
+    // Acquire nearest living enemy within 640px early for movement + aiming
+    let nearest: Enemy | null = null
+    let nearestDist = 640
+    for (const enemy of enemies) {
+      if (!enemy.isAlive || enemy.isSpawning) continue
+      const ec = enemy.getCenter()
+      const dist = Math.hypot(ec.x - this.x, ec.y - this.y)
+      if (dist < nearestDist) {
+        nearestDist = dist
+        nearest = enemy
+      }
+    }
 
     if (this.kind === 'companion_robot') {
       // Smooth orbital hover around the player
@@ -105,6 +160,56 @@ export class Summon {
       const followRate = Math.min(1, deltaTime * 9)
       this.x += (desiredX - this.x) * followRate
       this.y += (desiredY - this.y) * followRate
+    } else if (this.kind === 'laser_strider') {
+      // Autonomous walking combat strider patrolling flanks near the player
+      const patrolAngle =
+        this.animTime * 0.65 + (this.slotIndex / Math.max(1, this.totalSlots)) * Math.PI * 2
+      const patrolRadius = 86 + (this.slotIndex % 2) * 24
+      const targetX = pc.x + Math.cos(patrolAngle) * patrolRadius
+      const targetY = pc.y + Math.sin(patrolAngle) * patrolRadius
+      const dx = targetX - this.x
+      const dy = targetY - this.y
+      const dist = Math.hypot(dx, dy)
+      if (dist > 4) {
+        const walkSpeed = Math.min(dist / Math.max(0.016, deltaTime), 270 + this.level * 18)
+        this.x += (dx / dist) * walkSpeed * deltaTime
+        this.y += (dy / dist) * walkSpeed * deltaTime
+      }
+    } else if (this.kind === 'grim_reaper') {
+      // Hovering spectral Grim Reaper that glides toward enemy packs while staying tethered near player
+      const slotOffset = (this.slotIndex / Math.max(1, this.totalSlots)) * Math.PI * 2
+      const hoverAngle = this.animTime * 1.1 + slotOffset
+      let desiredX = pc.x + Math.cos(hoverAngle) * (88 + this.slotIndex * 18)
+      let desiredY = pc.y + Math.sin(hoverAngle) * (88 + this.slotIndex * 18) + Math.sin(this.animTime * 3.5) * 6
+
+      if (nearest) {
+        const nc = nearest.getCenter()
+        const toEnemyX = nc.x - pc.x
+        const toEnemyY = nc.y - pc.y
+        const eDist = Math.hypot(toEnemyX, toEnemyY) || 1
+        const leashDist = Math.min(185, Math.max(72, eDist * 0.6))
+        const flank = slotOffset * 0.45
+        const angToEnemy = Math.atan2(toEnemyY, toEnemyX) + (this.totalSlots > 1 ? Math.sin(flank) * 0.45 : 0)
+        desiredX = pc.x + Math.cos(angToEnemy) * leashDist
+        desiredY = pc.y + Math.sin(angToEnemy) * leashDist + Math.sin(this.animTime * 4) * 5
+      }
+
+      const glideRate = Math.min(1, deltaTime * 6.5)
+      this.x += (desiredX - this.x) * glideRate
+      this.y += (desiredY - this.y) * glideRate
+
+      if (Math.random() < 0.55) {
+        this.afterimages.push({ x: this.x, y: this.y, alpha: 0.48 })
+        if (this.afterimages.length > 6) {
+          this.afterimages.shift()
+        }
+      }
+      for (let i = this.afterimages.length - 1; i >= 0; i--) {
+        this.afterimages[i].alpha -= deltaTime * 1.5
+        if (this.afterimages[i].alpha <= 0) {
+          this.afterimages.splice(i, 1)
+        }
+      }
     } else if (this.kind === 'sentinel_turret') {
       // Planted automated gun platform with a 210px tactical reposition leash
       const distFromPlayer = Math.hypot(this.x - pc.x, this.y - pc.y)
@@ -157,23 +262,15 @@ export class Summon {
       }
     }
 
-    // Acquire nearest living enemy within 640px
-    let nearest: Enemy | null = null
-    let nearestDist = 640
-    for (const enemy of enemies) {
-      if (!enemy.isAlive || enemy.isSpawning) continue
-      const ec = enemy.getCenter()
-      const dist = Math.hypot(ec.x - this.x, ec.y - this.y)
-      if (dist < nearestDist) {
-        nearestDist = dist
-        nearest = enemy
-      }
-    }
-
     if (nearest) {
       const ec = nearest.getCenter()
       this.aimAngle = Math.atan2(ec.y - this.y, ec.x - this.x)
-    } else if (this.kind === 'companion_robot' || this.kind === 'sentinel_turret') {
+    } else if (
+      this.kind === 'companion_robot' ||
+      this.kind === 'sentinel_turret' ||
+      this.kind === 'laser_strider' ||
+      this.kind === 'grim_reaper'
+    ) {
       this.aimAngle += deltaTime * 1.6
     } else {
       this.aimAngle = Math.atan2(pc.y - this.y, pc.x - this.x) + Math.PI
@@ -295,6 +392,101 @@ export class Summon {
       }
     }
 
+    if (this.kind === 'laser_strider') {
+      // Fires aimed non-orbiting laser beams similar in visual power to Orbital Laser
+      const beamLength = 295 + this.level * 35
+      const beamDuration = 0.52 + this.level * 0.05
+      const beamColor = isLv5 ? '#FFD700' : '#34D399'
+
+      if (isLv5) {
+        return {
+          beams: [-0.16, 0, 0.16].map((offsetAngle) => ({
+            angle: this.aimAngle + offsetAngle,
+            length: beamLength,
+            duration: beamDuration,
+            damage: this.damage,
+            color: beamColor,
+            angularSpeed: 0
+          }))
+        }
+      }
+
+      return {
+        beams: [
+          {
+            angle: this.aimAngle,
+            length: beamLength,
+            duration: beamDuration,
+            damage: this.damage,
+            color: beamColor,
+            angularSpeed: 0
+          }
+        ]
+      }
+    }
+
+    if (this.kind === 'grim_reaper') {
+      this.scytheSwingTimer = 0.28
+      const scytheSpeed = 450 + this.level * 28
+      const scytheColor = isLv5 || this.isPairedHero ? '#FFD700' : '#FF2E63'
+      const scytheSize = 22 + this.level * 2
+      const pierces = 3 + this.level
+      const count = this.scytheCount
+      const span = count > 1 ? (count - 1) * 0.24 : 0
+      const projectiles = []
+      for (let s = 0; s < count; s++) {
+        const off = count === 1 ? 0 : -span / 2 + (s / (count - 1)) * span
+        const a = this.aimAngle + off
+        const d = { x: Math.cos(a), y: Math.sin(a) }
+        projectiles.push({
+          x: this.x + d.x * 16,
+          y: this.y + d.y * 16,
+          direction: d,
+          speed: scytheSpeed,
+          damage: this.damage,
+          color: scytheColor,
+          type: 'Scythe' as ProjectileType,
+          maxPierces: pierces,
+          width: scytheSize,
+          height: scytheSize
+        })
+      }
+
+      // Life-steal soul siphon on nearby enemies around the Reaper
+      const siphonRange = 250 + this.level * 20
+      const siphonCandidates = enemies
+        .filter((e) => e.isAlive && !e.isSpawning)
+        .map((e) => ({
+          enemy: e,
+          ec: e.getCenter(),
+          dist: Math.hypot(e.getCenter().x - this.x, e.getCenter().y - this.y)
+        }))
+        .filter((item) => item.dist <= siphonRange)
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, this.siphonTargetCount)
+
+      const siphonDamage = Math.max(8, Math.round(this.damage * 0.55))
+      const siphonTargets = siphonCandidates.map((item) => ({
+        x: item.ec.x,
+        y: item.ec.y,
+        damage: siphonDamage,
+        enemy: item.enemy
+      }))
+
+      return {
+        projectile: projectiles[0],
+        extraProjectiles: projectiles.slice(1),
+        siphon:
+          siphonTargets.length > 0
+            ? {
+                targets: siphonTargets,
+                healAmount: siphonTargets.length * this.healPerTarget,
+                color: this.isPairedHero ? '#FF2E63' : '#FB7185'
+              }
+            : undefined
+      }
+    }
+
     // Temporal Echo fires piercing phase crescent blades + emits close-range temporal shockwave
     const echoSpeed = 420 + this.level * 28
     const echoRadius = 65 + this.level * 20
@@ -329,6 +521,10 @@ export class Summon {
       this.drawCompanionRobot(ctx, sp, playerScreen)
     } else if (this.kind === 'sentinel_turret') {
       this.drawSentinelTurret(ctx, sp)
+    } else if (this.kind === 'laser_strider') {
+      this.drawLaserStrider(ctx, sp)
+    } else if (this.kind === 'grim_reaper') {
+      this.drawGrimReaper(ctx, sp, playerScreen, camera)
     } else {
       this.drawTemporalEcho(ctx, sp, playerScreen, camera)
     }
@@ -594,6 +790,189 @@ export class Summon {
     ctx.fillStyle = '#FFFFFF'
     ctx.beginPath()
     ctx.arc(4, 0, 1.6, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.restore()
+  }
+
+  private drawLaserStrider(ctx: CanvasRenderingContext2D, sp: Vector2): void {
+    const isLv5 = this.level >= 5
+    const accent = isLv5 ? '#FFD700' : '#34D399'
+    const bob = Math.abs(Math.sin(this.animTime * 11)) * 2.5
+    const leftLegSwing = Math.sin(this.animTime * 11) * 5.5
+    const rightLegSwing = -leftLegSwing
+
+    ctx.save()
+
+    // Ground foot shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)'
+    ctx.beginPath()
+    ctx.ellipse(sp.x, sp.y + 15, 13, 5.5, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Subtle energy aura beneath chassis
+    ctx.fillStyle = isLv5 ? 'rgba(255, 215, 0, 0.18)' : 'rgba(52, 211, 153, 0.16)'
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y - bob, isLv5 ? 21 : 17, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Articulated walking bipedal legs
+    ctx.strokeStyle = '#94A3B8'
+    ctx.lineWidth = 3.2
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(sp.x - 5, sp.y + 3 - bob)
+    ctx.lineTo(sp.x - 6 + leftLegSwing * 0.5, sp.y + 9 - bob * 0.4)
+    ctx.lineTo(sp.x - 6 + leftLegSwing, sp.y + 14)
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.moveTo(sp.x + 5, sp.y + 3 - bob)
+    ctx.lineTo(sp.x + 6 + rightLegSwing * 0.5, sp.y + 9 - bob * 0.4)
+    ctx.lineTo(sp.x + 6 + rightLegSwing, sp.y + 14)
+    ctx.stroke()
+
+    // Upper rotating chassis & laser rifle
+    ctx.translate(sp.x, sp.y - 2 - bob)
+    ctx.rotate(this.aimAngle)
+
+    // Twin / single Citadel laser rail cannon
+    ctx.fillStyle = '#334155'
+    ctx.fillRect(6, -3.5, 14, 7)
+    ctx.fillStyle = accent
+    ctx.fillRect(8, -1.6, 14, 3.2)
+    ctx.fillStyle = '#FFFFFF'
+    ctx.fillRect(18, -1.2, 4, 2.4)
+
+    // Armored strider torso & shoulder pauldrons
+    ctx.fillStyle = '#0F172A'
+    ctx.strokeStyle = accent
+    ctx.lineWidth = 1.8
+    ctx.beginPath()
+    ctx.roundRect(-10, -9.5, 20, 19, 5)
+    ctx.fill()
+    ctx.stroke()
+
+    // Glowing optic visor slit
+    ctx.fillStyle = accent
+    ctx.fillRect(1, -5, 5.5, 10)
+    ctx.fillStyle = '#FFFFFF'
+    ctx.fillRect(3, -3.2, 2.2, 6.4)
+
+    ctx.restore()
+  }
+
+  private drawGrimReaper(
+    ctx: CanvasRenderingContext2D,
+    sp: Vector2,
+    playerScreen: Vector2,
+    camera: Camera
+  ): void {
+    const isLv5 = this.level >= 5
+    const accent = isLv5 || this.isPairedHero ? '#FFD700' : '#FF2E63'
+    const floatY = Math.sin(this.animTime * 4.5) * 4.5
+    const rx = sp.x
+    const ry = sp.y + floatY
+
+    ctx.save()
+
+    // Spectral crimson/violet afterimage wisps
+    for (const ghost of this.afterimages) {
+      const gp = camera.worldToScreen(ghost.x, ghost.y)
+      ctx.globalAlpha = Math.max(0.05, ghost.alpha * 0.42)
+      ctx.fillStyle = '#9F1239'
+      ctx.beginPath()
+      ctx.arc(gp.x, gp.y, 14, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+
+    // Crimson soul link tether to player
+    ctx.strokeStyle = this.isPairedHero ? 'rgba(255, 215, 0, 0.34)' : 'rgba(255, 46, 99, 0.28)'
+    ctx.lineWidth = 1.6
+    ctx.setLineDash([5, 5])
+    ctx.beginPath()
+    ctx.moveTo(playerScreen.x, playerScreen.y)
+    ctx.lineTo(rx, ry)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // Ground dark vortex shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.48)'
+    ctx.beginPath()
+    ctx.ellipse(sp.x, sp.y + 18, 13, 5, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Orbiting soul wisps around the Grim Reaper
+    for (let w = 0; w < 3; w++) {
+      const wa = this.animTime * 3.1 + (w / 3) * Math.PI * 2
+      const wx = rx + Math.cos(wa) * 20
+      const wy = ry + Math.sin(wa) * 14
+      ctx.fillStyle = w === 0 ? accent : '#FB7185'
+      ctx.beginPath()
+      ctx.arc(wx, wy, 2.8, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // Reaper Death Scythe held beside cloak
+    const scytheSwing = this.scytheSwingTimer > 0 ? Math.sin((1 - this.scytheSwingTimer / 0.28) * Math.PI) * 1.15 : 0
+    ctx.save()
+    ctx.translate(rx, ry)
+    ctx.rotate(this.aimAngle * 0.25 + scytheSwing)
+    ctx.strokeStyle = '#CBD5E1'
+    ctx.lineWidth = 2.6
+    ctx.beginPath()
+    ctx.moveTo(-14, 14)
+    ctx.lineTo(13, -15)
+    ctx.stroke()
+    ctx.fillStyle = accent
+    ctx.strokeStyle = '#FFFFFF'
+    ctx.lineWidth = 1.4
+    ctx.beginPath()
+    ctx.moveTo(11, -14)
+    ctx.quadraticCurveTo(26, -6, 16, 10)
+    ctx.quadraticCurveTo(16, -4, 7, -10)
+    ctx.closePath()
+    ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+
+    // Tattered obsidian Grim Reaper shroud & hood
+    ctx.fillStyle = '#09090B'
+    ctx.strokeStyle = accent
+    ctx.lineWidth = 1.8
+    ctx.beginPath()
+    ctx.moveTo(rx, ry - 18)
+    ctx.quadraticCurveTo(rx + 14, ry - 6, rx + 12, ry + 13)
+    ctx.lineTo(rx + 5, ry + 9)
+    ctx.lineTo(rx, ry + 16)
+    ctx.lineTo(rx - 5, ry + 9)
+    ctx.lineTo(rx - 12, ry + 13)
+    ctx.quadraticCurveTo(rx - 14, ry - 6, rx, ry - 18)
+    ctx.closePath()
+    ctx.fill()
+    ctx.stroke()
+
+    // Dark hollow hood face + glowing eyes
+    ctx.fillStyle = '#18181B'
+    ctx.beginPath()
+    ctx.arc(rx, ry - 5, 7, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.fillStyle = accent
+    ctx.beginPath()
+    ctx.arc(rx - 2.6, ry - 5, 1.9, 0, Math.PI * 2)
+    ctx.arc(rx + 2.6, ry - 5, 1.9, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Glowing crimson soul heart crystal on robe
+    ctx.fillStyle = '#FF2E63'
+    ctx.beginPath()
+    ctx.moveTo(rx, ry + 1)
+    ctx.lineTo(rx + 3.2, ry + 5)
+    ctx.lineTo(rx, ry + 9)
+    ctx.lineTo(rx - 3.2, ry + 5)
+    ctx.closePath()
     ctx.fill()
 
     ctx.restore()

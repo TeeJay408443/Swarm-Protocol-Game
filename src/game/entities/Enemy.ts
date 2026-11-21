@@ -233,6 +233,10 @@ export class Enemy {
   burnTimer: number = 0
   burnTickTimer: number = 0
   burnDamagePerTick: number = 0
+
+  /** Frost Freeze status (temporarily halts movement & attacks) */
+  freezeTimer: number = 0
+  freezeImmuneTimer: number = 0
   
   /** Death animation */
   isDying: boolean = false
@@ -462,6 +466,27 @@ export class Enemy {
         this.color = this.baseColor
       }
     }
+
+    // Advance active frost freeze timer (frozen non-stationary enemies cannot move or attack)
+    if (this.freezeImmuneTimer > 0) {
+      this.freezeImmuneTimer = Math.max(0, this.freezeImmuneTimer - deltaTime)
+    }
+    if (this.freezeTimer > 0) {
+      this.freezeTimer = Math.max(0, this.freezeTimer - deltaTime)
+      if (this.freezeTimer === 0) {
+        this.freezeImmuneTimer = 0.45
+      }
+      if (!this.isStationaryBoss) {
+        this.velocity = Vector2.zero()
+        this.slowMultiplier = 1.0
+        this.updateProjectiles(deltaTime)
+        this.updateAoeProjectiles(deltaTime)
+        return
+      }
+      // Stationary final bosses resist hard freeze with a chill slow
+      this.slowMultiplier = Math.min(this.slowMultiplier, 0.55)
+    }
+
     if (this.attackCooldown > 0) {
       this.attackCooldown -= deltaTime
     }
@@ -1500,6 +1525,23 @@ export class Enemy {
   }
 
   /**
+   * Freeze enemy temporarily in solid ice (halting movement & attacks)
+   */
+  applyFreeze(duration = 1.6): void {
+    if (!this.isAlive || this.isSpawning || duration <= 0) return
+    if (this.freezeTimer <= 0 && this.freezeImmuneTimer > 0) return
+    const effectiveDuration = this.isStationaryBoss
+      ? Math.min(0.45, duration * 0.25)
+      : this.isBoss || this.isMiniBoss
+        ? Math.max(0.55, duration * 0.55)
+        : duration
+    this.freezeTimer = Math.min(2.6, Math.max(this.freezeTimer, effectiveDuration))
+    if (!this.isStationaryBoss) {
+      this.velocity = Vector2.zero()
+    }
+  }
+
+  /**
    * Get enemy type
    */
   getType(): EnemyType {
@@ -2504,6 +2546,38 @@ export class Enemy {
         ctx.closePath()
         ctx.fill()
       }
+      ctx.restore()
+    }
+
+    // Active Frost Freeze translucent crystal prism encasement
+    if (this.freezeTimer > 0) {
+      ctx.save()
+      const iceRadius = r * 1.24
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.38)'
+      ctx.strokeStyle = '#BAE6FD'
+      ctx.lineWidth = 2.2
+      ctx.beginPath()
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + Math.PI / 6
+        const rad = i % 2 === 0 ? iceRadius * 1.08 : iceRadius * 0.92
+        const px = cx + Math.cos(a) * rad
+        const py = cy + Math.sin(a) * rad
+        if (i === 0) ctx.moveTo(px, py)
+        else ctx.lineTo(px, py)
+      }
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+
+      // Specular ice sheen facets
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)'
+      ctx.lineWidth = 1.4
+      ctx.beginPath()
+      ctx.moveTo(cx - r * 0.55, cy - r * 0.55)
+      ctx.lineTo(cx + r * 0.2, cy - r * 0.85)
+      ctx.moveTo(cx - r * 0.7, cy + r * 0.15)
+      ctx.lineTo(cx + r * 0.45, cy - r * 0.3)
+      ctx.stroke()
       ctx.restore()
     }
 

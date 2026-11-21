@@ -13,8 +13,10 @@ import { Badge } from '../../ui/Badge'
 import { Modal } from '../../ui/Modal'
 import { CodexEmptyState } from '../../ui/EmptyState'
 import { useCodex, type CodexEntityType, type CodexEntity } from '../../../hooks/useCodex'
+import { useSupabase } from '../../../hooks/useSupabase'
 import { GAME_CONFIG } from '../../../config/gameConstants'
 import { getHeroAbility } from '../../../config/heroAbilities'
+import { formatMasteryBonusSummary, useHeroMastery } from '../../../services/heroMastery'
 import type { HeroesRow, EnemiesRow, UpgradesRow, AchievementsRow } from '../../../types/database'
 
 const isHero = (e: CodexEntity): e is HeroesRow => 'archetype' in e
@@ -24,6 +26,8 @@ const isAchievement = (e: CodexEntity): e is AchievementsRow => 'reward_badge' i
 
 export function CodexView() {
   const navigate = useNavigate()
+  const { user } = useSupabase()
+  const { getProgress: getMasteryProgress } = useHeroMastery(user?.id)
   const [selectedEntity, setSelectedEntity] = useState<CodexEntity | null>(null)
 
   const {
@@ -234,24 +238,31 @@ export function CodexView() {
                         <span className="text-xs text-cyan-accent whitespace-nowrap">Details →</span>
                       </div>
 
-                      {isHero(entity) && (
-                        <div className="space-y-2 text-sm">
-                          <p className="text-xs font-semibold text-amber-300">
-                            {getHeroAbility(entity.id).abilityName} ({getHeroAbility(entity.id).shortTag})
-                          </p>
-                          <p className="text-gray-300">{entity.lore}</p>
-                          <div className="flex flex-wrap gap-3 text-xs text-gray-400 pt-1">
-                            <span>HP: <strong className="text-white">{entity.hp}</strong></span>
-                            <span>
-                              Speed: <strong className="text-cyan-accent">{entity.speed.toFixed(2)}x</strong>{' '}
-                              ({Math.round(entity.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s)
-                            </span>
-                            <span>
-                              Starter: <strong className="text-hazard-gold">{getUpgradeName(entity.starting_upgrade_id)}</strong>
-                            </span>
+                      {isHero(entity) && (() => {
+                        const mastery = getMasteryProgress(entity.id)
+                        return (
+                          <div className="space-y-2 text-sm">
+                            <p className="text-xs font-semibold text-amber-300">
+                              {getHeroAbility(entity.id).abilityName} ({getHeroAbility(entity.id).shortTag})
+                            </p>
+                            <p className="text-gray-300">{entity.lore}</p>
+                            <div className="flex flex-wrap gap-3 text-xs text-gray-400 pt-1">
+                              <span>HP: <strong className="text-white">{entity.hp}</strong></span>
+                              <span>
+                                Speed: <strong className="text-cyan-accent">{entity.speed.toFixed(2)}x</strong>{' '}
+                                ({Math.round(entity.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s)
+                              </span>
+                              <span>
+                                Starter: <strong className="text-hazard-gold">{getUpgradeName(entity.starting_upgrade_id)}</strong>
+                              </span>
+                            </div>
+                            <div className="text-xs text-emerald-300 pt-1 tabular-nums">
+                              Mastery Rank {mastery.currentTier}/{mastery.maxTier} ({mastery.roundsCompleted} rds) ·{' '}
+                              {formatMasteryBonusSummary(mastery.totalBonuses)}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )
+                      })()}
 
                       {isEnemy(entity) && (
                         <div className="space-y-2 text-sm">
@@ -318,58 +329,99 @@ export function CodexView() {
               <span className="text-xs text-gray-400 font-mono">{selectedEntity.id}</span>
             </div>
 
-            {isHero(selectedEntity) && (
-              <>
-                <div className="bg-gray-900/90 border border-amber-400/30 rounded p-3">
-                  <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                    Signature Ability: {getHeroAbility(selectedEntity.id).abilityName}
-                  </p>
-                  <p className="text-sm text-gray-200 mt-1">
-                    {getHeroAbility(selectedEntity.id).description}
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div className="bg-gray-900 p-3 rounded">
-                    <p className="text-xs text-gray-400">Max Health</p>
-                    <p className="text-xl font-bold text-white">{selectedEntity.hp} HP</p>
-                  </div>
-                  <div className="bg-gray-900 p-3 rounded">
-                    <p className="text-xs text-gray-400">Move Speed</p>
-                    <p className="text-xl font-bold text-cyan-accent">
-                      {Math.round(selectedEntity.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s
+            {isHero(selectedEntity) && (() => {
+              const mastery = getMasteryProgress(selectedEntity.id)
+              return (
+                <>
+                  <div className="bg-gray-900/90 border border-amber-400/30 rounded p-3">
+                    <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                      Signature Ability: {getHeroAbility(selectedEntity.id).abilityName}
+                    </p>
+                    <p className="text-sm text-gray-200 mt-1">
+                      {getHeroAbility(selectedEntity.id).description}
                     </p>
                   </div>
-                  <div className="bg-gray-900 p-3 rounded col-span-2 sm:col-span-1">
-                    <p className="text-xs text-gray-400">Starting Weapon</p>
-                    <p className="text-sm font-bold text-hazard-gold">
-                      {getUpgradeName(selectedEntity.starting_upgrade_id)}
-                    </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="bg-gray-900 p-3 rounded">
+                      <p className="text-xs text-gray-400">Max Health</p>
+                      <p className="text-xl font-bold text-white">{selectedEntity.hp} HP</p>
+                    </div>
+                    <div className="bg-gray-900 p-3 rounded">
+                      <p className="text-xs text-gray-400">Move Speed</p>
+                      <p className="text-xl font-bold text-cyan-accent">
+                        {Math.round(selectedEntity.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s
+                      </p>
+                    </div>
+                    <div className="bg-gray-900 p-3 rounded col-span-2 sm:col-span-1">
+                      <p className="text-xs text-gray-400">Starting Weapon</p>
+                      <p className="text-sm font-bold text-hazard-gold">
+                        {getUpgradeName(selectedEntity.starting_upgrade_id)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      const heroId = selectedEntity.id
-                      setSelectedEntity(null)
-                      navigate(`/armory?heroId=${heroId}`)
-                    }}
-                  >
-                    Build Loadout
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      const heroId = selectedEntity.id
-                      setSelectedEntity(null)
-                      navigate(`/play?heroId=${heroId}`)
-                    }}
-                  >
-                    Deploy Now
-                  </Button>
-                </div>
-              </>
-            )}
+
+                  {/* Hero Mastery 5-Tier Track */}
+                  <div className="bg-gray-900/90 border border-gray-700 rounded-lg p-3.5 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-bold uppercase tracking-wider text-cyan-accent">
+                        Hero Mastery Track · Rank {mastery.currentTier}/{mastery.maxTier}
+                      </p>
+                      <span className="text-xs text-gray-300 tabular-nums">
+                        {mastery.roundsCompleted} rounds completed
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-300">
+                      Active Passives: {formatMasteryBonusSummary(mastery.totalBonuses)}
+                    </p>
+                    <div className="space-y-1.5">
+                      {mastery.tiers.map(tier => (
+                        <div
+                          key={tier.tier}
+                          className={`flex items-center justify-between gap-3 rounded px-3 py-2 text-xs border ${
+                            tier.unlocked
+                              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-100'
+                              : 'bg-gray-800/70 border-gray-700/60 text-gray-400'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <span className="font-bold text-white">
+                              Tier {tier.tier}: {tier.title}
+                            </span>
+                            <span className="ml-2 text-emerald-300">{tier.summary}</span>
+                          </div>
+                          <Badge variant={tier.unlocked ? 'success' : 'secondary'} size="sm">
+                            {tier.unlocked ? 'Unlocked' : `${tier.requiredRounds} rds`}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        const heroId = selectedEntity.id
+                        setSelectedEntity(null)
+                        navigate(`/armory?heroId=${heroId}`)
+                      }}
+                    >
+                      Build Loadout
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        const heroId = selectedEntity.id
+                        setSelectedEntity(null)
+                        navigate(`/play?heroId=${heroId}`)
+                      }}
+                    >
+                      Deploy Now
+                    </Button>
+                  </div>
+                </>
+              )
+            })()}
 
             {isEnemy(selectedEntity) && (
               <>

@@ -4,6 +4,7 @@ import { Card } from '../../ui/Card'
 import { Button } from '../../ui/Button'
 import { Badge } from '../../ui/Badge'
 import { heroes, upgrades } from '../../../db/seedData'
+import { AREA_TWO_UPGRADES } from '../../../config/areaUpgrades'
 import { GAME_CONFIG } from '../../../config/gameConstants'
 import { ArenaId, GAME_AREAS, getAreaById, isAreaUnlocked } from '../../../config/arenas'
 import { useLoadouts } from '../../../hooks/useLoadouts'
@@ -14,6 +15,7 @@ import {
   shopWeaponsAsUpgrades,
   useShopState
 } from '../../../services/shop'
+import { formatMasteryBonusSummary, useHeroMastery } from '../../../services/heroMastery'
 import { ARENA_PREVIEW_IMAGES } from '../HQView/arenaAssets'
 import GameContainer from './GameContainer'
 
@@ -22,7 +24,8 @@ export function PlayView() {
   const { user } = useSupabase()
   const { loadouts } = useLoadouts()
   const { equippedWeapon, equippedAccessories, shopState } = useShopState(user?.id)
-  const allUpgrades = [...shopWeaponsAsUpgrades(), ...upgrades]
+  const { getProgress: getMasteryProgress } = useHeroMastery(user?.id)
+  const allUpgrades = [...shopWeaponsAsUpgrades(), ...upgrades, ...AREA_TWO_UPGRADES]
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [selectedAreaId, setSelectedAreaId] = useState<ArenaId>('carbon_sector')
@@ -209,11 +212,16 @@ export function PlayView() {
           <div className="flex flex-wrap items-center gap-6">
             <div>
               <p className="text-[11px] uppercase tracking-wider text-gray-400">
-                Armory Weapon Override
+                Bonus Equipped Weapon
               </p>
               <p className="text-sm font-bold text-hazard-gold">
-                {equippedWeapon ? equippedWeapon.name : 'Hero / Loadout Default'}
+                {equippedWeapon ? `${equippedWeapon.name} (+ Hero Starter)` : 'Hero Starting Weapon Only'}
               </p>
+              {equippedWeapon?.pairedHeroLabel && (
+                <p className="text-xs text-rose-400 font-medium mt-0.5">
+                  {equippedWeapon.pairedHeroLabel}
+                </p>
+              )}
             </div>
             <div className="h-8 w-px bg-gray-800 hidden sm:block" />
             <div>
@@ -293,6 +301,7 @@ export function PlayView() {
             {heroes.map((hero) => {
               const startUpgrade = upgrades.find((u) => u.id === hero.starting_upgrade_id)
               const pixelSpeed = Math.round(hero.speed * GAME_CONFIG.BASE_PLAYER_SPEED)
+              const mastery = getMasteryProgress(hero.id)
               return (
                 <div
                   key={hero.id}
@@ -315,6 +324,37 @@ export function PlayView() {
                         <span className="text-cyan-accent font-bold">{pixelSpeed} px/s</span>
                       </div>
                     </div>
+
+                    {/* Hero Mastery Rank & Passive Summary */}
+                    <div className="bg-gray-900/90 border border-gray-700/80 rounded-lg p-2.5 mb-3">
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="font-bold text-amber-300 tabular-nums">
+                          Mastery Rank {mastery.currentTier}/{mastery.maxTier}
+                        </span>
+                        <span className="text-gray-400 tabular-nums">
+                          {mastery.roundsCompleted} rds
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden mb-1.5">
+                        <div
+                          className={`h-full transition-all duration-300 ${
+                            mastery.currentTier >= mastery.maxTier ? 'bg-hazard-gold' : 'bg-cyan-accent'
+                          }`}
+                          style={{ width: `${mastery.progressPercent}%` }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-emerald-300 leading-snug">
+                        {mastery.currentTier > 0
+                          ? formatMasteryBonusSummary(mastery.totalBonuses)
+                          : `Unlock Lv.1 at 3 rounds: ${mastery.nextTier?.summary || ''}`}
+                      </p>
+                      {mastery.currentTier > 0 && mastery.nextTier && (
+                        <p className="text-[10px] text-gray-400 mt-0.5 tabular-nums">
+                          Next ({mastery.nextTier.requiredRounds} rds): {mastery.nextTier.summary}
+                        </p>
+                      )}
+                    </div>
+
                     {startUpgrade && (
                       <p className="text-xs text-hazard-gold mb-4">
                         Starting Weapon: {startUpgrade.name}

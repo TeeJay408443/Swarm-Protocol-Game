@@ -23,6 +23,7 @@ import { Collision } from '../../../game/utils/collision'
 import { heroes, enemies as seedEnemies, upgrades as seedUpgrades } from '../../../db/seedData'
 import {
   COIN_CONFIG,
+  GAME_CONFIG,
   getEnemyScaling,
   getUpgradeLevelPerkHint,
   getUpgradeLevelStats,
@@ -48,14 +49,27 @@ import {
 import {
   computeHeroBurnPerTick,
   getArcSlashConfig,
+  getGrimReaperWeaponConfig,
   getHeroAbility,
   getHeroDamageReduction,
+  getMuramasaWeaponConfig,
+  getPairedHeroArcSlashBonus,
   getSummonCountForUpgrade,
   HERO_ABILITY_CONSTANTS,
+  resolveStartingUpgradeIds,
   shouldApplyHomingForHero
 } from '../../../config/heroAbilities'
+import {
+  AREA_TWO_UPGRADES,
+  getAvailableRunUpgrades
+} from '../../../config/areaUpgrades'
 import type { UpgradesRow } from '../../../types/database'
-import { calculateScoreFormula, getOperativeProfile, submitScore } from '../../../services/scores'
+import {
+  calculateScoreFormula,
+  getLocalPlayerTelemetry,
+  getOperativeProfile,
+  submitScore
+} from '../../../services/scores'
 import {
   computeEquippedAccessoryBonuses,
   creditShopCoins,
@@ -63,6 +77,12 @@ import {
   shopWeaponsAsUpgrades,
   type ComputedAccessoryBonuses
 } from '../../../services/shop'
+import {
+  computeHeroMasteryBonuses,
+  getHeroMasteryProgress,
+  recordHeroRoundsCompleted,
+  type HeroMasteryBonuses
+} from '../../../services/heroMastery'
 import {
   setDevRunStatus,
   subscribeDevActions,
@@ -114,6 +134,7 @@ interface OrbitalBeamFx {
   duration: number
   hitCooldowns: Map<Enemy, number>
   cloneId?: number
+  summon?: Summon
   originX?: number
   originY?: number
   color?: string
@@ -138,6 +159,58 @@ interface BurnZoneFx {
   tickTimer: number
   damagePerTick: number
   isLv5: boolean
+}
+
+interface SolarFlailFx {
+  x: number
+  y: number
+  originX: number
+  originY: number
+  angle: number
+  maxDistance: number
+  traveled: number
+  phase: 'outbound' | 'apex' | 'returning'
+  apexTimer: number
+  apexDuration: number
+  speed: number
+  spinAngle: number
+  headRadius: number
+  damage: number
+  burnDamage: number
+  burnRadius: number
+  burnDuration: number
+  isLv5: boolean
+  isCloneCast: boolean
+  cloneId?: number
+  trailDropDist: number
+  hitCooldowns: Map<Enemy, number>
+  timer: number
+  trail: Array<{ x: number; y: number }>
+}
+
+interface TornadoFx {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  radius: number
+  timer: number
+  duration: number
+  damage: number
+  isLv5: boolean
+  isCloneCast: boolean
+  hitCooldowns: Map<Enemy, number>
+}
+
+interface StarfallMeteorFx {
+  targetX: number
+  targetY: number
+  radius: number
+  timer: number
+  impactTime: number
+  damage: number
+  isLv5: boolean
+  isCloneCast: boolean
 }
 
 type AttackFx =
@@ -282,6 +355,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const activeBeamsRef = useRef<OrbitalBeamFx[]>([])
   const voidVorticesRef = useRef<VoidVortexFx[]>([])
   const burnZonesRef = useRef<BurnZoneFx[]>([])
+  const solarFlailsRef = useRef<SolarFlailFx[]>([])
+  const tornadoesRef = useRef<TornadoFx[]>([])
+  const meteorsRef = useRef<StarfallMeteorFx[]>([])
+  const prismBladeHitCooldownsRef = useRef<Map<Enemy, number>>(new Map())
+  const area2UnlockedRef = useRef<boolean>(false)
   const playerTrailRef = useRef<Array<{ x: number; y: number }>>([])
   const explosionsRef = useRef<ExplosionFx[]>([])
   const attackEffectsRef = useRef<AttackFx[]>([])
@@ -310,6 +388,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const bonusCoinCarryRef = useRef<number>(0)
   const hpRegenCarryRef = useRef<number>(0)
   const equippedBonusesRef = useRef<ComputedAccessoryBonuses>(computeEquippedAccessoryBonuses([]))
+  const masteryBonusesRef = useRef<HeroMasteryBonuses>(computeHeroMasteryBonuses('hero_01', 0))
+  const baseHeroSpeedRef = useRef<number>(GAME_CONFIG.BASE_PLAYER_SPEED)
   const equippedWeaponIdRef = useRef<string | null>(null)
   const equippedWeaponStarsRef = useRef<number>(0)
   const enemiesDefeatedRef = useRef<number>(0)
@@ -355,8 +435,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
       equippedWeaponIdRef.current && equippedWeaponStarsRef.current > 0
         ? { [equippedWeaponIdRef.current]: equippedWeaponStarsRef.current }
         : undefined
+    const basePool = getAvailableRunUpgrades({
+      areaId: areaRef.current.id,
+      wave15Cleared: area2UnlockedRef.current
+    })
     const candidatePool = [
-      ...seedUpgrades,
+      ...basePool,
       ...shopWeaponsAsUpgrades(starOverrides).filter((w) =>
         ownedShopWeapons.some((owned) => owned.id === w.id)
       )
@@ -495,9 +579,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const pc = player.getCenter()
       const heroId = player.hero?.id || selectedHeroId || 'hero_01'
       const isEngineer = heroId === 'hero_03'
-      const dmgMult = equippedBonusesRef.current.damageMultiplier
+      const dmgMult =
+        equippedBonusesRef.current.damageMultiplier + masteryBonusesRef.current.damageMultiplier
       const rateMult =
-        equippedBonusesRef.current.cooldownRateMultiplier *
+        (equippedBonusesRef.current.cooldownRateMultiplier +
+          masteryBonusesRef.current.fireRateMultiplier) *
         (isEngineer ? HERO_ABILITY_CONSTANTS.ENGINEER_SUMMON_FIRE_RATE_BONUS : 1)
       const scaledDmg = Math.max(1, Math.round(upgrade.damage * dmgMult))
 
@@ -574,6 +660,68 @@ const GameContainer: React.FC<GameContainerProps> = ({
           turret.damage = scaledDmg
           turret.cooldown = Math.max(0.18, (upgrade.cooldown_s || 0.65) / rateMult)
           turret.level = level
+        })
+      } else if (upgrade.id === 'upg_a2_02') {
+        const desiredStriders = getSummonCountForUpgrade(upgrade.id, level, heroId)
+        let current = summonsRef.current.filter((s) => s.kind === 'laser_strider')
+        while (current.length < desiredStriders) {
+          const offsetAngle = (current.length / Math.max(1, desiredStriders)) * Math.PI * 2
+          summonsRef.current.push(
+            new Summon({
+              kind: 'laser_strider',
+              upgradeId: upgrade.id,
+              x: pc.x + Math.cos(offsetAngle) * 86,
+              y: pc.y + Math.sin(offsetAngle) * 86,
+              damage: scaledDmg,
+              cooldown: (upgrade.cooldown_s || 0.72) / rateMult,
+              level
+            })
+          )
+          current = summonsRef.current.filter((s) => s.kind === 'laser_strider')
+        }
+        current.forEach((strider, idx) => {
+          strider.slotIndex = idx
+          strider.totalSlots = current.length
+          strider.damage = scaledDmg
+          strider.cooldown = Math.max(0.2, (upgrade.cooldown_s || 0.9) / rateMult)
+          strider.level = level
+        })
+      } else if (upgrade.id === 'wpn_grim_reaper') {
+        const reaperCfg = getGrimReaperWeaponConfig(scaledDmg, level, heroId)
+        const desiredReapers = reaperCfg.reaperCount
+        let current = summonsRef.current.filter((s) => s.kind === 'grim_reaper')
+        while (current.length < desiredReapers) {
+          const offsetAngle = (current.length / Math.max(1, desiredReapers)) * Math.PI * 2
+          summonsRef.current.push(
+            new Summon({
+              kind: 'grim_reaper',
+              upgradeId: upgrade.id,
+              x: pc.x + Math.cos(offsetAngle) * 88,
+              y: pc.y + Math.sin(offsetAngle) * 88,
+              damage: reaperCfg.damage,
+              cooldown: ((upgrade.cooldown_s || 1.05) * reaperCfg.cooldownScale) / rateMult,
+              level,
+              isPairedHero: reaperCfg.isPairedHero,
+              scytheCount: reaperCfg.scytheCount,
+              siphonTargetCount: reaperCfg.siphonTargets,
+              healPerTarget: reaperCfg.healPerTarget
+            })
+          )
+          current = summonsRef.current.filter((s) => s.kind === 'grim_reaper')
+        }
+        current.forEach((reaper, idx) => {
+          reaper.slotIndex = idx
+          reaper.totalSlots = current.length
+          reaper.damage = reaperCfg.damage
+          reaper.cooldown = Math.max(
+            0.22,
+            ((upgrade.cooldown_s || 1.05) * reaperCfg.cooldownScale) / rateMult
+          )
+          reaper.level = level
+          reaper.isPairedHero = reaperCfg.isPairedHero
+          reaper.scytheCount = reaperCfg.scytheCount
+          reaper.siphonTargetCount = reaperCfg.siphonTargets
+          reaper.healPerTarget = reaperCfg.healPerTarget
         })
       }
     },
@@ -753,22 +901,40 @@ const GameContainer: React.FC<GameContainerProps> = ({
         ? { [equippedWeaponIdRef.current]: equippedWeaponStarsRef.current }
         : undefined
 
-    const allKnownUpgrades = [...seedUpgrades, ...shopWeaponsAsUpgrades(starOverrides)]
+    const telemetry = getLocalPlayerTelemetry(effectiveUserId)
+    area2UnlockedRef.current =
+      areaRef.current.id === 'astral_citadel' || Boolean(telemetry.wave_15_cleared)
+
+    const allKnownUpgrades = [
+      ...seedUpgrades,
+      ...AREA_TWO_UPGRADES,
+      ...shopWeaponsAsUpgrades(starOverrides)
+    ]
     const hero = heroes.find((h) => h.id === selectedHeroId) || heroes[0]
-    const chosenStartId =
-      startingUpgradeId && startingUpgradeId.startsWith('wpn_')
-        ? startingUpgradeId
-        : shopState.equippedWeaponId || startingUpgradeId || hero.starting_upgrade_id
-    const initialUpgrade =
-      allKnownUpgrades.find((u) => u.id === chosenStartId) || seedUpgrades[0]
+    const masteryProgress = getHeroMasteryProgress(effectiveUserId, hero.id)
+    masteryBonusesRef.current = masteryProgress.totalBonuses
+
+    const startingUpgradeIds = resolveStartingUpgradeIds({
+      heroStartingUpgradeId: hero.starting_upgrade_id,
+      loadoutUpgradeId: startingUpgradeId,
+      equippedWeaponId: shopState.equippedWeaponId
+    })
+    const initialUpgrades: UpgradesRow[] = startingUpgradeIds
+      .map((id) => allKnownUpgrades.find((u) => u.id === id))
+      .filter((u): u is UpgradesRow => Boolean(u))
+    if (initialUpgrades.length === 0) {
+      initialUpgrades.push(seedUpgrades[0])
+    }
 
     const newPlayer = new Player({
       x: ARENA_SIZE / 2 - 20,
       y: ARENA_SIZE / 2 - 20,
       hero
     })
-    if (bonuses.bonusHp > 0) {
-      newPlayer.maxHealth += bonuses.bonusHp
+    baseHeroSpeedRef.current = newPlayer.speed
+    const totalBonusHp = bonuses.bonusHp + masteryBonusesRef.current.bonusHp
+    if (totalBonusHp > 0) {
+      newPlayer.maxHealth += totalBonusHp
       newPlayer.health = newPlayer.maxHealth
     }
     basePlayerMaxHealthRef.current = newPlayer.maxHealth
@@ -778,7 +944,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
       )
       newPlayer.health = newPlayer.maxHealth
     }
-    newPlayer.speed *= bonuses.speedMultiplier
+    newPlayer.speed *= bonuses.speedMultiplier + masteryBonusesRef.current.speedMultiplier
 
     const rect = containerRef.current?.getBoundingClientRect()
     canvas.width = Math.max(320, Math.floor(rect?.width || window.innerWidth))
@@ -819,22 +985,32 @@ const GameContainer: React.FC<GameContainerProps> = ({
     activeBeamsRef.current = []
     voidVorticesRef.current = []
     burnZonesRef.current = []
+    solarFlailsRef.current = []
+    tornadoesRef.current = []
+    meteorsRef.current = []
+    prismBladeHitCooldownsRef.current.clear()
     playerTrailRef.current = [newPlayer.getCenter()]
     explosionsRef.current = []
     attackEffectsRef.current = []
     floatingTextsRef.current = []
     cryoDotTimerRef.current = 0
 
-    const startStats = getUpgradeLevelStats(initialUpgrade.damage, initialUpgrade.cooldown_s, 1)
-    const clonedStartUpgrade: UpgradesRow = {
-      ...initialUpgrade,
-      damage: startStats.damage,
-      cooldown_s: startStats.cooldown_s
-    }
-    activeUpgradesRef.current = [clonedStartUpgrade]
-    upgradeLevelsRef.current = { [clonedStartUpgrade.id]: 1 }
-    upgradeCooldownsRef.current = { [clonedStartUpgrade.id]: 0.1 }
-    syncSummonsForUpgrade(clonedStartUpgrade, newPlayer, 1)
+    const clonedStartUpgrades: UpgradesRow[] = initialUpgrades.map((upg) => {
+      const stats = getUpgradeLevelStats(upg.damage, upg.cooldown_s, 1)
+      return {
+        ...upg,
+        damage: stats.damage,
+        cooldown_s: stats.cooldown_s
+      }
+    })
+    activeUpgradesRef.current = clonedStartUpgrades
+    upgradeLevelsRef.current = {}
+    upgradeCooldownsRef.current = {}
+    clonedStartUpgrades.forEach((upg, idx) => {
+      upgradeLevelsRef.current[upg.id] = 1
+      upgradeCooldownsRef.current[upg.id] = 0.08 + idx * 0.04
+      syncSummonsForUpgrade(upg, newPlayer, 1)
+    })
 
     waveRef.current = 1
     waveElapsedRef.current = 0
@@ -883,9 +1059,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
     setLevel(1)
     setEnemiesDefeated(0)
     setTimeSurvived(0)
-    setActiveUpgradeNames([`${clonedStartUpgrade.name} Lv.1`])
+    setActiveUpgradeNames(clonedStartUpgrades.map((u) => `${u.name} Lv.1`))
     setShieldActive(
-      clonedStartUpgrade.id === 'upg_11' || clonedStartUpgrade.id === 'upg_15'
+      clonedStartUpgrades.some((u) => u.id === 'upg_11' || u.id === 'upg_15')
     )
 
     const warpToWaveInternal = (targetWave: number) => {
@@ -1232,7 +1408,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
       if (wasKilled) {
         enemiesDefeatedRef.current += 1
         const baseXpGain = enemy.isBoss ? LEVEL_UP_CONFIG.XP_PER_BOSS_KILL : LEVEL_UP_CONFIG.XP_PER_ENEMY_KILL
-        const xpGain = Math.max(1, Math.round(baseXpGain * equippedBonusesRef.current.xpMultiplier))
+        const totalXpMult =
+          equippedBonusesRef.current.xpMultiplier + masteryBonusesRef.current.xpMultiplier
+        const xpGain = Math.max(1, Math.round(baseXpGain * totalXpMult))
         xpRef.current += xpGain
 
         // Spawn dropped coin(s)
@@ -1260,6 +1438,19 @@ const GameContainer: React.FC<GameContainerProps> = ({
             color: 'rgba(250, 204, 21, 0.7)'
           })
           clearedWave15BossRef.current = true
+          area2UnlockedRef.current = true
+          const heroIdForMastery = playerRef.current?.hero?.id || selectedHeroId || 'hero_01'
+          const bossMastery = recordHeroRoundsCompleted(
+            user?.id || 'guest_user',
+            heroIdForMastery,
+            1
+          )
+          masteryBonusesRef.current = bossMastery.progress.totalBonuses
+          if (bossMastery.unlockedNewTier) {
+            toast.success(
+              `Mastery Tier ${bossMastery.unlockedNewTier.tier} Unlocked: ${bossMastery.unlockedNewTier.title} (${bossMastery.unlockedNewTier.summary})`
+            )
+          }
           if (areaRef.current.id === 'astral_citadel') {
             playSoundRef.current('levelup')
             setEngineState('victory_choice')
@@ -1337,7 +1528,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
       }
 
       const heroDr = getHeroDamageReduction(player.hero?.id || 'hero_01')
-      const dmgReduction = Math.min(0.85, equippedBonusesRef.current.damageReduction + heroDr)
+      const dmgReduction = Math.min(
+        0.85,
+        equippedBonusesRef.current.damageReduction + masteryBonusesRef.current.damageReduction + heroDr
+      )
       const finalIncomingDmg = Math.max(1, Math.round(amount * (1 - dmgReduction)))
       const killed = player.takeDamage(finalIncomingDmg)
       waveTookDamageRef.current = true
@@ -1378,10 +1572,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const lv = upgradeLevelsRef.current[upg.id] || 1
       const isLv5 = lv >= MAX_WEAPON_UPGRADE_LEVEL
       const scaledBaseDmg = Math.max(1, Math.round(upg.damage * damageScale))
-      const weaponDmg = Math.max(
-        1,
-        Math.round(scaledBaseDmg * equippedBonusesRef.current.damageMultiplier)
-      )
+      const totalWeaponDmgMult =
+        equippedBonusesRef.current.damageMultiplier + masteryBonusesRef.current.damageMultiplier
+      const weaponDmg = Math.max(1, Math.round(scaledBaseDmg * totalWeaponDmgMult))
 
       // Nearest target within 620px
       let nearest: Enemy | null = null
@@ -1670,6 +1863,214 @@ const GameContainer: React.FC<GameContainerProps> = ({
           playSoundRef.current('shoot')
           return
         }
+        case 'wpn_cryo_railgun': {
+          if (!nearest) return
+          const ec = nearest.getCenter()
+          const baseAngle = Math.atan2(ec.y - pc.y, ec.x - pc.x)
+          const barrelCount = isLv5 ? 3 : lv >= 3 ? 2 : 1
+          const span = (barrelCount - 1) * 0.14
+          for (let i = 0; i < barrelCount; i++) {
+            const off = barrelCount === 1 ? 0 : -span / 2 + (i / (barrelCount - 1)) * span
+            const a = baseAngle + off
+            playerProjectilesRef.current.push(
+              new Projectile({
+                x: pc.x,
+                y: pc.y,
+                width: 22 + lv * 2,
+                height: 10,
+                speed: 680 + lv * 26,
+                direction: { x: Math.cos(a), y: Math.sin(a) },
+                damage: weaponDmg,
+                color: isLv5 ? '#E0F2FE' : '#38BDF8',
+                maxLifetime: 1.05,
+                maxPierces: 4 + lv + (isLv5 ? 1 : 0),
+                explosionRadius: 34 + lv * 8,
+                type: 'IceShard'
+              })
+            )
+          }
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'wpn_permafrost_spire': {
+          if (!nearest) return
+          const ec = nearest.getCenter()
+          const baseAngle = Math.atan2(ec.y - pc.y, ec.x - pc.x)
+          const count = isLv5 ? 3 : lv >= 3 ? 2 : 1
+          const span = (count - 1) * 0.18
+          const freezeDuration = 1.5 + (lv - 1) * 0.15
+          for (let i = 0; i < count; i++) {
+            const off = count === 1 ? 0 : -span / 2 + (i / (count - 1)) * span
+            const a = baseAngle + off
+            playerProjectilesRef.current.push(
+              new Projectile({
+                x: pc.x,
+                y: pc.y,
+                width: 18 + lv * 2,
+                height: 14 + lv,
+                speed: 560 + lv * 26,
+                direction: { x: Math.cos(a), y: Math.sin(a) },
+                damage: weaponDmg,
+                color: isLv5 ? '#E0F2FE' : '#38BDF8',
+                maxLifetime: 1.05,
+                maxPierces: 3 + lv,
+                explosionRadius: 52 + lv * 12,
+                explodeAtEnd: true,
+                freezeDuration,
+                type: 'IceShard'
+              })
+            )
+          }
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'wpn_solar_flail': {
+          // Legendary Solar Flare Flail: Launches spinning spiked solar mace(s) on a molten chain
+          // toward enemies, erupting into fire areas before snapping back to the wielder.
+          const targetCenter = nearest ? nearest.getCenter() : null
+          const baseAngle = targetCenter
+            ? Math.atan2(targetCenter.y - pc.y, targetCenter.x - pc.x)
+            : player.facingAngle
+          const flailCount = isLv5 ? 3 : lv >= 3 ? 2 : 1
+          const spreadSpan = flailCount === 1 ? 0 : flailCount === 2 ? 0.55 : 0.78
+          const targetDist = targetCenter ? Math.hypot(targetCenter.x - pc.x, targetCenter.y - pc.y) : 230
+          const reach = Math.max(190, Math.min(360, targetDist + 65 + lv * 18))
+          const burnDamage = Math.max(isCloneCast ? 5 : 10, Math.round(weaponDmg * 0.38))
+          const burnRadius = 56 + lv * 15
+          const burnDuration = 2.6 + lv * 0.35
+
+          for (let f = 0; f < flailCount; f++) {
+            const offset =
+              flailCount === 1 ? 0 : -spreadSpan / 2 + (f / (flailCount - 1)) * spreadSpan
+            const launchAngle = baseAngle + offset
+            solarFlailsRef.current.push({
+              x: pc.x,
+              y: pc.y,
+              originX: pc.x,
+              originY: pc.y,
+              angle: launchAngle,
+              maxDistance: reach,
+              traveled: 0,
+              phase: 'outbound',
+              apexTimer: 0,
+              apexDuration: 0.16,
+              speed: 620 + lv * 34,
+              spinAngle: f * 1.4,
+              headRadius: 22 + lv * 3.2,
+              damage: weaponDmg,
+              burnDamage,
+              burnRadius,
+              burnDuration,
+              isLv5,
+              isCloneCast,
+              cloneId,
+              trailDropDist: 0,
+              hitCooldowns: new Map(),
+              timer: 0,
+              trail: [{ x: pc.x, y: pc.y }]
+            })
+          }
+
+          explosionsRef.current.push({
+            x: pc.x,
+            y: pc.y,
+            radius: 44 + lv * 6,
+            timer: 0,
+            duration: 0.22,
+            color: isCloneCast ? 'rgba(192, 132, 252, 0.55)' : 'rgba(251, 146, 60, 0.65)'
+          })
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'wpn_void_reaper': {
+          const targetCenter = nearest ? nearest.getCenter() : pc
+          const baseAngle = nearest
+            ? Math.atan2(targetCenter.y - pc.y, targetCenter.x - pc.x)
+            : timeSurvivedRef.current * 4
+          const cleaveRadius = 105 + lv * 20
+          attackEffectsRef.current.push({
+            kind: 'slash',
+            x: pc.x,
+            y: pc.y,
+            angle: baseAngle,
+            radius: cleaveRadius,
+            color: isCloneCast ? '#C084FC' : isLv5 ? '#FFD700' : '#A855F7',
+            timer: 0,
+            duration: 0.28
+          })
+          for (const e of aliveEnemies) {
+            if (Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y) <= cleaveRadius + e.width / 2) {
+              damageEnemy(e, weaponDmg, pc)
+            }
+          }
+          const vortexRadius = 90 + lv * 18
+          const vortexCenters =
+            isLv5 || lv >= 3
+              ? [
+                  { x: targetCenter.x - 60, y: targetCenter.y },
+                  { x: targetCenter.x + 60, y: targetCenter.y }
+                ]
+              : [targetCenter]
+          for (const vc of vortexCenters) {
+            voidVorticesRef.current.push({
+              x: vc.x,
+              y: vc.y,
+              radius: vortexRadius,
+              timer: 0,
+              duration: 2.0 + lv * 0.15,
+              damage: Math.max(1, Math.round(weaponDmg * 0.72)),
+              isLv5
+            })
+          }
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'wpn_muramasa': {
+          const heroId = player.hero?.id || 'hero_01'
+          const muramasaCfg = getMuramasaWeaponConfig(weaponDmg, lv, heroId)
+          const baseAngle = nearest
+            ? Math.atan2(nearest.getCenter().y - pc.y, nearest.getCenter().x - pc.x)
+            : player.facingAngle
+          for (let w = 0; w < muramasaCfg.waveCount; w++) {
+            const angleOffset =
+              muramasaCfg.waveCount === 1
+                ? 0
+                : w === 0
+                  ? 0
+                  : w === 1
+                    ? Math.PI
+                    : (w % 2 === 0 ? 0.55 : -0.55)
+            const waveAngle = baseAngle + angleOffset
+            attackEffectsRef.current.push({
+              kind: 'muramasa_slash',
+              x: pc.x,
+              y: pc.y,
+              angle: waveAngle,
+              radius: muramasaCfg.radius,
+              color: isCloneCast ? '#C084FC' : w === 0 ? '#FF2E63' : '#FB7185',
+              timer: 0,
+              duration: 0.34
+            })
+          }
+          if (muramasaCfg.isPairedHero) {
+            explosionsRef.current.push({
+              x: pc.x,
+              y: pc.y,
+              radius: muramasaCfg.radius * 0.82,
+              timer: 0,
+              duration: 0.26,
+              color: isCloneCast ? 'rgba(192, 132, 252, 0.35)' : 'rgba(255, 46, 99, 0.36)'
+            })
+          }
+          for (const e of aliveEnemies) {
+            const d = Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y)
+            if (d <= muramasaCfg.radius + e.width / 2) {
+              damageEnemy(e, muramasaCfg.damage, pc)
+            }
+          }
+          playSoundRef.current('shoot')
+          return
+        }
         case 'upg_02': {
           // Rocket Barrage: 1 -> 1 -> 2 -> 2 -> 3 rockets; blast radius 68 -> 84 -> 100 -> 116 -> 132px
           if (!nearest) return
@@ -1744,7 +2145,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 : 'rgba(255, 215, 0, 0.3)'
           })
           if (lv >= 2) {
-            const pulseDmg = Math.max(1, Math.round(lv * 10 * damageScale))
+            const pulseDmg = Math.max(1, Math.round(lv * 10 * damageScale * totalWeaponDmgMult))
             for (const e of aliveEnemies) {
               if (Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y) <= radius + e.width / 2) {
                 damageEnemy(e, pulseDmg, pc)
@@ -1797,7 +2198,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           for (const item of sorted) {
             const targetPt = item.enemy.getCenter()
             chainPoints.push(targetPt)
-            damageEnemy(item.enemy, scaledBaseDmg, pc)
+            damageEnemy(item.enemy, weaponDmg, pc)
           }
           if (chainPoints.length > 1) {
             attackEffectsRef.current.push({
@@ -1840,7 +2241,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
             })
             for (const e of aliveEnemies) {
               if (Math.hypot(e.getCenter().x - strike.x, e.getCenter().y - strike.y) <= strike.r + e.width / 2) {
-                damageEnemy(e, scaledBaseDmg, strike)
+                damageEnemy(e, weaponDmg, strike)
               }
             }
           }
@@ -1863,7 +2264,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           const span = (streamCount - 1) * 0.14
           const plumeDamage = Math.max(
             isCloneCast ? 2 : 4,
-            Math.round(scaledBaseDmg * (streamCount === 1 ? 1 : 0.65))
+            Math.round(weaponDmg * (streamCount === 1 ? 1 : 0.65))
           )
           for (let i = 0; i < streamCount; i++) {
             const off = streamCount === 1 ? 0 : -span / 2 + (i / (streamCount - 1)) * span
@@ -1888,9 +2289,14 @@ const GameContainer: React.FC<GameContainerProps> = ({
           return
         }
         case 'upg_12': {
-          // Arc Slash - Vanguard Blade gains Muramasa Bloodmoon Slash buff & VFX
+          // Arc Slash - Vanguard Blade gains Muramasa Bloodmoon Slash buff & bonus resonance with Mythic Muramasa
           const heroId = player.hero?.id || 'hero_01'
-          const arcCfg = getArcSlashConfig(scaledBaseDmg, lv, heroId)
+          const arcCfg = getArcSlashConfig(weaponDmg, lv, heroId)
+          const pairResonance = getPairedHeroArcSlashBonus(
+            heroId,
+            activeUpgradesRef.current.map((u) => u.id)
+          )
+          const finalArcDamage = Math.max(1, Math.round(arcCfg.damage * pairResonance))
           const slashRadius = arcCfg.radius
           const slashAngle = nearest
             ? Math.atan2(nearest.getCenter().y - pc.y, nearest.getCenter().x - pc.x)
@@ -1914,7 +2320,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           for (const e of aliveEnemies) {
             const d = Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y)
             if (d <= slashRadius + e.width / 2) {
-              damageEnemy(e, arcCfg.damage, pc)
+              damageEnemy(e, finalArcDamage, pc)
             }
           }
           playSoundRef.current('shoot')
@@ -2004,8 +2410,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
           return
         }
         case 'upg_18': {
-          // Frost Nova Spire: 4 -> 6 -> 8 -> 10 -> 12 radial crystalline ice shards
+          // Frost Nova Spire: 4 -> 6 -> 8 -> 10 -> 12 radial crystalline ice shards that freeze foes
           const count = 2 + lv * 2
+          const freezeDuration = 0.85 + (lv - 1) * 0.15
           for (let i = 0; i < count; i++) {
             const a = (i / count) * Math.PI * 2
             playerProjectilesRef.current.push(
@@ -2020,6 +2427,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 color: isLv5 ? '#E0F2FE' : '#22D3EE',
                 maxLifetime: 0.78 + lv * 0.05,
                 maxPierces: lv,
+                freezeDuration,
                 type: 'IceShard'
               })
             )
@@ -2051,7 +2459,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           if (targets.length === 0) return
           for (const item of targets) {
             const ec = item.enemy.getCenter()
-            damageEnemy(item.enemy, scaledBaseDmg)
+            damageEnemy(item.enemy, weaponDmg)
             attackEffectsRef.current.push({
               kind: 'siphon',
               from: ec,
@@ -2109,6 +2517,142 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 burnRadius: zoneRadius,
                 burnDuration,
                 burnDamage
+              })
+            )
+          }
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'upg_a2_01': {
+          // Cyclone Tempest: spawns howling bouncing plasma tornadoes
+          const tornadoCount = isLv5 ? 3 : lv >= 3 ? 2 : 1
+          const baseAngle = nearest
+            ? Math.atan2(nearest.getCenter().y - pc.y, nearest.getCenter().x - pc.x)
+            : timeSurvivedRef.current * 2.1
+          const speed = 245 + lv * 22
+          const radius = 64 + lv * 14
+          const duration = 3.6 + lv * 0.28
+          const tickDmg = Math.max(isCloneCast ? 5 : 10, Math.round(weaponDmg * 0.72))
+
+          for (let t = 0; t < tornadoCount; t++) {
+            const ang =
+              baseAngle +
+              (tornadoCount === 1
+                ? 0
+                : tornadoCount === 2
+                  ? (t === 0 ? -0.45 : 0.45)
+                  : (t - 1) * 0.95)
+            tornadoesRef.current.push({
+              x: pc.x + Math.cos(ang) * 28,
+              y: pc.y + Math.sin(ang) * 28,
+              vx: Math.cos(ang) * speed,
+              vy: Math.sin(ang) * speed,
+              radius,
+              timer: 0,
+              duration,
+              damage: tickDmg,
+              isLv5,
+              isCloneCast,
+              hitCooldowns: new Map()
+            })
+          }
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'upg_a2_03': {
+          // Astral Javelin: hurls piercing spears that burst into an AoE shockwave at the end
+          if (!nearest) return
+          const ec = nearest.getCenter()
+          const baseAngle = Math.atan2(ec.y - pc.y, ec.x - pc.x)
+          const spearCount = isLv5 ? 4 : lv >= 4 ? 3 : lv >= 3 ? 2 : 1
+          const spreadSpan = spearCount === 1 ? 0 : (spearCount - 1) * 0.16
+          const pierces = isLv5 ? 14 : 3 + lv * 2
+          const endBurstRadius = 66 + lv * 18
+
+          for (let i = 0; i < spearCount; i++) {
+            const off =
+              spearCount === 1 ? 0 : -spreadSpan / 2 + (i / (spearCount - 1)) * spreadSpan
+            const a = baseAngle + off
+            playerProjectilesRef.current.push(
+              new Projectile({
+                x: pc.x,
+                y: pc.y,
+                width: 15 + lv,
+                height: 11 + lv * 0.6,
+                speed: 620 + lv * 24,
+                direction: { x: Math.cos(a), y: Math.sin(a) },
+                damage: weaponDmg,
+                color: isLv5 ? '#FFD700' : '#34D399',
+                maxLifetime: 0.78 + lv * 0.06,
+                maxPierces: pierces,
+                explosionRadius: endBurstRadius,
+                explodeAtEnd: true,
+                type: 'Spear'
+              })
+            )
+          }
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'upg_a2_04': {
+          // Starfall Meteor: calls down blazing emerald-gold meteors on enemy clusters
+          const meteorCount = lv
+          const meteorRadius = 78 + lv * 17
+          const candidates = [...aliveEnemies].sort((a, b) => {
+            const da = Math.hypot(a.getCenter().x - pc.x, a.getCenter().y - pc.y)
+            const db = Math.hypot(b.getCenter().x - pc.x, b.getCenter().y - pc.y)
+            return da - db
+          })
+          for (let m = 0; m < meteorCount; m++) {
+            const pick =
+              candidates.length > 0
+                ? candidates[(m * 2) % candidates.length].getCenter()
+                : {
+                    x: pc.x + Math.cos(m * 1.4) * 140,
+                    y: pc.y + Math.sin(m * 1.4) * 140
+                  }
+            meteorsRef.current.push({
+              targetX: pick.x + (m > 0 ? Math.cos(m * 2.1) * 28 : 0),
+              targetY: pick.y + (m > 0 ? Math.sin(m * 2.1) * 28 : 0),
+              radius: meteorRadius,
+              timer: -m * 0.06,
+              impactTime: 0.24,
+              damage: weaponDmg,
+              isLv5,
+              isCloneCast
+            })
+          }
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'upg_a2_06': {
+          // Permafrost Cryo-Nova: launches frost orbs that detonate in freezing cryo-novas
+          if (!nearest) return
+          const ec = nearest.getCenter()
+          const baseAngle = Math.atan2(ec.y - pc.y, ec.x - pc.x)
+          const orbCount = isLv5 ? 4 : lv >= 4 ? 3 : lv >= 2 ? 2 : 1
+          const span = orbCount === 1 ? 0 : (orbCount - 1) * 0.22
+          const novaRadius = 78 + lv * 18
+          const freezeDuration = 1.5 + (lv - 1) * 0.175
+          for (let i = 0; i < orbCount; i++) {
+            const off = orbCount === 1 ? 0 : -span / 2 + (i / (orbCount - 1)) * span
+            const a = baseAngle + off
+            playerProjectilesRef.current.push(
+              new Projectile({
+                x: pc.x,
+                y: pc.y,
+                width: 18 + lv * 1.5,
+                height: 18 + lv * 1.5,
+                speed: 380 + lv * 22,
+                direction: { x: Math.cos(a), y: Math.sin(a) },
+                damage: weaponDmg,
+                color: isLv5 ? '#E0F2FE' : '#38BDF8',
+                maxLifetime: 0.92 + lv * 0.06,
+                maxPierces: lv >= 3 ? lv - 1 : 0,
+                explosionRadius: novaRadius,
+                explodeAtEnd: lv >= 3,
+                freezeDuration,
+                type: 'FrostOrb'
               })
             )
           }
@@ -2209,7 +2753,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
         radius: proj.explosionRadius,
         timer: 0,
         duration: 0.3,
-        color: proj.burnRadius > 0 ? 'rgba(249, 115, 22, 0.55)' : 'rgba(255, 215, 0, 0.45)'
+        color:
+          proj.burnRadius > 0
+            ? 'rgba(249, 115, 22, 0.55)'
+            : proj.freezeDuration > 0
+              ? 'rgba(56, 189, 248, 0.55)'
+              : 'rgba(255, 215, 0, 0.45)'
       })
       for (const aoeTarget of enemiesRef.current) {
         if (!aoeTarget.isAlive || aoeTarget.isSpawning) continue
@@ -2217,7 +2766,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
           Math.hypot(aoeTarget.getCenter().x - proj.x, aoeTarget.getCenter().y - proj.y) <=
           proj.explosionRadius + aoeTarget.width / 2
         ) {
-          damageEnemy(aoeTarget, proj.damage, { x: proj.x, y: proj.y })
+          damageEnemy(aoeTarget, proj.damage, { x: proj.x, y: proj.y }, {
+            color: proj.freezeDuration > 0 ? '#7DD3FC' : undefined
+          })
+          if (proj.freezeDuration > 0 && aoeTarget.isAlive) {
+            aoeTarget.applyFreeze(proj.freezeDuration)
+          }
         }
       }
       if (proj.burnRadius > 0) {
@@ -2248,7 +2802,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
         if (gameStateRef.current === 'playing') {
           timeSurvivedRef.current += deltaTime
 
-          // 1. Movement (Keyboard + Touch D-pad)
+          // 1. Movement (Keyboard + Touch D-pad + Shield Paladin Spacebar Dash)
+          dashCooldownRef.current = Math.max(0, dashCooldownRef.current - deltaTime)
           const kbMove = inputRef.current?.getMovementVector() || { x: 0, y: 0 }
           const touchMove = touchDirRef.current
           let moveX = kbMove.x + touchMove.x
@@ -2258,7 +2813,64 @@ const GameContainer: React.FC<GameContainerProps> = ({
             moveX /= mag
             moveY /= mag
           }
-          player.update({ x: moveX, y: moveY }, deltaTime)
+          if (mag > 0.05) {
+            lastMoveDirRef.current = { x: moveX, y: moveY }
+          }
+
+          if (dashTimerRef.current > 0) {
+            dashTimerRef.current = Math.max(0, dashTimerRef.current - deltaTime)
+            player.x = Math.max(
+              0,
+              Math.min(
+                ARENA_SIZE - player.width,
+                player.x + dashDirRef.current.x * HERO_ABILITY_CONSTANTS.PALADIN_DASH_SPEED * deltaTime
+              )
+            )
+            player.y = Math.max(
+              0,
+              Math.min(
+                ARENA_SIZE - player.height,
+                player.y + dashDirRef.current.y * HERO_ABILITY_CONSTANTS.PALADIN_DASH_SPEED * deltaTime
+              )
+            )
+            player.update({ x: 0, y: 0 }, deltaTime)
+            dashAfterimagesRef.current.push({
+              x: player.x,
+              y: player.y,
+              timer: 0,
+              duration: 0.24
+            })
+            if (dashAfterimagesRef.current.length > 12) {
+              dashAfterimagesRef.current.shift()
+            }
+
+            // Shield bash knockback + impact damage during dash
+            const dashPc = player.getCenter()
+            for (const enemy of enemiesRef.current) {
+              if (!enemy.isAlive || enemy.isSpawning || dashHitEnemiesRef.current.has(enemy)) continue
+              const ec = enemy.getCenter()
+              const dist = Math.hypot(ec.x - dashPc.x, ec.y - dashPc.y)
+              if (dist <= player.width / 2 + enemy.width / 2 + 16) {
+                dashHitEnemiesRef.current.add(enemy)
+                const pushLen = dist || 1
+                if (!enemy.isStationaryBoss) {
+                  enemy.x += ((ec.x - dashPc.x) / pushLen) * 38
+                  enemy.y += ((ec.y - dashPc.y) / pushLen) * 38
+                }
+                damageEnemy(enemy, Math.max(12, Math.round(player.maxHealth * 0.14)), dashPc)
+              }
+            }
+          } else {
+            player.update({ x: moveX, y: moveY }, deltaTime)
+          }
+
+          for (let ai = dashAfterimagesRef.current.length - 1; ai >= 0; ai--) {
+            dashAfterimagesRef.current[ai].timer += deltaTime
+            if (dashAfterimagesRef.current[ai].timer >= dashAfterimagesRef.current[ai].duration) {
+              dashAfterimagesRef.current.splice(ai, 1)
+            }
+          }
+
           if (bossArenaRef.current) {
             const ba = bossArenaRef.current
             player.x = Math.max(ba.left + 16, Math.min(ba.left + ba.width - player.width - 16, player.x))
@@ -2374,6 +2986,55 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   currentDamageFreeStreakRef.current
                 )
               }
+
+              // Hero Mastery: record completed round & unlock passive bonuses live
+              const masteryResult = recordHeroRoundsCompleted(
+                user?.id || 'guest_user',
+                player.hero?.id || selectedHeroId || 'hero_01',
+                1
+              )
+              masteryBonusesRef.current = masteryResult.progress.totalBonuses
+              if (masteryResult.unlockedNewTier) {
+                const newTier = masteryResult.unlockedNewTier
+                const bonusHpGain = newTier.bonuses.bonusHp || 0
+                if (bonusHpGain > 0) {
+                  basePlayerMaxHealthRef.current += bonusHpGain
+                  const devHpMult =
+                    isDevUserRef.current && devSettingsRef.current.healthMultiplier > 1
+                      ? devSettingsRef.current.healthMultiplier
+                      : 1
+                  player.maxHealth = Math.round(basePlayerMaxHealthRef.current * devHpMult)
+                  player.heal(Math.round(bonusHpGain * devHpMult))
+                  setMaxHealth(player.maxHealth)
+                  setHealth(player.health)
+                }
+                player.speed =
+                  baseHeroSpeedRef.current *
+                  (equippedBonusesRef.current.speedMultiplier +
+                    masteryBonusesRef.current.speedMultiplier)
+                for (const upg of activeUpgradesRef.current) {
+                  if (
+                    upg.id === 'upg_01' ||
+                    upg.id === 'upg_14' ||
+                    upg.id === 'upg_20' ||
+                    upg.id === 'upg_a2_02' ||
+                    upg.id === 'wpn_grim_reaper'
+                  ) {
+                    syncSummonsForUpgrade(upg, player, upgradeLevelsRef.current[upg.id] || 1)
+                  }
+                }
+                playSoundRef.current('levelup')
+                floatingTextsRef.current.push({
+                  x: updatedCenter.x,
+                  y: player.y - 26,
+                  text: `MASTERY TIER ${newTier.tier}: ${newTier.title.toUpperCase()}!`,
+                  color: '#FACC15',
+                  timer: 1.5
+                })
+                toast.success(
+                  `Hero Mastery Tier ${newTier.tier} Unlocked: ${newTier.title} (${newTier.summary})`
+                )
+              }
             }
           }
 
@@ -2394,9 +3055,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
             (u) => (u.id === 'upg_11' || u.id === 'upg_15') && (upgradeCooldownsRef.current[u.id] || 0) <= 0
           )
 
-          // Passive HP regeneration from equipped Accessories
-          if (equippedBonusesRef.current.hpRegenPerSec > 0 && player.isAlive && player.health < player.maxHealth) {
-            hpRegenCarryRef.current += equippedBonusesRef.current.hpRegenPerSec * deltaTime
+          // Passive HP regeneration from equipped Accessories + Hero Mastery
+          const totalHpRegenPerSec =
+            equippedBonusesRef.current.hpRegenPerSec + masteryBonusesRef.current.hpRegenPerSec
+          if (totalHpRegenPerSec > 0 && player.isAlive && player.health < player.maxHealth) {
+            hpRegenCarryRef.current += totalHpRegenPerSec * deltaTime
             if (hpRegenCarryRef.current >= 1) {
               const healWhole = Math.floor(hpRegenCarryRef.current)
               hpRegenCarryRef.current -= healWhole
@@ -2405,13 +3068,18 @@ const GameContainer: React.FC<GameContainerProps> = ({
           }
 
           // 4. Auto-Fire Equipped Upgrades (Summons are updated autonomously below)
-          const fireRateMultiplier = equippedBonusesRef.current.cooldownRateMultiplier
+          const fireRateMultiplier =
+            equippedBonusesRef.current.cooldownRateMultiplier +
+            masteryBonusesRef.current.fireRateMultiplier
           for (const upg of activeUpgradesRef.current) {
             if (
               upg.id === 'upg_08' ||
               upg.id === 'upg_01' ||
               upg.id === 'upg_14' ||
-              upg.id === 'upg_20'
+              upg.id === 'upg_20' ||
+              upg.id === 'upg_a2_02' ||
+              upg.id === 'upg_a2_05' ||
+              upg.id === 'wpn_grim_reaper'
             ) {
               continue
             }
@@ -2427,14 +3095,25 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const nextCd = prevCd - deltaTime * fireRateMultiplier
             if (nextCd <= 0) {
               fireUpgrade(upg, player)
-              const baseCd = upg.cooldown_s > 0 ? upg.cooldown_s : 0.35
+              let baseCd = upg.cooldown_s > 0 ? upg.cooldown_s : 0.35
+              if (upg.id === 'upg_12' && player.hero?.id === 'hero_01') {
+                baseCd *= HERO_ABILITY_CONSTANTS.MURAMASA_COOLDOWN_MULTIPLIER
+              }
+              if (upg.id === 'wpn_muramasa' && player.hero?.id === 'hero_01') {
+                baseCd *= getMuramasaWeaponConfig(
+                  upg.damage,
+                  upgradeLevelsRef.current[upg.id] || 1,
+                  player.hero.id
+                ).cooldownScale
+              }
               upgradeCooldownsRef.current[upg.id] = baseCd
             } else {
               upgradeCooldownsRef.current[upg.id] = nextCd
             }
           }
 
-          // 4b. Autonomous Summons (Companion Robot, Temporal Echo & Sentinel Turret)
+          // 4b. Autonomous Summons & Chrono Operative 3s Clones
+          const rangerHomingActive = shouldApplyHomingForHero(player.hero?.id || 'hero_01')
           for (const summon of summonsRef.current) {
             const action = summon.update(deltaTime, player, enemiesRef.current, playerTrailRef.current)
             const spawnedList = [
@@ -2453,12 +3132,67 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   damage: pData.damage,
                   color: pData.color,
                   type: pData.type,
-                  maxPierces: pData.maxPierces
+                  maxPierces: pData.maxPierces,
+                  homingStrength: rangerHomingActive ? HERO_ABILITY_CONSTANTS.RANGER_HOMING_STRENGTH : 0
                 })
               )
             }
             if (spawnedList.length > 0) {
               playSoundRef.current('shoot')
+            }
+            if (action?.beams && action.beams.length > 0) {
+              for (const beamSpec of action.beams) {
+                activeBeamsRef.current.push({
+                  angle: beamSpec.angle,
+                  angularSpeed: beamSpec.angularSpeed ?? 0,
+                  length: beamSpec.length,
+                  damage: beamSpec.damage,
+                  timer: 0,
+                  duration: beamSpec.duration,
+                  hitCooldowns: new Map(),
+                  summon,
+                  originX: summon.x,
+                  originY: summon.y,
+                  color: beamSpec.color
+                })
+              }
+              playSoundRef.current('shoot')
+            }
+            if (action?.siphon && action.siphon.targets.length > 0) {
+              const playerPos = player.getCenter()
+              for (const st of action.siphon.targets) {
+                if (st.enemy.isAlive && !st.enemy.isSpawning) {
+                  damageEnemy(st.enemy, st.damage, { x: summon.x, y: summon.y }, {
+                    color: '#FF2E63'
+                  })
+                }
+                attackEffectsRef.current.push({
+                  kind: 'siphon',
+                  from: { x: st.x, y: st.y },
+                  to: { x: summon.x, y: summon.y },
+                  color: action.siphon.color,
+                  timer: 0,
+                  duration: 0.32
+                })
+              }
+              attackEffectsRef.current.push({
+                kind: 'siphon',
+                from: { x: summon.x, y: summon.y },
+                to: playerPos,
+                color: '#FDA4AF',
+                timer: 0,
+                duration: 0.34
+              })
+              if (action.siphon.healAmount > 0 && player.isAlive) {
+                player.heal(action.siphon.healAmount)
+                floatingTextsRef.current.push({
+                  x: playerPos.x,
+                  y: player.y - 20,
+                  text: `+${action.siphon.healAmount} HP`,
+                  color: '#FDA4AF',
+                  timer: 0.65
+                })
+              }
             }
             if (action?.pulse) {
               explosionsRef.current.push({
@@ -2479,7 +3213,42 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
           }
 
-          // 4c. Sweeping Orbital Laser Beams
+          // Chrono Operative: spawn holographic clones for 3s that copy player attacks at 50% damage
+          if (player.hero?.id === 'hero_04') {
+            chronoCloneSpawnTimerRef.current += deltaTime
+            if (chronoCloneSpawnTimerRef.current >= HERO_ABILITY_CONSTANTS.CHRONO_CLONE_SPAWN_INTERVAL) {
+              chronoCloneSpawnTimerRef.current -= HERO_ABILITY_CONSTANTS.CHRONO_CLONE_SPAWN_INTERVAL
+              const id = chronoCloneNextIdRef.current++
+              const slotOffsetAngle = (id % 2 === 0 ? 1 : -1) * 2.15
+              chronoClonesRef.current.push({
+                id,
+                x: updatedCenter.x + Math.cos(slotOffsetAngle) * 58,
+                y: updatedCenter.y + Math.sin(slotOffsetAngle) * 58,
+                timer: 0,
+                duration: HERO_ABILITY_CONSTANTS.CHRONO_CLONE_DURATION,
+                slotOffsetAngle
+              })
+            }
+            for (let ci = chronoClonesRef.current.length - 1; ci >= 0; ci--) {
+              const clone = chronoClonesRef.current[ci]
+              clone.timer += deltaTime
+              if (clone.timer >= clone.duration) {
+                chronoClonesRef.current.splice(ci, 1)
+                continue
+              }
+              const orbitAngle =
+                player.facingAngle +
+                clone.slotOffsetAngle +
+                Math.sin(timeSurvivedRef.current * 2 + clone.id) * 0.25
+              const desiredX = updatedCenter.x + Math.cos(orbitAngle) * 58
+              const desiredY = updatedCenter.y + Math.sin(orbitAngle) * 58
+              const follow = Math.min(1, deltaTime * 10)
+              clone.x += (desiredX - clone.x) * follow
+              clone.y += (desiredY - clone.y) * follow
+            }
+          }
+
+          // 4c. Sweeping Orbital & Aimed Strider Laser Beams
           for (let b = activeBeamsRef.current.length - 1; b >= 0; b--) {
             const beam = activeBeamsRef.current[b]
             beam.timer += deltaTime
@@ -2488,8 +3257,22 @@ const GameContainer: React.FC<GameContainerProps> = ({
               activeBeamsRef.current.splice(b, 1)
               continue
             }
-            const bx = updatedCenter.x
-            const by = updatedCenter.y
+            const activeClone =
+              beam.cloneId !== undefined
+                ? chronoClonesRef.current.find((c) => c.id === beam.cloneId)
+                : undefined
+            const bx = beam.summon
+              ? beam.summon.x
+              : beam.cloneId !== undefined
+                ? (activeClone?.x ?? beam.originX ?? updatedCenter.x)
+                : updatedCenter.x
+            const by = beam.summon
+              ? beam.summon.y
+              : beam.cloneId !== undefined
+                ? (activeClone?.y ?? beam.originY ?? updatedCenter.y)
+                : updatedCenter.y
+            beam.originX = bx
+            beam.originY = by
             const ex = bx + Math.cos(beam.angle) * beam.length
             const ey = by + Math.sin(beam.angle) * beam.length
 
@@ -2506,7 +3289,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               const dist = Math.hypot(ec.x - projX, ec.y - projY)
               if (dist <= enemy.width / 2 + 12) {
                 beam.hitCooldowns.set(enemy, beam.timer)
-                damageEnemy(enemy, beam.damage, updatedCenter)
+                damageEnemy(enemy, beam.damage, { x: bx, y: by })
               }
             }
           }
@@ -2570,6 +3353,281 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
           }
 
+          // 4f. Legendary Solar Flare Flails (Launch spinning mace out -> apex fire pool -> whip back)
+          for (let sf = solarFlailsRef.current.length - 1; sf >= 0; sf--) {
+            const flail = solarFlailsRef.current[sf]
+            flail.timer += deltaTime
+            flail.spinAngle += deltaTime * 24
+
+            const activeClone =
+              flail.cloneId !== undefined
+                ? chronoClonesRef.current.find((c) => c.id === flail.cloneId)
+                : undefined
+            const ox =
+              flail.cloneId !== undefined
+                ? (activeClone?.x ?? updatedCenter.x)
+                : updatedCenter.x
+            const oy =
+              flail.cloneId !== undefined
+                ? (activeClone?.y ?? updatedCenter.y)
+                : updatedCenter.y
+            flail.originX = ox
+            flail.originY = oy
+
+            if (flail.phase === 'outbound') {
+              const step = flail.speed * deltaTime
+              flail.x += Math.cos(flail.angle) * step
+              flail.y += Math.sin(flail.angle) * step
+              flail.traveled += step
+              flail.trailDropDist += step
+
+              if (flail.trailDropDist >= 105) {
+                flail.trailDropDist = 0
+                burnZonesRef.current.push({
+                  x: flail.x,
+                  y: flail.y,
+                  radius: Math.round(flail.burnRadius * 0.72),
+                  timer: 0,
+                  duration: flail.burnDuration * 0.8,
+                  tickTimer: 0.25,
+                  damagePerTick: Math.max(4, Math.round(flail.burnDamage * 0.75)),
+                  isLv5: flail.isLv5
+                })
+              }
+
+              if (flail.traveled >= flail.maxDistance) {
+                flail.phase = 'apex'
+                flail.apexTimer = 0
+                // Apex Solar Flare eruption + full magma fire area
+                explosionsRef.current.push({
+                  x: flail.x,
+                  y: flail.y,
+                  radius: flail.burnRadius * 1.15,
+                  timer: 0,
+                  duration: 0.34,
+                  color: flail.isCloneCast
+                    ? 'rgba(192, 132, 252, 0.7)'
+                    : 'rgba(250, 204, 21, 0.8)'
+                })
+                burnZonesRef.current.push({
+                  x: flail.x,
+                  y: flail.y,
+                  radius: flail.burnRadius,
+                  timer: 0,
+                  duration: flail.burnDuration,
+                  tickTimer: 0.35,
+                  damagePerTick: flail.burnDamage,
+                  isLv5: flail.isLv5
+                })
+              }
+            } else if (flail.phase === 'apex') {
+              flail.apexTimer += deltaTime
+              if (flail.apexTimer >= flail.apexDuration) {
+                flail.phase = 'returning'
+                // Reset per-enemy hit cooldowns cleanly for the return pull cleave
+                flail.hitCooldowns.clear()
+              }
+            } else {
+              const dx = ox - flail.x
+              const dy = oy - flail.y
+              const dist = Math.hypot(dx, dy)
+              const returnSpeed = flail.speed * 1.28
+              if (dist <= Math.max(24, returnSpeed * deltaTime + 8)) {
+                solarFlailsRef.current.splice(sf, 1)
+                continue
+              }
+              flail.x += (dx / dist) * returnSpeed * deltaTime
+              flail.y += (dy / dist) * returnSpeed * deltaTime
+            }
+
+            flail.trail.push({ x: flail.x, y: flail.y })
+            if (flail.trail.length > 9) {
+              flail.trail.shift()
+            }
+
+            // Smash any enemy touched by the spinning solar mace
+            for (const enemy of enemiesRef.current) {
+              if (!enemy.isAlive || enemy.isSpawning) continue
+              const lastHit = flail.hitCooldowns.get(enemy) ?? -1
+              if (flail.timer - lastHit < 0.22) continue
+              const ec = enemy.getCenter()
+              if (Math.hypot(ec.x - flail.x, ec.y - flail.y) <= flail.headRadius + enemy.width / 2) {
+                flail.hitCooldowns.set(enemy, flail.timer)
+                const smashDmg = flail.phase === 'returning' ? Math.round(flail.damage * 1.15) : flail.damage
+                damageEnemy(enemy, smashDmg, { x: flail.x, y: flail.y }, { color: '#FDE047' })
+                explosionsRef.current.push({
+                  x: ec.x,
+                  y: ec.y,
+                  radius: 36,
+                  timer: 0,
+                  duration: 0.18,
+                  color: flail.isCloneCast ? 'rgba(192, 132, 252, 0.55)' : 'rgba(249, 115, 22, 0.65)'
+                })
+              }
+            }
+          }
+
+          // 4g. Cyclone Tempest Bouncing Tornadoes (bounces inside arena/boss bounds, pulls & shreds)
+          for (let t = tornadoesRef.current.length - 1; t >= 0; t--) {
+            const tor = tornadoesRef.current[t]
+            tor.timer += deltaTime
+            if (tor.timer >= tor.duration) {
+              tornadoesRef.current.splice(t, 1)
+              continue
+            }
+
+            // Slight spiral drift
+            const turnAngle = Math.sin(tor.timer * 3.4 + t) * 0.65 * deltaTime
+            const cosT = Math.cos(turnAngle)
+            const sinT = Math.sin(turnAngle)
+            const nvx = tor.vx * cosT - tor.vy * sinT
+            const nvy = tor.vx * sinT + tor.vy * cosT
+            tor.vx = nvx
+            tor.vy = nvy
+
+            tor.x += tor.vx * deltaTime
+            tor.y += tor.vy * deltaTime
+
+            const bounds = bossArenaRef.current
+              ? {
+                  minX: bossArenaRef.current.left + tor.radius * 0.4,
+                  maxX: bossArenaRef.current.left + bossArenaRef.current.width - tor.radius * 0.4,
+                  minY: bossArenaRef.current.top + tor.radius * 0.4,
+                  maxY: bossArenaRef.current.top + bossArenaRef.current.height - tor.radius * 0.4
+                }
+              : {
+                  minX: tor.radius * 0.4,
+                  maxX: ARENA_SIZE - tor.radius * 0.4,
+                  minY: tor.radius * 0.4,
+                  maxY: ARENA_SIZE - tor.radius * 0.4
+                }
+
+            if (tor.x < bounds.minX) {
+              tor.x = bounds.minX
+              tor.vx = Math.abs(tor.vx)
+            } else if (tor.x > bounds.maxX) {
+              tor.x = bounds.maxX
+              tor.vx = -Math.abs(tor.vx)
+            }
+            if (tor.y < bounds.minY) {
+              tor.y = bounds.minY
+              tor.vy = Math.abs(tor.vy)
+            } else if (tor.y > bounds.maxY) {
+              tor.y = bounds.maxY
+              tor.vy = -Math.abs(tor.vy)
+            }
+
+            const pullRadius = tor.radius * 1.45
+            for (const enemy of enemiesRef.current) {
+              if (!enemy.isAlive || enemy.isSpawning) continue
+              const ec = enemy.getCenter()
+              const dx = tor.x - ec.x
+              const dy = tor.y - ec.y
+              const dist = Math.hypot(dx, dy)
+              if (dist > 10 && dist <= pullRadius) {
+                const pull = (tor.isLv5 ? 165 : 110) * deltaTime
+                enemy.x += (dx / dist) * pull
+                enemy.y += (dy / dist) * pull
+              }
+              if (dist <= tor.radius + enemy.width / 2) {
+                const lastHit = tor.hitCooldowns.get(enemy) ?? -1
+                if (tor.timer - lastHit >= 0.24) {
+                  tor.hitCooldowns.set(enemy, tor.timer)
+                  damageEnemy(
+                    enemy,
+                    tor.damage,
+                    { x: tor.x, y: tor.y },
+                    { color: tor.isLv5 ? '#FFD700' : '#38BDF8' }
+                  )
+                }
+              }
+            }
+          }
+
+          // 4h. Starfall Meteors (descent telegraph -> fiery emerald/gold crater impact)
+          for (let m = meteorsRef.current.length - 1; m >= 0; m--) {
+            const meteor = meteorsRef.current[m]
+            meteor.timer += deltaTime
+            if (meteor.timer >= meteor.impactTime) {
+              explosionsRef.current.push({
+                x: meteor.targetX,
+                y: meteor.targetY,
+                radius: meteor.radius,
+                timer: 0,
+                duration: 0.42,
+                color: meteor.isCloneCast
+                  ? 'rgba(192, 132, 252, 0.7)'
+                  : meteor.isLv5
+                    ? 'rgba(255, 215, 0, 0.78)'
+                    : 'rgba(52, 211, 153, 0.72)'
+              })
+              for (const enemy of enemiesRef.current) {
+                if (!enemy.isAlive || enemy.isSpawning) continue
+                const ec = enemy.getCenter()
+                if (
+                  Math.hypot(ec.x - meteor.targetX, ec.y - meteor.targetY) <=
+                  meteor.radius + enemy.width / 2
+                ) {
+                  damageEnemy(
+                    enemy,
+                    meteor.damage,
+                    { x: meteor.targetX, y: meteor.targetY },
+                    { color: meteor.isLv5 ? '#FDE047' : '#34D399' }
+                  )
+                }
+              }
+              meteorsRef.current.splice(m, 1)
+            }
+          }
+
+          // 4i. Prism Satellite Blades (continuous orbiting chakrams slicing nearby hostiles)
+          const prismUpg = activeUpgradesRef.current.find((u) => u.id === 'upg_a2_05')
+          const prismLv = upgradeLevelsRef.current['upg_a2_05'] || 0
+          if (prismUpg && prismLv > 0) {
+            const bladeCount = 1 + prismLv
+            const orbitRadius = 92 + prismLv * 15
+            const spinSpeed = 2.6 + prismLv * 0.38
+            const baseSpin = timeSurvivedRef.current * spinSpeed
+            const pCenter = player.getCenter()
+            const dmgMult =
+              equippedBonusesRef.current.damageMultiplier +
+              masteryBonusesRef.current.damageMultiplier +
+              (isDevUserRef.current && devSettingsRef.current.damageMultiplier > 1
+                ? devSettingsRef.current.damageMultiplier - 1
+                : 0)
+            const bladeDamage = Math.max(1, Math.round(prismUpg.damage * dmgMult))
+
+            for (let b = 0; b < bladeCount; b++) {
+              const ba = baseSpin + (b / bladeCount) * Math.PI * 2
+              const bx = pCenter.x + Math.cos(ba) * orbitRadius
+              const by = pCenter.y + Math.sin(ba) * orbitRadius
+              for (const enemy of enemiesRef.current) {
+                if (!enemy.isAlive || enemy.isSpawning) continue
+                const ec = enemy.getCenter()
+                if (Math.hypot(ec.x - bx, ec.y - by) <= 22 + enemy.width / 2) {
+                  const lastHit = prismBladeHitCooldownsRef.current.get(enemy) ?? -1
+                  if (timeSurvivedRef.current - lastHit >= 0.25) {
+                    prismBladeHitCooldownsRef.current.set(enemy, timeSurvivedRef.current)
+                    damageEnemy(enemy, bladeDamage, pCenter, {
+                      color: prismLv >= MAX_WEAPON_UPGRADE_LEVEL ? '#FFD700' : '#34D399'
+                    })
+                    explosionsRef.current.push({
+                      x: ec.x,
+                      y: ec.y,
+                      radius: 28,
+                      timer: 0,
+                      duration: 0.16,
+                      color:
+                        prismLv >= MAX_WEAPON_UPGRADE_LEVEL
+                          ? 'rgba(255, 215, 0, 0.6)'
+                          : 'rgba(52, 211, 153, 0.58)'
+                    })
+                  }
+                }
+              }
+            }
+          }
+
           const pc = player.getCenter()
           const playerCircle = { x: pc.x, y: pc.y, radius: player.width / 2 }
 
@@ -2593,6 +3651,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
 
             enemy.update(deltaTime, player)
+            if (enemy.isAlive && !enemy.isSpawning) {
+              const burnDmg = enemy.tickBurn(deltaTime)
+              if (burnDmg > 0) {
+                damageEnemy(enemy, burnDmg, undefined, { isBurnTick: true, color: '#FB923C' })
+              }
+            }
           }
 
           // Separate overlapping enemies cleanly via spatial-grid circle collision
@@ -2696,12 +3760,35 @@ const GameContainer: React.FC<GameContainerProps> = ({
           }
 
           // 6. Update Player Projectiles & Check Circle-to-Circle Enemy Hits
+          const heroHoming = shouldApplyHomingForHero(player.hero?.id || 'hero_01')
           for (let i = playerProjectilesRef.current.length - 1; i >= 0; i--) {
             const proj = playerProjectilesRef.current[i]
+            if (heroHoming || proj.homingStrength > 0) {
+              if (heroHoming) {
+                proj.homingStrength = Math.max(
+                  proj.homingStrength,
+                  HERO_ABILITY_CONSTANTS.RANGER_HOMING_STRENGTH
+                )
+              }
+              let lockEnemy: Enemy | null = null
+              let lockDist = 750
+              for (const enemy of enemiesRef.current) {
+                if (!enemy.isAlive || enemy.isSpawning) continue
+                const ec = enemy.getCenter()
+                const d = Math.hypot(ec.x - proj.x, ec.y - proj.y)
+                if (d < lockDist) {
+                  lockDist = d
+                  lockEnemy = enemy
+                }
+              }
+              if (lockEnemy) {
+                proj.homingTarget = lockEnemy.getCenter()
+              }
+            }
             proj.update(deltaTime)
 
             if (!proj.isAlive) {
-              if (proj.burnRadius > 0) {
+              if (proj.burnRadius > 0 || (proj.explodeAtEnd && proj.explosionRadius > 0)) {
                 detonateProjectileImpact(proj)
               }
               playerProjectilesRef.current.splice(i, 1)
@@ -2717,14 +3804,46 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const projCircle = { x: proj.x, y: proj.y, radius: proj.width / 2 }
             for (const enemy of enemiesRef.current) {
               if (!enemy.isAlive || enemy.isSpawning) continue
+              if (proj.explodeAtEnd && proj.hitEntities.has(enemy)) continue
               const ec = enemy.getCenter()
               const enemyCircle = { x: ec.x, y: ec.y, radius: enemy.width / 2 }
 
               if (Collision.circleCircle(projCircle, enemyCircle)) {
-                if (proj.explosionRadius > 0) {
+                if (proj.explodeAtEnd) {
+                  proj.hitEntities.add(enemy)
+                  const willExpireNow = proj.pierceCount >= proj.maxPierces
+                  if (willExpireNow && proj.explosionRadius > 0) {
+                    detonateProjectileImpact(proj)
+                  } else {
+                    damageEnemy(enemy, proj.damage, { x: proj.x, y: proj.y }, {
+                      color: proj.freezeDuration > 0 ? '#7DD3FC' : proj.color
+                    })
+                    if (proj.freezeDuration > 0 && enemy.isAlive) {
+                      enemy.applyFreeze(proj.freezeDuration)
+                    }
+                    explosionsRef.current.push({
+                      x: ec.x,
+                      y: ec.y,
+                      radius: 30,
+                      timer: 0,
+                      duration: 0.18,
+                      color:
+                        proj.freezeDuration > 0
+                          ? 'rgba(56, 189, 248, 0.55)'
+                          : proj.color === '#FFD700'
+                            ? 'rgba(255, 215, 0, 0.55)'
+                            : 'rgba(52, 211, 153, 0.55)'
+                    })
+                  }
+                } else if (proj.explosionRadius > 0) {
                   detonateProjectileImpact(proj)
                 } else {
-                  damageEnemy(enemy, proj.damage, { x: proj.x, y: proj.y })
+                  damageEnemy(enemy, proj.damage, { x: proj.x, y: proj.y }, {
+                    color: proj.freezeDuration > 0 ? '#7DD3FC' : undefined
+                  })
+                  if (proj.freezeDuration > 0 && enemy.isAlive) {
+                    enemy.applyFreeze(proj.freezeDuration)
+                  }
                 }
 
                 proj.hitEntity()
@@ -2738,7 +3857,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
           // 7. Coins Magnetism & Collection
           const baseMagnet = isBreatherRef.current ? COIN_CONFIG.COIN_MAGNET_RANGE * 2.2 : COIN_CONFIG.COIN_MAGNET_RANGE
-          const magnetRange = baseMagnet * equippedBonusesRef.current.magnetRangeMultiplier
+          const totalMagnetMult =
+            equippedBonusesRef.current.magnetRangeMultiplier +
+            masteryBonusesRef.current.magnetRangeMultiplier
+          const magnetRange = baseMagnet * totalMagnetMult
+          const totalBonusCoinChance =
+            equippedBonusesRef.current.bonusCoinChance + masteryBonusesRef.current.bonusCoinChance
           for (let i = coinsRef.current.length - 1; i >= 0; i--) {
             const coin = coinsRef.current[i]
             const dist = Math.hypot(coin.x - pc.x, coin.y - pc.y)
@@ -2752,8 +3876,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
             coin.update(deltaTime, pc)
             if (coin.isCollected) {
               let earned = coin.value
-              if (equippedBonusesRef.current.bonusCoinChance > 0) {
-                bonusCoinCarryRef.current += coin.value * equippedBonusesRef.current.bonusCoinChance
+              if (totalBonusCoinChance > 0) {
+                bonusCoinCarryRef.current += coin.value * totalBonusCoinChance
                 if (bonusCoinCarryRef.current >= 1) {
                   const extra = Math.floor(bonusCoinCarryRef.current)
                   bonusCoinCarryRef.current -= extra
@@ -2800,6 +3924,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
             setHealth(player.health)
             setEnemiesDefeated(enemiesDefeatedRef.current)
             setShieldActive(shieldReady)
+            setDashCooldown(Math.max(0, dashCooldownRef.current))
             setWaveTimeRemaining(
               isBreatherRef.current
                 ? Math.max(0, WAVE_CONFIG.BREATHER_DURATION_SECONDS - breatherElapsedRef.current)
@@ -2863,78 +3988,144 @@ const GameContainer: React.FC<GameContainerProps> = ({
           ctx.restore()
         }
 
-        // Cryo Aura Ring (radius grows from 133px at Lv 1 to 245px at Lv 5)
+        // Cryo Aura Ring (crystalline frost rune ring + orbiting ice glints)
         const activeCryoLv = upgradeLevelsRef.current['upg_08'] || 0
         if (activeCryoLv > 0) {
           const pc = camera.worldToScreen(player.getCenter().x, player.getCenter().y)
           const r = 105 + activeCryoLv * 28
+          const rot = timeSurvivedRef.current * 0.85
+          ctx.save()
+          ctx.fillStyle =
+            activeCryoLv >= MAX_WEAPON_UPGRADE_LEVEL
+              ? 'rgba(56, 189, 248, 0.08)'
+              : 'rgba(34, 211, 238, 0.05)'
+          ctx.beginPath()
+          ctx.arc(pc.x, pc.y, r, 0, Math.PI * 2)
+          ctx.fill()
+
           ctx.strokeStyle =
             activeCryoLv >= MAX_WEAPON_UPGRADE_LEVEL
-              ? 'rgba(56, 189, 248, 0.45)'
-              : 'rgba(0, 240, 255, 0.25)'
+              ? 'rgba(125, 211, 252, 0.6)'
+              : 'rgba(0, 240, 255, 0.35)'
           ctx.lineWidth = activeCryoLv >= MAX_WEAPON_UPGRADE_LEVEL ? 3 : 2
+          ctx.setLineDash([14, 8])
+          ctx.lineDashOffset = -rot * 36
           ctx.beginPath()
           ctx.arc(pc.x, pc.y, r, 0, Math.PI * 2)
           ctx.stroke()
+          ctx.setLineDash([])
+
+          const crystalCount = 4 + activeCryoLv * 2
+          for (let c = 0; c < crystalCount; c++) {
+            const ca = rot + (c / crystalCount) * Math.PI * 2
+            const cx = pc.x + Math.cos(ca) * r
+            const cy = pc.y + Math.sin(ca) * r
+            ctx.fillStyle = c % 2 === 0 ? '#E0F2FE' : '#38BDF8'
+            ctx.beginPath()
+            ctx.moveTo(cx, cy - 5)
+            ctx.lineTo(cx + 4, cy)
+            ctx.lineTo(cx, cy + 5)
+            ctx.lineTo(cx - 4, cy)
+            ctx.closePath()
+            ctx.fill()
+          }
+          ctx.restore()
         }
 
-        // Void Singularity Vortices
+        // Void Singularity Vortices (swirling accretion spiral arms + event horizon)
         for (const vortex of voidVorticesRef.current) {
           const vp = camera.worldToScreen(vortex.x, vortex.y)
           const progress = Math.min(1, vortex.timer / vortex.duration)
-          const coreR = Math.max(8, vortex.radius * (0.3 + 0.25 * Math.sin(progress * Math.PI * 6)))
+          const outerR = Math.max(12, vortex.radius)
+          const coreR = Math.max(8, outerR * (0.28 + 0.14 * Math.sin(progress * Math.PI * 8)))
+          const swirl = vortex.timer * 4.5
           ctx.save()
-          ctx.fillStyle = vortex.isLv5 ? 'rgba(168, 85, 247, 0.28)' : 'rgba(147, 51, 234, 0.2)'
+          const grad = ctx.createRadialGradient(vp.x, vp.y, coreR * 0.4, vp.x, vp.y, outerR)
+          grad.addColorStop(0, 'rgba(15, 23, 42, 0.72)')
+          grad.addColorStop(0.5, vortex.isLv5 ? 'rgba(192, 132, 252, 0.34)' : 'rgba(147, 51, 234, 0.25)')
+          grad.addColorStop(1, 'rgba(88, 28, 135, 0)')
+          ctx.fillStyle = grad
           ctx.beginPath()
-          ctx.arc(vp.x, vp.y, Math.max(10, vortex.radius), 0, Math.PI * 2)
+          ctx.arc(vp.x, vp.y, outerR, 0, Math.PI * 2)
           ctx.fill()
-          ctx.strokeStyle = vortex.isLv5 ? '#FFD700' : '#E879F9'
-          ctx.lineWidth = 2.2
+
+          // Swirling gravity spiral arms
+          const arms = vortex.isLv5 ? 4 : 3
+          for (let a = 0; a < arms; a++) {
+            const baseA = swirl + (a / arms) * Math.PI * 2
+            ctx.strokeStyle = a % 2 === 0 ? (vortex.isLv5 ? '#FFD700' : '#E879F9') : '#A855F7'
+            ctx.lineWidth = 2.4
+            ctx.beginPath()
+            ctx.arc(vp.x, vp.y, outerR * 0.72, baseA, baseA + 1.15)
+            ctx.stroke()
+            ctx.beginPath()
+            ctx.arc(vp.x, vp.y, outerR * 0.44, -baseA, -baseA + 1.05)
+            ctx.stroke()
+          }
+
+          // Event horizon core
+          ctx.strokeStyle = vortex.isLv5 ? '#FDE047' : '#F0ABFC'
+          ctx.lineWidth = 2.5
           ctx.beginPath()
-          ctx.arc(vp.x, vp.y, Math.max(8, coreR), 0, Math.PI * 2)
+          ctx.arc(vp.x, vp.y, coreR, 0, Math.PI * 2)
           ctx.stroke()
-          ctx.fillStyle = '#0B0F19'
+          ctx.fillStyle = '#05070E'
           ctx.beginPath()
-          ctx.arc(vp.x, vp.y, Math.max(4, coreR * 0.45), 0, Math.PI * 2)
+          ctx.arc(vp.x, vp.y, Math.max(4, coreR * 0.65), 0, Math.PI * 2)
           ctx.fill()
           ctx.restore()
         }
 
-        // Inferno Fireball Burning Ground Zones
+        // Scorching Magma Fire Areas (Inferno Fireball & Solar Flare Flail fire pools)
         for (const zone of burnZonesRef.current) {
           const zp = camera.worldToScreen(zone.x, zone.y)
           const remaining = Math.max(0, zone.duration - zone.timer)
           const fade = Math.min(1, remaining / 0.45)
-          const pulse = 1 + Math.sin(zone.timer * 14) * 0.04
-          const r = Math.max(12, zone.radius * pulse)
+          const pulse = 1 + Math.sin(zone.timer * 14) * 0.045
+          const r = Math.max(14, zone.radius * pulse)
 
           ctx.save()
           ctx.globalAlpha = fade
-          ctx.fillStyle = zone.isLv5 ? 'rgba(234, 88, 12, 0.34)' : 'rgba(194, 65, 12, 0.28)'
+          const magmaGrad = ctx.createRadialGradient(zp.x, zp.y, r * 0.12, zp.x, zp.y, r)
+          magmaGrad.addColorStop(0, zone.isLv5 ? 'rgba(250, 204, 21, 0.48)' : 'rgba(251, 146, 60, 0.42)')
+          magmaGrad.addColorStop(0.65, 'rgba(234, 88, 12, 0.32)')
+          magmaGrad.addColorStop(1, 'rgba(153, 27, 27, 0.08)')
+          ctx.fillStyle = magmaGrad
           ctx.beginPath()
           ctx.arc(zp.x, zp.y, r, 0, Math.PI * 2)
           ctx.fill()
 
-          ctx.strokeStyle = zone.isLv5 ? '#FACC15' : '#F97316'
-          ctx.lineWidth = 2.2
+          // Glowing magma outer ring & inner ring
+          ctx.strokeStyle = zone.isLv5 ? '#FDE047' : '#FB923C'
+          ctx.lineWidth = 2.4
           ctx.beginPath()
           ctx.arc(zp.x, zp.y, r, 0, Math.PI * 2)
           ctx.stroke()
+          ctx.strokeStyle = 'rgba(254, 240, 138, 0.55)'
+          ctx.lineWidth = 1.2
+          ctx.beginPath()
+          ctx.arc(zp.x, zp.y, r * 0.66, 0, Math.PI * 2)
+          ctx.stroke()
 
-          // Inner scorching magma tongues
-          const flameCount = zone.isLv5 ? 7 : 5
+          // Orbiting magma embers & multi-layered flame tongues
+          const flameCount = zone.isLv5 ? 9 : 6
           for (let f = 0; f < flameCount; f++) {
-            const ang = (f / flameCount) * Math.PI * 2 + zone.timer * 1.4
-            const dist = r * (0.38 + ((f % 2) * 0.22))
+            const ang = (f / flameCount) * Math.PI * 2 + zone.timer * 1.75
+            const dist = r * (0.34 + ((f % 2) * 0.28))
             const fx = zp.x + Math.cos(ang) * dist
             const fy = zp.y + Math.sin(ang) * dist
-            const flameH = 7 + Math.sin(zone.timer * 22 + f * 3) * 3
-            ctx.fillStyle = f % 2 === 0 ? '#FB923C' : '#FEF08A'
+            const flameH = 9 + Math.sin(zone.timer * 24 + f * 3) * 3.5
+            ctx.fillStyle = f % 2 === 0 ? '#F97316' : '#FDE047'
             ctx.beginPath()
-            ctx.moveTo(fx - 4, fy + 2)
+            ctx.moveTo(fx - 4.5, fy + 2.5)
             ctx.lineTo(fx, fy - flameH)
-            ctx.lineTo(fx + 4, fy + 2)
+            ctx.lineTo(fx + 4.5, fy + 2.5)
             ctx.closePath()
+            ctx.fill()
+
+            ctx.fillStyle = '#FEF9C3'
+            ctx.beginPath()
+            ctx.arc(fx, fy - flameH * 0.25, 1.8, 0, Math.PI * 2)
             ctx.fill()
           }
           ctx.restore()
@@ -2955,26 +4146,51 @@ const GameContainer: React.FC<GameContainerProps> = ({
           coin.draw(ctx, camera)
         }
 
-        // Explosions (ring + radial shockwave)
+        // Explosions (radial energy blast, white-hot flash core, double shock rings & spark needles)
         for (const fx of explosionsRef.current) {
           const sp = camera.worldToScreen(fx.x, fx.y)
           const progress = Math.min(1, fx.timer / fx.duration)
-          const outerR = Math.max(2, fx.radius * (0.4 + progress * 0.6))
+          const outerR = Math.max(3, fx.radius * (0.35 + progress * 0.65))
           ctx.save()
           ctx.globalAlpha = Math.max(0, 1 - progress)
-          ctx.fillStyle = fx.color
+
+          const blastGrad = ctx.createRadialGradient(sp.x, sp.y, outerR * 0.1, sp.x, sp.y, outerR)
+          blastGrad.addColorStop(0, 'rgba(255, 255, 255, 0.72)')
+          blastGrad.addColorStop(0.45, fx.color)
+          blastGrad.addColorStop(1, 'rgba(0, 0, 0, 0)')
+          ctx.fillStyle = blastGrad
           ctx.beginPath()
           ctx.arc(sp.x, sp.y, outerR, 0, Math.PI * 2)
           ctx.fill()
+
           ctx.strokeStyle = fx.color
-          ctx.lineWidth = 2.5
+          ctx.lineWidth = 3 * (1 - progress * 0.45)
           ctx.beginPath()
           ctx.arc(sp.x, sp.y, outerR, 0, Math.PI * 2)
           ctx.stroke()
+
+          ctx.strokeStyle = '#FFFFFF'
+          ctx.lineWidth = 1.6
+          ctx.beginPath()
+          ctx.arc(sp.x, sp.y, Math.max(1, outerR * 0.68), 0, Math.PI * 2)
+          ctx.stroke()
+
+          const sparkCount = 8
+          for (let k = 0; k < sparkCount; k++) {
+            const sa = (k / sparkCount) * Math.PI * 2 + fx.x * 0.05
+            const r1 = outerR * 0.55
+            const r2 = outerR * (0.95 + progress * 0.25)
+            ctx.strokeStyle = k % 2 === 0 ? '#FFFFFF' : '#FDE047'
+            ctx.lineWidth = 1.8
+            ctx.beginPath()
+            ctx.moveTo(sp.x + Math.cos(sa) * r1, sp.y + Math.sin(sa) * r1)
+            ctx.lineTo(sp.x + Math.cos(sa) * r2, sp.y + Math.sin(sa) * r2)
+            ctx.stroke()
+          }
           ctx.restore()
         }
 
-        // Authentic Weapon Attack Effects (Lightning, Crescent Slash, Sky Beam, Siphon, Heal Wave)
+        // Reworked Weapon Attack Effects (Lightning, Crescent Slash, Muramasa Bloodmoon, Sky Beam, Siphon, Heal Wave)
         for (const fx of attackEffectsRef.current) {
           const progress = Math.min(1, fx.timer / fx.duration)
           const alpha = Math.max(0, 1 - progress)
@@ -2983,8 +4199,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
           if (fx.kind === 'lightning' && fx.points.length > 1) {
             const screenPts = fx.points.map((pt) => camera.worldToScreen(pt.x, pt.y))
-            // Build jagged segments between chained targets
-            const drawJagged = (lineW: number, strokeColor: string) => {
+            const drawJagged = (lineW: number, strokeColor: string, branch = false) => {
               ctx.strokeStyle = strokeColor
               ctx.lineWidth = lineW
               ctx.lineCap = 'round'
@@ -2994,10 +4209,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
               for (let i = 1; i < screenPts.length; i++) {
                 const a = screenPts[i - 1]
                 const b = screenPts[i]
-                const steps = 4
+                const steps = 5
                 for (let s = 1; s < steps; s++) {
                   const t = s / steps
-                  const jitter = Math.sin((i * 17 + s * 31 + fx.timer * 90)) * 12
+                  const jitter = Math.sin(i * 19 + s * 37 + fx.timer * 105) * (branch ? 18 : 13)
                   const dx = b.x - a.x
                   const dy = b.y - a.y
                   const len = Math.hypot(dx, dy) || 1
@@ -3009,22 +4224,29 @@ const GameContainer: React.FC<GameContainerProps> = ({
               }
               ctx.stroke()
             }
-            drawJagged(6, fx.color)
+            drawJagged(9, fx.color, true)
+            drawJagged(5, fx.color)
             drawJagged(2.2, '#FFFFFF')
             for (let i = 1; i < screenPts.length; i++) {
+              const p = screenPts[i]
+              ctx.fillStyle = fx.color
+              ctx.beginPath()
+              ctx.arc(p.x, p.y, 7.5, 0, Math.PI * 2)
+              ctx.fill()
               ctx.fillStyle = '#FFFFFF'
               ctx.beginPath()
-              ctx.arc(screenPts[i].x, screenPts[i].y, 4.5, 0, Math.PI * 2)
+              ctx.arc(p.x, p.y, 3.8, 0, Math.PI * 2)
               ctx.fill()
             }
           } else if (fx.kind === 'slash') {
             const sp = camera.worldToScreen(fx.x, fx.y)
-            const sweepStart = fx.angle - 1.35 + progress * 0.35
-            const sweepEnd = fx.angle + 1.35 + progress * 0.35
-            const rOuter = Math.max(12, fx.radius * (0.78 + progress * 0.25))
-            const rInner = Math.max(6, rOuter * 0.66)
+            const sweepStart = fx.angle - 1.48 + progress * 0.42
+            const sweepEnd = fx.angle + 1.48 + progress * 0.42
+            const rOuter = Math.max(14, fx.radius * (0.76 + progress * 0.28))
+            const rMid = rOuter * 0.82
+            const rInner = Math.max(7, rOuter * 0.62)
 
-            // Crescent energy blade silhouette
+            // Outer glow crescent wave
             ctx.fillStyle = fx.color
             ctx.beginPath()
             ctx.arc(sp.x, sp.y, rOuter, sweepStart, sweepEnd)
@@ -3032,94 +4254,437 @@ const GameContainer: React.FC<GameContainerProps> = ({
             ctx.closePath()
             ctx.fill()
 
-            // Razor white cutting edge
+            // Inner echo ribbon
+            ctx.strokeStyle = fx.color
+            ctx.lineWidth = 2.4
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, rMid * 0.9, sweepStart - 0.14, sweepEnd + 0.1)
+            ctx.stroke()
+
+            // Razor white cutting edge + slice glints
             ctx.strokeStyle = '#FFFFFF'
-            ctx.lineWidth = 3
+            ctx.lineWidth = 3.6
             ctx.beginPath()
             ctx.arc(sp.x, sp.y, rOuter, sweepStart, sweepEnd)
             ctx.stroke()
+
+            for (let s = 0; s < 5; s++) {
+              const ang = sweepStart + (s / 4) * (sweepEnd - sweepStart)
+              const dist = rOuter * 0.92
+              ctx.strokeStyle = '#FFFFFF'
+              ctx.lineWidth = 1.8
+              ctx.beginPath()
+              ctx.moveTo(sp.x + Math.cos(ang - 0.1) * dist, sp.y + Math.sin(ang - 0.1) * dist)
+              ctx.lineTo(
+                sp.x + Math.cos(ang + 0.12) * (dist + 14),
+                sp.y + Math.sin(ang + 0.12) * (dist + 14)
+              )
+              ctx.stroke()
+            }
+          } else if (fx.kind === 'muramasa_slash') {
+            // Terraria Calamity Muramasa-inspired Bloodmoon Crimson multi-layered crescent wave
+            const sp = camera.worldToScreen(fx.x, fx.y)
+            const sweepStart = fx.angle - 2.15 + progress * 0.5
+            const sweepEnd = fx.angle + 2.15 + progress * 0.5
+            const rOuter = Math.max(20, fx.radius * (0.76 + progress * 0.32))
+            const rMid = rOuter * 0.8
+            const rInner = Math.max(10, rOuter * 0.54)
+
+            // Outer blood-obsidian crimson shockwave aura
+            ctx.fillStyle = fx.color === '#C084FC' ? 'rgba(126, 34, 206, 0.78)' : 'rgba(127, 29, 29, 0.84)'
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, rOuter, sweepStart, sweepEnd)
+            ctx.arc(sp.x, sp.y, rInner, sweepEnd, sweepStart, true)
+            ctx.closePath()
+            ctx.fill()
+
+            // Neon crimson Muramasa plasma core
+            ctx.fillStyle = fx.color
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, rOuter * 0.94, sweepStart + 0.08, sweepEnd - 0.08)
+            ctx.arc(sp.x, sp.y, rMid * 0.84, sweepEnd - 0.08, sweepStart + 0.08, true)
+            ctx.closePath()
+            ctx.fill()
+
+            // Twin counter-sweeping echo blood-arcs
+            ctx.strokeStyle = fx.color === '#C084FC' ? '#E879F9' : '#FB7185'
+            ctx.lineWidth = 2.8
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, rMid, sweepStart - 0.2, sweepEnd + 0.15)
+            ctx.stroke()
+
+            // Incandescent white-rose razor cutting edge
+            ctx.strokeStyle = '#FFE4E6'
+            ctx.lineWidth = 4.5
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, rOuter, sweepStart, sweepEnd)
+            ctx.stroke()
+
+            // High-velocity crimson katana glint needles
+            const streakCount = 9
+            for (let s = 0; s < streakCount; s++) {
+              const frac = s / (streakCount - 1)
+              const ang = sweepStart + frac * (sweepEnd - sweepStart)
+              const dist = rMid * (0.82 + (s % 2) * 0.18)
+              const lx1 = sp.x + Math.cos(ang - 0.13) * dist
+              const ly1 = sp.y + Math.sin(ang - 0.13) * dist
+              const lx2 = sp.x + Math.cos(ang + 0.15) * (dist + 22)
+              const ly2 = sp.y + Math.sin(ang + 0.15) * (dist + 22)
+              ctx.strokeStyle = s % 2 === 0 ? '#FFFFFF' : '#FF2E63'
+              ctx.lineWidth = 2.2
+              ctx.beginPath()
+              ctx.moveTo(lx1, ly1)
+              ctx.lineTo(lx2, ly2)
+              ctx.stroke()
+            }
           } else if (fx.kind === 'orbital_strike') {
             const sp = camera.worldToScreen(fx.x, fx.y)
-            const beamHalfW = Math.max(4, fx.radius * 0.24 * (1 - progress * 0.6))
-            const groundR = Math.max(8, fx.radius * (0.35 + progress * 0.65))
+            const beamHalfW = Math.max(5, fx.radius * 0.28 * (1 - progress * 0.55))
+            const groundR = Math.max(10, fx.radius * (0.35 + progress * 0.65))
 
-            // Vertical orbital satellite beam pillar from top of screen
+            // Outer ionization pillar + inner white-hot core + energy helix
             ctx.fillStyle = fx.color
-            ctx.globalAlpha = alpha * 0.45
-            ctx.fillRect(sp.x - beamHalfW, 0, beamHalfW * 2, sp.y)
+            ctx.globalAlpha = alpha * 0.42
+            ctx.fillRect(sp.x - beamHalfW * 1.4, 0, beamHalfW * 2.8, sp.y)
             ctx.fillStyle = '#FFFFFF'
-            ctx.globalAlpha = alpha * 0.85
-            ctx.fillRect(sp.x - beamHalfW * 0.35, 0, beamHalfW * 0.7, sp.y)
+            ctx.globalAlpha = alpha * 0.9
+            ctx.fillRect(sp.x - beamHalfW * 0.4, 0, beamHalfW * 0.8, sp.y)
 
-            // Ground targeting reticle + scorched shockwave ring
             ctx.globalAlpha = alpha
+            ctx.strokeStyle = '#FEF08A'
+            ctx.lineWidth = 2.2
+            ctx.beginPath()
+            for (let y = 0; y <= sp.y; y += 18) {
+              const hx = sp.x + Math.sin(y * 0.05 + fx.timer * 26) * (beamHalfW * 1.55)
+              if (y === 0) ctx.moveTo(hx, y)
+              else ctx.lineTo(hx, y)
+            }
+            ctx.stroke()
+
+            // Triple concentric ground targeting rings + scorch core
             ctx.strokeStyle = fx.color
-            ctx.lineWidth = 3
+            ctx.lineWidth = 3.2
             ctx.beginPath()
             ctx.arc(sp.x, sp.y, groundR, 0, Math.PI * 2)
             ctx.stroke()
+            ctx.strokeStyle = '#FFFFFF'
+            ctx.lineWidth = 1.6
             ctx.beginPath()
-            ctx.moveTo(sp.x - groundR * 0.5, sp.y)
-            ctx.lineTo(sp.x + groundR * 0.5, sp.y)
-            ctx.moveTo(sp.x, sp.y - groundR * 0.5)
-            ctx.lineTo(sp.x, sp.y + groundR * 0.5)
+            ctx.arc(sp.x, sp.y, groundR * 0.62, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.beginPath()
+            ctx.moveTo(sp.x - groundR * 0.55, sp.y)
+            ctx.lineTo(sp.x + groundR * 0.55, sp.y)
+            ctx.moveTo(sp.x, sp.y - groundR * 0.55)
+            ctx.lineTo(sp.x, sp.y + groundR * 0.55)
             ctx.stroke()
           } else if (fx.kind === 'siphon') {
             const a = camera.worldToScreen(fx.from.x, fx.from.y)
             const b = camera.worldToScreen(fx.to.x, fx.to.y)
-            const midX = (a.x + b.x) / 2 + Math.sin(fx.timer * 25) * 14
-            const midY = (a.y + b.y) / 2 - Math.cos(fx.timer * 25) * 14
+            const wave = Math.sin(fx.timer * 28) * 16
+            const midX1 = (a.x + b.x) / 2 + wave
+            const midY1 = (a.y + b.y) / 2 - Math.cos(fx.timer * 28) * 16
+            const midX2 = (a.x + b.x) / 2 - wave
+            const midY2 = (a.y + b.y) / 2 + Math.cos(fx.timer * 28) * 16
 
             ctx.strokeStyle = fx.color
-            ctx.lineWidth = 3
+            ctx.lineWidth = 3.5
             ctx.beginPath()
             ctx.moveTo(a.x, a.y)
-            ctx.quadraticCurveTo(midX, midY, b.x, b.y)
+            ctx.quadraticCurveTo(midX1, midY1, b.x, b.y)
             ctx.stroke()
 
-            // Animated blood-energy orb traveling toward player
+            ctx.strokeStyle = '#FDA4AF'
+            ctx.lineWidth = 1.8
+            ctx.beginPath()
+            ctx.moveTo(a.x, a.y)
+            ctx.quadraticCurveTo(midX2, midY2, b.x, b.y)
+            ctx.stroke()
+
             const t = progress
-            const orbX = (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * midX + t * t * b.x
-            const orbY = (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * midY + t * t * b.y
+            const orbX = (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * midX1 + t * t * b.x
+            const orbY = (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * midY1 + t * t * b.y
             ctx.fillStyle = '#FFE4E6'
             ctx.beginPath()
-            ctx.arc(orbX, orbY, 4.5, 0, Math.PI * 2)
+            ctx.arc(orbX, orbY, 5.2, 0, Math.PI * 2)
             ctx.fill()
           } else if (fx.kind === 'heal_wave') {
             const sp = camera.worldToScreen(fx.x, fx.y)
-            const r = Math.max(8, fx.radius * (0.35 + progress * 0.65))
+            const r = Math.max(10, fx.radius * (0.35 + progress * 0.65))
             ctx.strokeStyle = '#10B981'
-            ctx.lineWidth = 3.5
+            ctx.lineWidth = 4
             ctx.beginPath()
             ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
             ctx.stroke()
+            ctx.strokeStyle = '#6EE7B7'
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, r * 0.65, 0, Math.PI * 2)
+            ctx.stroke()
             ctx.fillStyle = '#34D399'
-            ctx.fillRect(sp.x - 3, sp.y - 12 - progress * 16, 6, 18)
-            ctx.fillRect(sp.x - 9, sp.y - 6 - progress * 16, 18, 6)
+            ctx.fillRect(sp.x - 3, sp.y - 14 - progress * 18, 6, 20)
+            ctx.fillRect(sp.x - 10, sp.y - 7 - progress * 18, 20, 6)
           }
 
           ctx.restore()
         }
 
-        // Sweeping Orbital Laser Beams
+        // Sweeping Orbital Laser Beams (outer glow + core + traveling pulse rings + tip flare)
         for (const beam of activeBeamsRef.current) {
-          const pcScreen = camera.worldToScreen(player.getCenter().x, player.getCenter().y)
-          const endX = pcScreen.x + Math.cos(beam.angle) * beam.length
-          const endY = pcScreen.y + Math.sin(beam.angle) * beam.length
+          const originWorldX = beam.originX ?? player.getCenter().x
+          const originWorldY = beam.originY ?? player.getCenter().y
+          const pcScreen = camera.worldToScreen(originWorldX, originWorldY)
+          const cos = Math.cos(beam.angle)
+          const sin = Math.sin(beam.angle)
+          const endX = pcScreen.x + cos * beam.length
+          const endY = pcScreen.y + sin * beam.length
+          const beamGlow =
+            beam.color === '#34D399'
+              ? 'rgba(52, 211, 153, 0.44)'
+              : beam.color === '#FFD700'
+                ? 'rgba(255, 215, 0, 0.45)'
+                : beam.color
+                  ? 'rgba(192, 132, 252, 0.45)'
+                  : 'rgba(0, 240, 255, 0.42)'
+          const beamTipColor =
+            beam.color === '#34D399'
+              ? '#A7F3D0'
+              : beam.color === '#FFD700'
+                ? '#FEF08A'
+                : beam.color
+                  ? '#E9D5FF'
+                  : '#BAE6FD'
+
           ctx.save()
-          ctx.strokeStyle = 'rgba(0, 240, 255, 0.35)'
-          ctx.lineWidth = 14
+          ctx.strokeStyle = beamGlow
+          ctx.lineWidth = 17
           ctx.lineCap = 'round'
           ctx.beginPath()
           ctx.moveTo(pcScreen.x, pcScreen.y)
           ctx.lineTo(endX, endY)
           ctx.stroke()
-          ctx.strokeStyle = '#E0F2FE'
-          ctx.lineWidth = 4
+
+          ctx.strokeStyle = beam.color || '#38BDF8'
+          ctx.lineWidth = 8.5
           ctx.beginPath()
           ctx.moveTo(pcScreen.x, pcScreen.y)
           ctx.lineTo(endX, endY)
           ctx.stroke()
+
+          ctx.strokeStyle = '#FFFFFF'
+          ctx.lineWidth = 3.5
+          ctx.beginPath()
+          ctx.moveTo(pcScreen.x, pcScreen.y)
+          ctx.lineTo(endX, endY)
+          ctx.stroke()
+
+          // Traveling focus pulse nodes along the laser beam
+          for (let p = 0; p < 3; p++) {
+            const frac = ((beam.timer * 2.2 + p / 3) % 1) * beam.length
+            const nx = pcScreen.x + cos * frac
+            const ny = pcScreen.y + sin * frac
+            ctx.fillStyle = '#FFFFFF'
+            ctx.beginPath()
+            ctx.arc(nx, ny, 4.5, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          // Bright tip flare
+          ctx.fillStyle = beamTipColor
+          ctx.beginPath()
+          ctx.arc(endX, endY, 7 + Math.sin(beam.timer * 32) * 2, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.restore()
+        }
+
+        // Legendary Boomerang Spinning Solar Flare Flails (Molten Chain + Blazing Spiked Mace Head)
+        for (const flail of solarFlailsRef.current) {
+          const originScr = camera.worldToScreen(flail.originX, flail.originY)
+          const headScr = camera.worldToScreen(flail.x, flail.y)
+          ctx.save()
+
+          // Fiery afterimage trail behind mace head
+          for (let t = 0; t < flail.trail.length; t++) {
+            const pt = camera.worldToScreen(flail.trail[t].x, flail.trail[t].y)
+            const frac = (t + 1) / flail.trail.length
+            ctx.globalAlpha = frac * 0.42
+            ctx.fillStyle = flail.isCloneCast ? '#C084FC' : t % 2 === 0 ? '#EA580C' : '#FACC15'
+            ctx.beginPath()
+            ctx.arc(pt.x, pt.y, Math.max(4, flail.headRadius * 0.72 * frac), 0, Math.PI * 2)
+            ctx.fill()
+          }
+          ctx.globalAlpha = 1
+
+          // Molten energy chain from wielder to spinning mace head
+          const cdx = headScr.x - originScr.x
+          const cdy = headScr.y - originScr.y
+          const chainLen = Math.hypot(cdx, cdy)
+          if (chainLen > 4) {
+            // Outer plasma chain tether glow
+            ctx.strokeStyle = flail.isCloneCast
+              ? 'rgba(192, 132, 252, 0.55)'
+              : 'rgba(249, 115, 22, 0.65)'
+            ctx.lineWidth = 6
+            ctx.beginPath()
+            ctx.moveTo(originScr.x, originScr.y)
+            ctx.lineTo(headScr.x, headScr.y)
+            ctx.stroke()
+
+            // Individual glowing chain links
+            const linkCount = Math.max(4, Math.floor(chainLen / 18))
+            for (let l = 1; l < linkCount; l++) {
+              const frac = l / linkCount
+              const lx = originScr.x + cdx * frac
+              const ly = originScr.y + cdy * frac
+              ctx.fillStyle = l % 2 === 0 ? '#FEF08A' : '#F97316'
+              ctx.strokeStyle = '#7C2D12'
+              ctx.lineWidth = 1.4
+              ctx.beginPath()
+              ctx.arc(lx, ly, 3.6, 0, Math.PI * 2)
+              ctx.fill()
+              ctx.stroke()
+            }
+          }
+
+          // Spinning Spiked Solar Mace Head
+          ctx.translate(headScr.x, headScr.y)
+          const r = flail.headRadius
+
+          // Outer blazing solar aura & sweeping flare arcs
+          ctx.fillStyle = flail.isCloneCast
+            ? 'rgba(168, 85, 247, 0.32)'
+            : 'rgba(251, 146, 60, 0.34)'
+          ctx.beginPath()
+          ctx.arc(0, 0, r * 1.42, 0, Math.PI * 2)
+          ctx.fill()
+
+          ctx.rotate(flail.spinAngle)
+          for (let arcIdx = 0; arcIdx < 2; arcIdx++) {
+            const a0 = arcIdx * Math.PI
+            ctx.strokeStyle = flail.isCloneCast ? '#E9D5FF' : '#FDE047'
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.arc(0, 0, r * 1.24, a0, a0 + 1.35)
+            ctx.stroke()
+          }
+
+          // Spiked Solar Flail Star Silhouette (10 heavy magma spikes)
+          const spikes = 10
+          ctx.fillStyle = flail.isCloneCast ? '#9333EA' : '#EA580C'
+          ctx.strokeStyle = flail.isCloneCast ? '#F3E8FF' : '#FEF08A'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          for (let s = 0; s < spikes * 2; s++) {
+            const sa = (s / (spikes * 2)) * Math.PI * 2
+            const sr = s % 2 === 0 ? r * 1.15 : r * 0.64
+            const sx = Math.cos(sa) * sr
+            const sy = Math.sin(sa) * sr
+            if (s === 0) ctx.moveTo(sx, sy)
+            else ctx.lineTo(sx, sy)
+          }
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Incandescent white-gold solar star core
+          ctx.fillStyle = flail.isCloneCast ? '#E9D5FF' : '#FEF9C3'
+          ctx.beginPath()
+          ctx.arc(0, 0, Math.max(5, r * 0.44), 0, Math.PI * 2)
+          ctx.fill()
+          ctx.restore()
+        }
+
+        // Cyclone Tempest Tornadoes (swirling stacked wind funnel rings + crackling core)
+        for (const tor of tornadoesRef.current) {
+          const ts = camera.worldToScreen(tor.x, tor.y)
+          const remaining = Math.max(0, tor.duration - tor.timer)
+          const fade = Math.min(1, Math.min(tor.timer / 0.25, remaining / 0.35))
+          ctx.save()
+          ctx.globalAlpha = fade
+
+          // Ground suction vortex shadow & glow
+          const grad = ctx.createRadialGradient(ts.x, ts.y, 6, ts.x, ts.y, tor.radius)
+          grad.addColorStop(
+            0,
+            tor.isLv5 ? 'rgba(255, 215, 0, 0.36)' : 'rgba(56, 189, 248, 0.34)'
+          )
+          grad.addColorStop(1, 'rgba(56, 189, 248, 0)')
+          ctx.fillStyle = grad
+          ctx.beginPath()
+          ctx.arc(ts.x, ts.y, tor.radius, 0, Math.PI * 2)
+          ctx.fill()
+
+          // Rising stacked funnel ellipses
+          const rings = 5
+          for (let k = 0; k < rings; k++) {
+            const frac = k / (rings - 1)
+            const ringR = tor.radius * (0.34 + frac * 0.62)
+            const wobbleX = Math.sin(tor.timer * 14 + k * 1.4) * 5
+            const ry = ts.y - k * 8.5
+            ctx.strokeStyle =
+              k % 2 === 0
+                ? tor.isCloneCast
+                  ? '#C084FC'
+                  : tor.isLv5
+                    ? '#FFD700'
+                    : '#38BDF8'
+                : '#E0F2FE'
+            ctx.lineWidth = 2.6 - frac * 0.8
+            const spinA = tor.timer * (8 + k * 1.6) + k
+            ctx.beginPath()
+            ctx.ellipse(ts.x + wobbleX, ry, ringR, ringR * 0.42, 0, spinA, spinA + Math.PI * 1.45)
+            ctx.stroke()
+          }
+
+          // Orbiting wind debris streaks
+          for (let d = 0; d < 6; d++) {
+            const da = tor.timer * 9 + (d / 6) * Math.PI * 2
+            const dr = tor.radius * (0.55 + (d % 2) * 0.3)
+            const dx = ts.x + Math.cos(da) * dr
+            const dy = ts.y - (d % 3) * 10 + Math.sin(da) * dr * 0.45
+            ctx.fillStyle = d % 2 === 0 ? '#FFFFFF' : tor.isLv5 ? '#FDE047' : '#67E8F9'
+            ctx.beginPath()
+            ctx.arc(dx, dy, 2.4, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          ctx.restore()
+        }
+
+        // Falling Starfall Meteors (ground target ring + diagonal blazing sky meteor streak)
+        for (const meteor of meteorsRef.current) {
+          if (meteor.timer < 0) continue
+          const frac = Math.min(1, meteor.timer / meteor.impactTime)
+          const mp = camera.worldToScreen(meteor.targetX, meteor.targetY)
+          const startX = mp.x - 160 * (1 - frac)
+          const startY = mp.y - 340 * (1 - frac)
+          const accent = meteor.isCloneCast
+            ? '#C084FC'
+            : meteor.isLv5
+              ? '#FFD700'
+              : '#34D399'
+
+          ctx.save()
+          // Ground impact crater preview reticle
+          ctx.strokeStyle = accent
+          ctx.globalAlpha = 0.35 + frac * 0.55
+          ctx.lineWidth = 2.4
+          ctx.beginPath()
+          ctx.arc(mp.x, mp.y, meteor.radius * (0.4 + frac * 0.6), 0, Math.PI * 2)
+          ctx.stroke()
+
+          // Descending meteor sky trail
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = accent
+          ctx.lineWidth = 8
+          ctx.lineCap = 'round'
+          ctx.beginPath()
+          ctx.moveTo(startX - 42, startY - 90)
+          ctx.lineTo(startX, startY)
+          ctx.stroke()
+
+          ctx.fillStyle = '#FFFFFF'
+          ctx.beginPath()
+          ctx.arc(startX, startY, 10, 0, Math.PI * 2)
+          ctx.fill()
           ctx.restore()
         }
 
@@ -3133,9 +4698,120 @@ const GameContainer: React.FC<GameContainerProps> = ({
           proj.draw(ctx, camera)
         }
 
-        // Autonomous Summons (Companion Robots & Temporal Echoes)
+        // Autonomous Summons (Companion Robots, Temporal Echoes, Sentinel Turrets & Laser Striders)
         for (const summon of summonsRef.current) {
           summon.draw(ctx, camera, player)
+        }
+
+        // Orbiting Prism Satellite Blades (spinning emerald-gold prism chakrams around player)
+        const activePrismLv = upgradeLevelsRef.current['upg_a2_05'] || 0
+        if (activePrismLv > 0) {
+          const pScr = camera.worldToScreen(player.getCenter().x, player.getCenter().y)
+          const bladeCount = 1 + activePrismLv
+          const orbitR = 92 + activePrismLv * 15
+          const spinSpeed = 2.6 + activePrismLv * 0.38
+          const baseSpin = timeSurvivedRef.current * spinSpeed
+          const isLv5Prism = activePrismLv >= MAX_WEAPON_UPGRADE_LEVEL
+
+          ctx.save()
+          ctx.strokeStyle = isLv5Prism ? 'rgba(255, 215, 0, 0.32)' : 'rgba(52, 211, 153, 0.25)'
+          ctx.lineWidth = 1.4
+          ctx.setLineDash([8, 8])
+          ctx.beginPath()
+          ctx.arc(pScr.x, pScr.y, orbitR, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.setLineDash([])
+
+          for (let b = 0; b < bladeCount; b++) {
+            const ba = baseSpin + (b / bladeCount) * Math.PI * 2
+            const bx = pScr.x + Math.cos(ba) * orbitR
+            const by = pScr.y + Math.sin(ba) * orbitR
+            ctx.save()
+            ctx.translate(bx, by)
+            ctx.rotate(timeSurvivedRef.current * 14 + b)
+            ctx.fillStyle = isLv5Prism ? 'rgba(255, 215, 0, 0.28)' : 'rgba(52, 211, 153, 0.28)'
+            ctx.beginPath()
+            ctx.arc(0, 0, 18, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.fillStyle = isLv5Prism ? '#FFD700' : '#34D399'
+            ctx.strokeStyle = '#FFFFFF'
+            ctx.lineWidth = 1.6
+            ctx.beginPath()
+            for (let k = 0; k < 8; k++) {
+              const ka = (k / 8) * Math.PI * 2
+              const kr = k % 2 === 0 ? 15 : 6.5
+              const px = Math.cos(ka) * kr
+              const py = Math.sin(ka) * kr
+              if (k === 0) ctx.moveTo(px, py)
+              else ctx.lineTo(px, py)
+            }
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+
+            ctx.fillStyle = '#FFFFFF'
+            ctx.beginPath()
+            ctx.arc(0, 0, 3.6, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.restore()
+          }
+          ctx.restore()
+        }
+
+        // Shield Paladin Dash Spectral Afterimages (glowing golden shield bursts)
+        for (const img of dashAfterimagesRef.current) {
+          const sp = camera.worldToScreen(img.x + player.width / 2, img.y + player.height / 2)
+          const alpha = Math.max(0, (1 - img.timer / img.duration) * 0.65)
+          const r = player.width * (0.48 + (img.timer / img.duration) * 0.25)
+          ctx.save()
+          ctx.globalAlpha = alpha
+          ctx.fillStyle = 'rgba(250, 204, 21, 0.35)'
+          ctx.beginPath()
+          ctx.arc(sp.x, sp.y, r * 1.25, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.strokeStyle = '#FEF08A'
+          ctx.lineWidth = 2.6
+          ctx.beginPath()
+          ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.restore()
+        }
+
+        // Chrono Operative 3s Holographic Clones (50% damage attack mimic)
+        for (const clone of chronoClonesRef.current) {
+          const cs = camera.worldToScreen(clone.x, clone.y)
+          const remainFrac = Math.max(0, 1 - clone.timer / clone.duration)
+          const pulseR = 16 + Math.sin(clone.timer * 14) * 1.5
+          ctx.save()
+          // 3.0s countdown arc indicator
+          ctx.strokeStyle = '#00F0FF'
+          ctx.lineWidth = 2.5
+          ctx.beginPath()
+          ctx.arc(cs.x, cs.y, 24, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * remainFrac)
+          ctx.stroke()
+
+          // Holographic violet silhouette
+          ctx.globalAlpha = 0.72
+          ctx.fillStyle = '#7E22CE'
+          ctx.strokeStyle = '#C084FC'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.arc(cs.x, cs.y, pulseR, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.stroke()
+
+          ctx.fillStyle = '#E9D5FF'
+          ctx.beginPath()
+          ctx.arc(cs.x, cs.y, 7, 0, Math.PI * 2)
+          ctx.fill()
+
+          ctx.globalAlpha = 0.95
+          ctx.font = 'bold 9px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillStyle = '#E9D5FF'
+          ctx.fillText(`${Math.max(0, clone.duration - clone.timer).toFixed(1)}s`, cs.x, cs.y - 28)
+          ctx.restore()
         }
 
         // Player
@@ -3252,9 +4928,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
           equippedWeaponIdRef.current && equippedWeaponStarsRef.current > 0
             ? { [equippedWeaponIdRef.current]: equippedWeaponStarsRef.current }
             : undefined
-        const selected = [...seedUpgrades, ...shopWeaponsAsUpgrades(starOverrides)].find(
-          (u) => u.id === upgradeId
-        )
+        const selected = [
+          ...seedUpgrades,
+          ...AREA_TWO_UPGRADES,
+          ...shopWeaponsAsUpgrades(starOverrides)
+        ].find((u) => u.id === upgradeId)
         if (selected) {
           const prevLv = upgradeLevelsRef.current[selected.id] || 0
           const nextLv = Math.min(MAX_WEAPON_UPGRADE_LEVEL, prevLv + 1)
@@ -3394,11 +5072,34 @@ const GameContainer: React.FC<GameContainerProps> = ({
           isBreather={isBreather}
           isEndless={isEndlessMode}
           heroName={heroName}
+          heroAbilityTag={heroAbilityTag}
+          hasSpaceDash={hasSpaceDash}
+          dashCooldown={dashCooldown}
           areaName={activeArea.name}
           activeUpgrades={activeUpgradeNames}
           shieldActive={shieldActive}
           onPause={handlePauseToggle}
         />
+      )}
+
+      {/* Mobile / Touch Shield Paladin Dash Trigger */}
+      {gameState === 'playing' && hasSpaceDash && (
+        <button
+          type="button"
+          onClick={triggerPaladinDash}
+          disabled={dashCooldown > 0}
+          className={`md:hidden absolute bottom-16 left-4 z-20 w-16 h-16 rounded-full border-2 font-mono font-extrabold text-xs flex flex-col items-center justify-center transition-all ${
+            dashCooldown <= 0
+              ? 'bg-yellow-500/85 border-yellow-200 text-slate-950 shadow-lg shadow-yellow-500/30'
+              : 'bg-slate-900/80 border-slate-600 text-slate-300'
+          }`}
+          aria-label="Trigger Aegis Dash"
+        >
+          <span>DASH</span>
+          <span className="text-[10px]">
+            {dashCooldown <= 0 ? 'READY' : `${dashCooldown.toFixed(1)}s`}
+          </span>
+        </button>
       )}
 
       {/* Mobile / Touch On-Screen D-Pad */}

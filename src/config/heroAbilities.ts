@@ -149,6 +149,14 @@ export function getSummonCountForUpgrade(upgradeId: string, level: number, heroI
     const base = level >= 5 ? 2 : 1
     return isEngineer ? base + HERO_ABILITY_CONSTANTS.ENGINEER_BONUS_OTHER_SUMMONS : base
   }
+  if (upgradeId === 'upg_a2_02') {
+    const base = level >= 3 ? 2 : 1
+    return isEngineer ? base + HERO_ABILITY_CONSTANTS.ENGINEER_BONUS_OTHER_SUMMONS : base
+  }
+  if (upgradeId === 'wpn_grim_reaper') {
+    const base = level >= 5 ? 2 : 1
+    return isEngineer ? base + HERO_ABILITY_CONSTANTS.ENGINEER_BONUS_OTHER_SUMMONS : base
+  }
   return 0
 }
 
@@ -158,3 +166,137 @@ export function computeHeroBurnPerTick(hitDamage: number): number {
     Math.round(hitDamage * HERO_ABILITY_CONSTANTS.PYRO_BURN_DAMAGE_RATIO)
   )
 }
+
+/**
+ * Resolve all starting upgrade/weapon IDs for a run.
+ * Always keeps the hero's signature starting weapon (e.g., Arc Slash on Vanguard Blade)
+ * even when an Armory weapon or Loadout weapon is also equipped.
+ */
+export function resolveStartingUpgradeIds(params: {
+  heroStartingUpgradeId: string
+  equippedWeaponId?: string | null
+  loadoutUpgradeId?: string | null
+}): string[] {
+  const ordered: string[] = []
+  const pushUnique = (id?: string | null) => {
+    if (id && !ordered.includes(id)) {
+      ordered.push(id)
+    }
+  }
+  pushUnique(params.heroStartingUpgradeId)
+  pushUnique(params.loadoutUpgradeId)
+  pushUnique(params.equippedWeaponId)
+  return ordered
+}
+
+export const MURAMASA_WEAPON_CONSTANTS = {
+  PAIRED_HERO_ID: 'hero_01',
+  PAIRED_DAMAGE_MULTIPLIER: 1.55,
+  PAIRED_RADIUS_MULTIPLIER: 1.25,
+  PAIRED_COOLDOWN_MULTIPLIER: 0.75,
+  PAIRED_ARC_SLASH_RESONANCE: 1.25
+} as const
+
+export function getMuramasaWeaponConfig(
+  baseDamage: number,
+  level: number,
+  heroId: string
+): {
+  radius: number
+  damage: number
+  cooldownScale: number
+  waveCount: number
+  isPairedHero: boolean
+} {
+  const safeLv = Math.max(1, Math.min(5, Math.floor(level)))
+  const baseRadius = 150 + safeLv * 26
+  const isPairedHero = heroId === MURAMASA_WEAPON_CONSTANTS.PAIRED_HERO_ID
+
+  if (isPairedHero) {
+    return {
+      radius: Math.round(baseRadius * MURAMASA_WEAPON_CONSTANTS.PAIRED_RADIUS_MULTIPLIER),
+      damage: Math.max(
+        1,
+        Math.round(baseDamage * MURAMASA_WEAPON_CONSTANTS.PAIRED_DAMAGE_MULTIPLIER)
+      ),
+      cooldownScale: MURAMASA_WEAPON_CONSTANTS.PAIRED_COOLDOWN_MULTIPLIER,
+      waveCount: safeLv >= 5 ? 3 : 2,
+      isPairedHero: true
+    }
+  }
+
+  return {
+    radius: baseRadius,
+    damage: Math.max(1, Math.round(baseDamage)),
+    cooldownScale: 1,
+    waveCount: safeLv >= 5 ? 2 : 1,
+    isPairedHero: false
+  }
+}
+
+export function getPairedHeroArcSlashBonus(
+  heroId: string,
+  activeUpgradeIds: ReadonlyArray<string>
+): number {
+  if (
+    heroId === MURAMASA_WEAPON_CONSTANTS.PAIRED_HERO_ID &&
+    activeUpgradeIds.includes('wpn_muramasa')
+  ) {
+    return MURAMASA_WEAPON_CONSTANTS.PAIRED_ARC_SLASH_RESONANCE
+  }
+  return 1
+}
+
+export const GRIM_REAPER_WEAPON_CONSTANTS = {
+  PAIRED_HERO_ID: 'hero_03',
+  PAIRED_DAMAGE_MULTIPLIER: 1.5,
+  PAIRED_COOLDOWN_MULTIPLIER: 0.78,
+  PAIRED_BONUS_HEAL: 2
+} as const
+
+export function getGrimReaperWeaponConfig(
+  baseDamage: number,
+  level: number,
+  heroId: string
+): {
+  damage: number
+  cooldownScale: number
+  reaperCount: number
+  scytheCount: number
+  siphonTargets: number
+  healPerTarget: number
+  isPairedHero: boolean
+} {
+  const safeLv = Math.max(1, Math.min(5, Math.floor(level)))
+  const isPairedHero = heroId === GRIM_REAPER_WEAPON_CONSTANTS.PAIRED_HERO_ID
+  const reaperCount = getSummonCountForUpgrade('wpn_grim_reaper', safeLv, heroId)
+  const baseScythes = safeLv >= 5 ? 3 : safeLv >= 3 ? 2 : 1
+  const baseSiphonTargets = safeLv >= 4 ? 3 : safeLv >= 2 ? 2 : 1
+  const baseHealPerTarget = safeLv >= 5 ? 3 : 2
+
+  if (isPairedHero) {
+    return {
+      damage: Math.max(
+        1,
+        Math.round(baseDamage * GRIM_REAPER_WEAPON_CONSTANTS.PAIRED_DAMAGE_MULTIPLIER)
+      ),
+      cooldownScale: GRIM_REAPER_WEAPON_CONSTANTS.PAIRED_COOLDOWN_MULTIPLIER,
+      reaperCount,
+      scytheCount: Math.min(3, baseScythes + (safeLv >= 2 && safeLv < 5 ? 1 : 0)),
+      siphonTargets: baseSiphonTargets + 1,
+      healPerTarget: baseHealPerTarget + GRIM_REAPER_WEAPON_CONSTANTS.PAIRED_BONUS_HEAL,
+      isPairedHero: true
+    }
+  }
+
+  return {
+    damage: Math.max(1, Math.round(baseDamage)),
+    cooldownScale: 1,
+    reaperCount,
+    scytheCount: baseScythes,
+    siphonTargets: baseSiphonTargets,
+    healPerTarget: baseHealPerTarget,
+    isPairedHero: false
+  }
+}
+

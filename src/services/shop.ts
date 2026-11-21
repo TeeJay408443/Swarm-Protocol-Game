@@ -18,6 +18,7 @@ export type GearRarity =
   | 'rare'
   | 'epic'
   | 'legendary'
+  | 'mythic'
 
 export const RARITY_META: Record<
   GearRarity,
@@ -29,7 +30,8 @@ export const RARITY_META: Record<
   uncommon: { label: 'Uncommon', color: '#34D399', isBad: false, order: 3 },
   rare: { label: 'Rare', color: '#38BDF8', isBad: false, order: 4 },
   epic: { label: 'Epic', color: '#C084FC', isBad: false, order: 5 },
-  legendary: { label: 'Legendary', color: '#FFD700', isBad: false, order: 6 }
+  legendary: { label: 'Legendary', color: '#FFD700', isBad: false, order: 6 },
+  mythic: { label: 'Mythic', color: '#FF2E63', isBad: false, order: 7 }
 }
 
 export interface ShopWeaponItem {
@@ -42,6 +44,8 @@ export interface ShopWeaponItem {
   price: number
   salvageValue: number
   crateOnly?: boolean
+  pairedHeroId?: string
+  pairedHeroLabel?: string
   damage: number
   cooldown_s: number
   special: string
@@ -263,30 +267,130 @@ export const SHOP_WEAPONS: ShopWeaponItem[] = [
     kind: 'weapon',
     name: 'Abyssal Prism Beam',
     category: 'Beam Weapon',
-    rarity: 'epic',
-    tierLabel: 'Epic',
-    price: 1350,
-    salvageValue: 400,
-    damage: 42,
-    cooldown_s: 2.6,
+    rarity: 'legendary',
+    tierLabel: 'Legendary',
+    price: 2150,
+    salvageValue: 645,
+    damage: 54,
+    cooldown_s: 2.5,
     special: 'Dual 280px sweep',
     function_desc: 'Projects dual opposing disintegration beams sweeping 360° around you.',
-    accentColor: '#C084FC'
+    accentColor: '#FFD700'
   },
   {
     id: 'wpn_celestial_swarm',
     kind: 'weapon',
     name: 'Celestial Seeker Swarm',
     category: 'Heavy AoE',
-    rarity: 'legendary',
-    tierLabel: 'Legendary',
-    price: 2100,
-    salvageValue: 630,
+    rarity: 'epic',
+    tierLabel: 'Epic',
+    price: 1450,
+    salvageValue: 435,
     damage: 38,
     cooldown_s: 1.5,
     special: '4x homing warheads',
     function_desc: 'Launches 4 lock-on plasma missiles that track and detonate on packs.',
+    accentColor: '#C084FC'
+  },
+  {
+    id: 'wpn_cryo_railgun',
+    kind: 'weapon',
+    name: 'Cryo Railcannon',
+    category: 'Beam Weapon',
+    rarity: 'rare',
+    tierLabel: 'Rare',
+    price: 780,
+    salvageValue: 235,
+    damage: 44,
+    cooldown_s: 1.05,
+    special: 'Piercing frostburst rail',
+    function_desc: 'Fires hypersonic sub-zero rail slugs that pierce dense lines and shatter on impact.',
+    accentColor: '#38BDF8'
+  },
+  {
+    id: 'wpn_solar_flail',
+    kind: 'weapon',
+    name: 'Solar Flare Flail',
+    category: 'Heavy AoE',
+    rarity: 'legendary',
+    tierLabel: 'Legendary',
+    price: 2250,
+    salvageValue: 675,
+    damage: 78,
+    cooldown_s: 1.25,
+    special: 'Boomerang spinning solar mace + fire area',
+    function_desc:
+      'Launches a blazing spiked solar mace on a molten chain toward enemies, spinning back to the wielder while igniting burning magma zones.',
     accentColor: '#FFD700'
+  },
+  {
+    id: 'wpn_void_reaper',
+    kind: 'weapon',
+    name: 'Void Singularity Scythe',
+    category: 'Melee Weapon',
+    rarity: 'legendary',
+    tierLabel: 'Legendary',
+    price: 2450,
+    salvageValue: 735,
+    damage: 86,
+    cooldown_s: 1.15,
+    special: 'Gravity cleave + vortex',
+    function_desc: 'Carves wide abyssal scythe arcs and tears open gravity vortices that crush swarms inward.',
+    accentColor: '#FFD700'
+  },
+  {
+    id: 'wpn_muramasa',
+    kind: 'weapon',
+    name: 'Muramasa: Calamity Blade',
+    category: 'Melee Weapon',
+    rarity: 'mythic',
+    tierLabel: 'Mythic',
+    price: 5000,
+    salvageValue: 1500,
+    crateOnly: true,
+    pairedHeroId: 'hero_01',
+    pairedHeroLabel: 'Pairs with Vanguard Blade (+55% DMG · +25% Reach & Speed · Extra Wave)',
+    damage: 138,
+    cooldown_s: 0.9,
+    special: 'Mythic Bloodmoon Wave · Vanguard Synergy',
+    function_desc:
+      'High-frequency Calamity katana unleashing devastating crimson crescent waves. Pairs with Vanguard Blade for +55% damage, faster swings, wider cleave, and extra slash waves.',
+    accentColor: '#FF2E63'
+  },
+  {
+    id: 'wpn_permafrost_spire',
+    kind: 'weapon',
+    name: 'Glacier Permafrost Spire',
+    category: 'Ranged',
+    rarity: 'epic',
+    tierLabel: 'Epic',
+    price: 1380,
+    salvageValue: 415,
+    damage: 46,
+    cooldown_s: 1.2,
+    special: '1.5s solid freeze · Cryo burst',
+    function_desc:
+      'Launches piercing sub-zero frost lances that shatter into icy bursts and freeze enemies solid.',
+    accentColor: '#C084FC'
+  },
+  {
+    id: 'wpn_grim_reaper',
+    kind: 'weapon',
+    name: 'Grim Reaper: Soul Harvester',
+    category: 'Summon',
+    rarity: 'mythic',
+    tierLabel: 'Mythic',
+    price: 5200,
+    salvageValue: 1560,
+    crateOnly: true,
+    pairedHeroId: 'hero_03',
+    pairedHeroLabel: 'Pairs with Tech Engineer (+50% DMG · Extra Reaper · +22% Attack Speed · Bonus Soul Heal)',
+    damage: 88,
+    cooldown_s: 1.05,
+    special: 'Mythic Grim Reaper · Throws Scythes & Life Siphon · Engineer Synergy',
+    function_desc:
+      'Summons an autonomous spectral Grim Reaper that throws spinning scythes and siphons enemy life force back to heal you. Pairs with Tech Engineer for an extra Reaper, +50% damage, faster attacks, and stronger healing.',
+    accentColor: '#FF2E63'
   }
 ]
 
@@ -454,6 +558,78 @@ export const SHOP_ACCESSORIES: ShopAccessoryItem[] = [
       hpRegenPerSec: 2,
       xpMultiplier: 0.15
     }
+  },
+  {
+    id: 'acc_aegis_plating',
+    kind: 'accessory',
+    name: 'Aegis Reactive Plating',
+    slotLabel: 'Heavy Armor',
+    rarity: 'rare',
+    price: 490,
+    salvageValue: 145,
+    statSummary: '+75 Max HP • -14% Damage Taken • +8% Move Speed',
+    function_desc: 'Layered ceramic-titanium plating absorbing heavy boss strikes without bogging mobility.',
+    accentColor: '#38BDF8',
+    bonuses: {
+      bonusHp: 75,
+      damageReduction: 0.14,
+      speedMultiplier: 0.08
+    }
+  },
+  {
+    id: 'acc_chrono_accelerator',
+    kind: 'accessory',
+    name: 'Chrono Surge Core',
+    slotLabel: 'Tempo Core',
+    rarity: 'epic',
+    price: 1080,
+    salvageValue: 320,
+    statSummary: '+24% Fire Rate • +12% Move Speed • +15% XP Gain',
+    function_desc: 'Temporal accelerator compressing weapon cooldowns and amplifying battlefield reflexes.',
+    accentColor: '#C084FC',
+    bonuses: {
+      cooldownReduction: 0.24,
+      speedMultiplier: 0.12,
+      xpMultiplier: 0.15
+    }
+  },
+  {
+    id: 'acc_berserker_crest',
+    kind: 'accessory',
+    name: 'Bloodforged War Crest',
+    slotLabel: 'War Sigil',
+    rarity: 'legendary',
+    price: 1650,
+    salvageValue: 495,
+    statSummary: '+35% Weapon Damage • +15% Fire Rate • +1.5 HP/sec',
+    function_desc: 'Siphons battlefield fury into relentless attack output and continuous combat sustain.',
+    accentColor: '#FFD700',
+    bonuses: {
+      damageMultiplier: 0.35,
+      cooldownReduction: 0.15,
+      hpRegenPerSec: 1.5
+    }
+  },
+  {
+    id: 'acc_calamity_heart',
+    kind: 'accessory',
+    name: 'Heart of Calamity',
+    slotLabel: 'Mythic Relic',
+    rarity: 'mythic',
+    price: 4200,
+    salvageValue: 1260,
+    crateOnly: true,
+    statSummary: '+120 Max HP • +48% Weapon Damage • +20% Fire Rate • -15% Damage Taken • +4 HP/sec',
+    function_desc:
+      'Apex Calamity reactor core overflowing with crimson energy, elevating every offensive and defensive stat simultaneously.',
+    accentColor: '#FF2E63',
+    bonuses: {
+      bonusHp: 120,
+      damageMultiplier: 0.48,
+      cooldownReduction: 0.2,
+      damageReduction: 0.15,
+      hpRegenPerSec: 4
+    }
   }
 ]
 
@@ -497,19 +673,36 @@ export const SUPPLY_CRATES: SupplyCrateTier[] = [
   {
     id: 'crate_apex',
     name: 'Apex Prototype Crate',
-    tagline: 'Premium • Highest Rare Odds',
+    tagline: 'Premium • High Rare Odds • 1% Mythic',
     price: 650,
     accentColor: '#FFD700',
     description:
-      'Experimental vault cache. Minimal faulty risk and the highest drop chance for Epic & Legendary gear.',
+      'Experimental vault cache. Minimal faulty risk with elevated Epic & Legendary odds plus a 1% Mythic drop chance.',
     rarityWeights: {
       scrap: 0.04,
       faulty: 0.08,
       common: 0.16,
-      uncommon: 0.35,
+      uncommon: 0.34,
       rare: 0.24,
       epic: 0.095,
-      legendary: 0.035
+      legendary: 0.035,
+      mythic: 0.01
+    }
+  },
+  {
+    id: 'crate_mythic',
+    name: 'Calamity Mythic Vault',
+    tagline: 'No Common/Scrap • 4% Mythic',
+    price: 2000,
+    accentColor: '#FF2E63',
+    description:
+      'Zero Scrap, Faulty, or Common drops. Guarantees Uncommon+ gear with 10% Legendary and 4% Mythic odds.',
+    rarityWeights: {
+      uncommon: 0.21,
+      rare: 0.40,
+      epic: 0.25,
+      legendary: 0.10,
+      mythic: 0.04
     }
   }
 ]
@@ -1112,6 +1305,148 @@ export function openSupplyCrate(
   }
 }
 
+export interface CrateDropEntry {
+  item: ShopCatalogItem
+  rarity: GearRarity
+  stars: number
+  isNewUnlock: boolean
+  isBadGear: boolean
+  isDuplicate: boolean
+  newCount: number
+  totalOwnedCount: number
+}
+
+export interface BatchCrateOpenResult {
+  success: boolean
+  state: ShopAccountState
+  crate?: SupplyCrateTier
+  countRequested: number
+  drops: CrateDropEntry[]
+  highestRarity?: GearRarity
+  hasMythic: boolean
+  hasLegendary: boolean
+  totalCost: number
+  error?: string
+}
+
+/**
+ * Open multiple Supply Crates (e.g., 10 at once) in a single atomic transaction.
+ */
+export function openMultipleSupplyCrates(
+  userId: string | null | undefined,
+  crateId: string,
+  count: number = 10,
+  rng: () => number = Math.random
+): BatchCrateOpenResult {
+  const safeCount = Math.max(1, Math.min(10, Math.floor(count)))
+  const current = getShopAccountState(userId)
+  const crate = getSupplyCrateById(crateId)
+  if (!crate) {
+    return {
+      success: false,
+      state: current,
+      countRequested: safeCount,
+      drops: [],
+      hasMythic: false,
+      hasLegendary: false,
+      totalCost: 0,
+      error: 'Supply crate not found.'
+    }
+  }
+
+  const totalCost = crate.price * safeCount
+  if (current.balance < totalCost) {
+    const needed = totalCost - current.balance
+    return {
+      success: false,
+      state: current,
+      crate,
+      countRequested: safeCount,
+      drops: [],
+      hasMythic: false,
+      hasLegendary: false,
+      totalCost,
+      error: `Need ${needed.toLocaleString()} more Battle Coins to open ${safeCount}× ${crate.name}.`
+    }
+  }
+
+  let runningStacks = { ...current.gearStacks }
+  const rawDrops: Array<{
+    item: ShopCatalogItem
+    rarity: GearRarity
+    isNewUnlock: boolean
+    isBadGear: boolean
+    isDuplicate: boolean
+  }> = []
+
+  let highestRarity: GearRarity = 'scrap'
+  let highestOrder = -1
+
+  for (let i = 0; i < safeCount; i++) {
+    const rolledRarity = pickRarityFromCrate(crate, rng())
+    const matchingPool = SHOP_CATALOG.filter((item) => item.rarity === rolledRarity)
+    const pool = matchingPool.length > 0 ? matchingPool : SHOP_CATALOG
+    const pickIndex = Math.min(
+      pool.length - 1,
+      Math.floor(Math.max(0, Math.min(0.999999, rng())) * pool.length)
+    )
+    const droppedItem = pool[pickIndex]
+
+    const prevCountForItem = (runningStacks[droppedItem.id] || []).reduce(
+      (sum, n) => sum + (n > 0 ? n : 0),
+      0
+    )
+    const hadBefore = prevCountForItem > 0
+    runningStacks = addItemStackToRecord(runningStacks, droppedItem.id, 0, 1)
+
+    if (RARITY_META[droppedItem.rarity].order > highestOrder) {
+      highestOrder = RARITY_META[droppedItem.rarity].order
+      highestRarity = droppedItem.rarity
+    }
+
+    rawDrops.push({
+      item: droppedItem,
+      rarity: droppedItem.rarity,
+      isNewUnlock: !hadBefore,
+      isBadGear: isBadGearRarity(droppedItem.rarity),
+      isDuplicate: hadBefore
+    })
+  }
+
+  const next: ShopAccountState = normalizeAccountState(
+    {
+      ...current,
+      balance: current.balance - totalCost,
+      totalSpent: current.totalSpent + totalCost,
+      cratesOpened: (current.cratesOpened || 0) + safeCount,
+      gearStacks: runningStacks,
+      ownedIds: deriveOwnedIdsFromStacks(runningStacks),
+      updatedAt: new Date().toISOString()
+    },
+    current.userId
+  )
+  writeShopState(next)
+
+  const drops: CrateDropEntry[] = rawDrops.map((entry) => ({
+    ...entry,
+    stars: 0,
+    newCount: getStackCount(next, entry.item.id, 0),
+    totalOwnedCount: getTotalStackCount(next, entry.item.id)
+  }))
+
+  return {
+    success: true,
+    state: next,
+    crate,
+    countRequested: safeCount,
+    drops,
+    highestRarity,
+    hasMythic: drops.some((d) => d.rarity === 'mythic'),
+    hasLegendary: drops.some((d) => d.rarity === 'legendary'),
+    totalCost
+  }
+}
+
 /**
  * Fuse 2 copies of the same gear at `sourceStars` (0..4) into 1 copy at `sourceStars + 1` (1..5).
  */
@@ -1425,6 +1760,8 @@ export function useShopState(userId?: string | null) {
       .filter((a): a is ShopAccessoryItem => Boolean(a)),
     buyItem: (itemId: string) => purchaseShopItem(effectiveUserId, itemId),
     openCrate: (crateId: string) => openSupplyCrate(effectiveUserId, crateId),
+    openCrates: (crateId: string, count: number) =>
+      openMultipleSupplyCrates(effectiveUserId, crateId, count),
     salvageItem: (itemId: string, stars?: number) => salvageShopItem(effectiveUserId, itemId, stars),
     fuseItem: (itemId: string, sourceStars: number) => fuseGearStacks(effectiveUserId, itemId, sourceStars),
     setEquippedWeapon: (weaponId: string | null, stars?: number) =>

@@ -10,6 +10,8 @@ import { ValidationPresets } from '../../../hooks/useValidation'
 import { useSupabase } from '../../../hooks/useSupabase'
 import { useLoadouts } from '../../../hooks/useLoadouts'
 import { heroes, upgrades } from '../../../db/seedData'
+import { AREA_TWO_UPGRADES, isAreaTwoUpgrade, isAreaTwoUpgradesUnlocked } from '../../../config/areaUpgrades'
+import { getLocalPlayerTelemetry } from '../../../services/scores'
 import { GAME_CONFIG } from '../../../config/gameConstants'
 import { getHeroAbility, getHeroDamageReduction } from '../../../config/heroAbilities'
 import {
@@ -37,7 +39,7 @@ import {
 type ArmoryTab = 'inventory' | 'forge' | 'loadouts' | 'builder'
 type InventoryFilter = 'all' | 'weapon' | 'accessory' | 'fusable'
 
-export function calculateUpgradeDps(damage: number, cooldownSeconds: number): number | null {
+function calculateUpgradeDps(damage: number, cooldownSeconds: number): number | null {
   if (damage <= 0) return 0
   if (cooldownSeconds <= 0) return null
   return Number((damage / cooldownSeconds).toFixed(1))
@@ -104,12 +106,23 @@ export function ArmoryView() {
     () => shopUpgradeRows.filter((u) => ownedSet.has(u.id)),
     [shopUpgradeRows, ownedSet]
   )
+  const area2Unlocked = useMemo(
+    () =>
+      isAreaTwoUpgradesUnlocked({
+        wave15Cleared: getLocalPlayerTelemetry(effectiveUserId).wave_15_cleared
+      }),
+    [effectiveUserId]
+  )
   const allSelectableUpgrades = useMemo(
-    () => [...ownedShopUpgrades, ...upgrades],
-    [ownedShopUpgrades]
+    () => [
+      ...ownedShopUpgrades,
+      ...upgrades,
+      ...(area2Unlocked ? AREA_TWO_UPGRADES : [])
+    ],
+    [ownedShopUpgrades, area2Unlocked]
   )
   const allKnownUpgrades = useMemo(
-    () => [...shopUpgradeRows, ...upgrades],
+    () => [...shopUpgradeRows, ...upgrades, ...AREA_TWO_UPGRADES],
     [shopUpgradeRows]
   )
 
@@ -466,8 +479,8 @@ export function ArmoryView() {
                   </>
                 ) : (
                   <>
-                    <p className="text-sm font-semibold text-gray-300">Hero Default</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Select a weapon stack below</p>
+                    <p className="text-sm font-semibold text-gray-300">Hero Starter Only</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Equip a bonus weapon below (keeps hero starter)</p>
                   </>
                 )}
               </div>
@@ -767,7 +780,12 @@ export function ArmoryView() {
                           </p>
                         )}
 
-                        <p className="text-xs text-gray-400 mb-4">{item.function_desc}</p>
+                        <p className="text-xs text-gray-400 mb-2">{item.function_desc}</p>
+                        {isWeapon && item.pairedHeroLabel && (
+                          <p className="text-xs font-semibold text-rose-400 mb-3">
+                            {item.pairedHeroLabel}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -1243,6 +1261,11 @@ export function ArmoryView() {
                               {isShopWpn && (
                                 <span className="ml-2 text-xs text-hazard-gold font-normal">
                                   Crate Weapon · {starLabel}★
+                                </span>
+                              )}
+                              {isAreaTwoUpgrade(upgrade.id) && (
+                                <span className="ml-2 text-xs text-emerald-400 font-normal">
+                                  Area 2 Unlock
                                 </span>
                               )}
                             </h4>

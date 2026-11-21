@@ -19,6 +19,7 @@ import {
   type OperativeProfile
 } from '../../../services/scores'
 import { updateLocalAccountUsername } from '../../../services/auth'
+import { formatMasteryBonusSummary, useHeroMastery } from '../../../services/heroMastery'
 
 type ActiveTab = 'overview' | 'stats' | 'achievements' | 'settings'
 
@@ -35,6 +36,7 @@ export function ProfileView() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview')
   const [telemetry, setTelemetry] = useState<LocalPlayerTelemetry | null>(null)
+  const { getProgress: getMasteryProgress } = useHeroMastery(user?.id)
   const [profile, setProfile] = useState<OperativeProfile>(() => getOperativeProfile(user?.id))
   const [isEditing, setIsEditing] = useState(false)
   const [editUsername, setEditUsername] = useState('')
@@ -300,6 +302,24 @@ export function ProfileView() {
                       </p>
                     </div>
                   </div>
+                  {(() => {
+                    const favMastery = getMasteryProgress(favoriteHero.id)
+                    return (
+                      <div className="mt-3 bg-gray-800/80 border border-gray-700 rounded p-2.5">
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="font-bold text-amber-300 tabular-nums">
+                            Mastery Rank {favMastery.currentTier}/{favMastery.maxTier}
+                          </span>
+                          <span className="text-gray-400 tabular-nums">
+                            {favMastery.roundsCompleted} rounds
+                          </span>
+                        </div>
+                        <p className="text-xs text-emerald-300">
+                          {formatMasteryBonusSummary(favMastery.totalBonuses)}
+                        </p>
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
             </Card>
@@ -349,26 +369,81 @@ export function ProfileView() {
             </Card>
 
             <Card className="bg-gray-900 lg:col-span-2">
-              <h3 className="text-lg font-semibold text-cyan-accent mb-4">Hero Mastery Records</h3>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <h3 className="text-lg font-semibold text-cyan-accent">Hero Mastery Records</h3>
+                <span className="text-xs text-gray-400">
+                  Clear combat waves with each hero to unlock permanent passive bonuses
+                </span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {heroes.map(hero => {
                   const stat = telemetry?.hero_stats?.[hero.id]
+                  const mastery = getMasteryProgress(hero.id)
                   return (
-                    <div key={hero.id} className="bg-gray-800 rounded p-4">
-                      <h4 className="font-semibold text-white">{hero.name}</h4>
-                      <p className="text-xs text-cyan-accent mb-3">{hero.archetype}</p>
-                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div key={hero.id} className="bg-gray-800 rounded-xl p-4 border border-gray-700/80 flex flex-col justify-between gap-3">
+                      <div>
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div>
+                            <h4 className="font-semibold text-white">{hero.name}</h4>
+                            <p className="text-xs text-cyan-accent">{hero.archetype}</p>
+                          </div>
+                          <Badge variant={mastery.currentTier > 0 ? 'primary' : 'secondary'} size="sm">
+                            Rank {mastery.currentTier}/{mastery.maxTier}
+                          </Badge>
+                        </div>
+
+                        <div className="mt-2">
+                          <div className="flex justify-between text-[11px] text-gray-400 mb-1 tabular-nums">
+                            <span>{mastery.roundsCompleted} rounds cleared</span>
+                            <span>
+                              {mastery.nextTier
+                                ? `${mastery.roundsToNextTier} to Tier ${mastery.nextTier.tier}`
+                                : 'Mastered'}
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-300 ${
+                                mastery.currentTier >= mastery.maxTier ? 'bg-hazard-gold' : 'bg-cyan-accent'
+                              }`}
+                              style={{ width: `${mastery.progressPercent}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-emerald-300 mt-2.5 leading-snug">
+                          {formatMasteryBonusSummary(mastery.totalBonuses)}
+                        </p>
+
+                        <div className="mt-2 space-y-1">
+                          {mastery.tiers.map(t => (
+                            <div
+                              key={t.tier}
+                              className={`text-[11px] flex items-center justify-between gap-2 px-2 py-0.5 rounded ${
+                                t.unlocked ? 'bg-emerald-950/50 text-emerald-200' : 'bg-gray-900/70 text-gray-500'
+                              }`}
+                            >
+                              <span className="truncate">
+                                {t.unlocked ? '✓' : '•'} T{t.tier} {t.title}
+                              </span>
+                              <span className="shrink-0 tabular-nums">{t.requiredRounds} rds</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs pt-2 border-t border-gray-700/70">
                         <div>
                           <p className="text-gray-400">Runs</p>
-                          <p className="text-white font-semibold">{stat?.gamesPlayed ?? 0}</p>
+                          <p className="text-white font-semibold tabular-nums">{stat?.gamesPlayed ?? 0}</p>
                         </div>
                         <div>
                           <p className="text-gray-400">Best Wave</p>
-                          <p className="text-cyan-accent font-semibold">{stat?.highestWave ?? 0}</p>
+                          <p className="text-cyan-accent font-semibold tabular-nums">{stat?.highestWave ?? 0}</p>
                         </div>
                         <div>
                           <p className="text-gray-400">Best Score</p>
-                          <p className="text-hazard-gold font-semibold">
+                          <p className="text-hazard-gold font-semibold tabular-nums">
                             {(stat?.highestScore ?? 0).toLocaleString()}
                           </p>
                         </div>

@@ -14,6 +14,7 @@ import {
   achievements as defaultAchievements
 } from '../db/seedData'
 import { AREA_TWO_BOSSES, AREA_TWO_ENEMIES } from '../config/arenas'
+import { AREA_TWO_UPGRADES } from '../config/areaUpgrades'
 import type { 
   HeroesRow, 
   EnemiesRow, 
@@ -106,16 +107,21 @@ export const getEnemy = async (id: string): Promise<EnemiesRow | null> => {
  * Fetch all upgrades from the database
  */
 export const getUpgrades = async (): Promise<UpgradesRow[]> => {
-  if (!supabase) return defaultUpgrades
+  const mergeWithAreaTwo = (base: UpgradesRow[]): UpgradesRow[] => {
+    const seen = new Set(base.map((u) => u.id))
+    return [...base, ...AREA_TWO_UPGRADES.filter((u) => !seen.has(u.id))]
+  }
+
+  if (!supabase) return mergeWithAreaTwo(defaultUpgrades)
   try {
     const { data, error } = await supabase
       .from('upgrades')
       .select('*')
       .order('name', { ascending: true })
-    if (error || !data || data.length === 0) return defaultUpgrades
-    return data
+    if (error || !data || data.length === 0) return mergeWithAreaTwo(defaultUpgrades)
+    return mergeWithAreaTwo(data)
   } catch {
-    return defaultUpgrades
+    return mergeWithAreaTwo(defaultUpgrades)
   }
 }
 
@@ -123,17 +129,18 @@ export const getUpgrades = async (): Promise<UpgradesRow[]> => {
  * Fetch a single upgrade by ID
  */
 export const getUpgrade = async (id: string): Promise<UpgradesRow | null> => {
-  if (!supabase) return defaultUpgrades.find(u => u.id === id) || null
+  const localPool = [...defaultUpgrades, ...AREA_TWO_UPGRADES]
+  if (!supabase) return localPool.find(u => u.id === id) || null
   try {
     const { data, error } = await supabase
       .from('upgrades')
       .select('*')
       .eq('id', id)
       .single()
-    if (error || !data) return defaultUpgrades.find(u => u.id === id) || null
+    if (error || !data) return localPool.find(u => u.id === id) || null
     return data
   } catch {
-    return defaultUpgrades.find(u => u.id === id) || null
+    return localPool.find(u => u.id === id) || null
   }
 }
 

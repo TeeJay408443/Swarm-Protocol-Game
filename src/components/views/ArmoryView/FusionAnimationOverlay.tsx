@@ -51,7 +51,8 @@ const RARITY_BORDER_CLASS: Record<GearRarity, string> = {
   uncommon: 'border-emerald-400/80',
   rare: 'border-sky-400/85',
   epic: 'border-purple-400/90',
-  legendary: 'border-hazard-gold'
+  legendary: 'border-hazard-gold',
+  mythic: 'border-rose-500'
 }
 
 const RARITY_TEXT_CLASS: Record<GearRarity, string> = {
@@ -61,7 +62,8 @@ const RARITY_TEXT_CLASS: Record<GearRarity, string> = {
   uncommon: 'text-emerald-400',
   rare: 'text-sky-400',
   epic: 'text-purple-400',
-  legendary: 'text-hazard-gold'
+  legendary: 'text-hazard-gold',
+  mythic: 'text-rose-400'
 }
 
 function formatDps(damage: number, cooldown: number): string {

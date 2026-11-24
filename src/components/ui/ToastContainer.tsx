@@ -107,19 +107,19 @@ export const useToast = () => {
   const { addToast, dismissToast, clearToasts } = context
   
   // Convenience methods for different toast types
-  const success = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type'>) => {
+  const success = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type' | 'message'>) => {
     return addToast(message, { type: 'success', ...options })
   }, [addToast])
   
-  const error = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type'>) => {
+  const error = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type' | 'message'>) => {
     return addToast(message, { type: 'error', duration: 8000, ...options })
   }, [addToast])
   
-  const warning = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type'>) => {
+  const warning = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type' | 'message'>) => {
     return addToast(message, { type: 'warning', ...options })
   }, [addToast])
   
-  const info = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type'>) => {
+  const info = useCallback((message: string, options?: Omit<ToastProps, 'id' | 'onDismiss' | 'type' | 'message'>) => {
     return addToast(message, { type: 'info', ...options })
   }, [addToast])
   

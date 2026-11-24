@@ -6,7 +6,6 @@
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
-import astralGalaxyBackgroundUrl from '../../../../attached_assets/image_1795561136880.png'
 import { Camera } from '../../../game/engine/Camera'
 import { InputManager } from '../../../game/engine/InputManager'
 import { isVisiblePlayerWeaponId, Player } from '../../../game/entities/Player'
@@ -295,6 +294,16 @@ interface TempestSphereFx {
 }
 
 type AttackFx =
+  | {
+      kind: 'solar_void_rift'
+      x: number
+      y: number
+      angle: number
+      length: number
+      thickness: number
+      timer: number
+      duration: number
+    }
   | {
       kind: 'lightning'
       points: Array<{ x: number; y: number }>
@@ -860,7 +869,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
   useEffect(() => {
     const galaxyImage = new Image()
     galaxyImage.decoding = 'async'
-    galaxyImage.src = astralGalaxyBackgroundUrl
+    galaxyImage.src = '/astral-scourge-galaxy.svg'
     astralGalaxyImageRef.current = galaxyImage
     return () => {
       astralGalaxyImageRef.current = null
@@ -2779,7 +2788,16 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const bossSet = PLAYABLE_BOSS_DROP_SETS.find((boss) =>
               boss.materials.some((material) => material.id === loot.materials?.[0])
             )
-            toast.success(`${bossSet?.name || 'Boss'} defeated — 3 crafting materials added to your Armory.`)
+            const dropNames =
+              bossSet?.materials
+                .filter((material) => loot.materials?.includes(material.id))
+                .map((material) => material.name) || []
+            toast.success(
+              dropNames.length
+                ? `${dropNames.join(', ')} added to your crafting materials.`
+                : 'Three crafting materials added to your inventory.',
+              { title: 'BOSS DROP ACQUIRED', duration: 7500 }
+            )
           }
         }
         const baseXpGain = enemy.isBoss ? LEVEL_UP_CONFIG.XP_PER_BOSS_KILL : LEVEL_UP_CONFIG.XP_PER_ENEMY_KILL
@@ -3574,21 +3592,25 @@ const GameContainer: React.FC<GameContainerProps> = ({
           const baseAngle = Math.atan2(targetCenter.y - pc.y, targetCenter.x - pc.x)
           const cleaveRadius = 142 + lv * 18
           attackEffectsRef.current.push({
-            kind: 'slash',
-            x: pc.x,
-            y: pc.y,
+            kind: 'solar_void_rift',
+            x: targetCenter.x,
+            y: targetCenter.y,
             angle: baseAngle,
-            radius: cleaveRadius,
-            color: isCloneCast ? '#C084FC' : isLv5 ? '#FEF08A' : '#F97316',
+            length: 300 + lv * 32,
+            thickness: 54 + lv * 7,
             timer: 0,
-            duration: 0.32
+            duration: 0.92
           })
+          const riftBurnPerTick = Math.max(8, Math.round(weaponDmg * 0.32))
           for (const e of aliveEnemies) {
             if (Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y) <= cleaveRadius + e.width / 2) {
               damageEnemy(e, weaponDmg, pc, {
                 critChanceBonus: weaponCrit.critChanceBonus,
                 critDamageBonus: weaponCrit.critDamageBonus
               })
+              if (e.isAlive && !e.isSpawning) {
+                e.applyBurn(riftBurnPerTick, 3.2 + lv * 0.22)
+              }
             }
           }
 
@@ -6455,6 +6477,136 @@ const GameContainer: React.FC<GameContainerProps> = ({
           ctx.restore()
         }
 
+        // Draw the Reaper's rift into the backdrop layer so it reads as a tear
+        // in space behind the combatants, rather than another foreground slash.
+        for (const fx of attackEffectsRef.current) {
+          if (fx.kind !== 'solar_void_rift') continue
+          const progress = Math.min(1, fx.timer / fx.duration)
+          const fadeIn = Math.min(1, progress * 7)
+          const fadeOut = Math.max(0, 1 - Math.max(0, progress - 0.72) / 0.28)
+          const open = Math.sin(Math.min(1, progress * 1.7) * Math.PI * 0.5)
+          const halfLength = (fx.length * (0.34 + open * 0.66)) / 2
+          const halfThickness = fx.thickness * (0.2 + open * 0.8)
+          const center = camera.worldToScreen(fx.x, fx.y)
+          const alpha = fadeIn * fadeOut
+          const edgeSteps = 22
+
+          ctx.save()
+          ctx.translate(center.x, center.y)
+          ctx.rotate(fx.angle)
+          ctx.globalAlpha = alpha
+
+          const edgeOffset = (index: number, side: number) => {
+            const along = index / edgeSteps
+            const jagged =
+              Math.sin(index * 2.31 + fx.timer * 8.5) * 0.16 +
+              Math.cos(index * 1.17 - fx.timer * 5.2) * 0.1
+            return side * halfThickness * Math.max(0.38, 0.78 + jagged + Math.sin(along * Math.PI) * 0.12)
+          }
+
+          ctx.beginPath()
+          for (let i = 0; i <= edgeSteps; i++) {
+            const x = -halfLength + (i / edgeSteps) * halfLength * 2
+            const y = edgeOffset(i, -1)
+            if (i === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+          }
+          for (let i = edgeSteps; i >= 0; i--) {
+            const x = -halfLength + (i / edgeSteps) * halfLength * 2
+            ctx.lineTo(x, edgeOffset(i, 1))
+          }
+          ctx.closePath()
+          ctx.fillStyle = 'rgba(2, 3, 15, 0.94)'
+          ctx.shadowColor = '#A855F7'
+          ctx.shadowBlur = 34 + open * 22
+          ctx.fill()
+          ctx.shadowBlur = 0
+
+          const coreGlow = ctx.createLinearGradient(0, -halfThickness, 0, halfThickness)
+          coreGlow.addColorStop(0, 'rgba(192, 38, 211, 0.08)')
+          coreGlow.addColorStop(0.28, 'rgba(124, 58, 237, 0.74)')
+          coreGlow.addColorStop(0.5, 'rgba(4, 5, 18, 0.98)')
+          coreGlow.addColorStop(0.72, 'rgba(249, 115, 22, 0.68)')
+          coreGlow.addColorStop(1, 'rgba(251, 146, 60, 0.06)')
+          ctx.fillStyle = coreGlow
+          ctx.fill()
+
+          for (const side of [-1, 1]) {
+            ctx.beginPath()
+            for (let i = 0; i <= edgeSteps; i++) {
+              const x = -halfLength + (i / edgeSteps) * halfLength * 2
+              const y = edgeOffset(i, side)
+              if (i === 0) ctx.moveTo(x, y)
+              else ctx.lineTo(x, y)
+            }
+            ctx.strokeStyle = side < 0 ? '#C084FC' : '#FDBA55'
+            ctx.lineWidth = 5 + open * 2
+            ctx.lineCap = 'round'
+            ctx.lineJoin = 'round'
+            ctx.shadowColor = ctx.strokeStyle
+            ctx.shadowBlur = 18
+            ctx.stroke()
+            ctx.shadowBlur = 0
+          }
+
+          // Hot filaments and drifting embers make the opening feel energetic.
+          ctx.globalCompositeOperation = 'lighter'
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath()
+            for (let step = 0; step <= 28; step++) {
+              const along = -halfLength + (step / 28) * halfLength * 2
+              const wave = Math.sin(step * 0.74 + fx.timer * (13 + i * 2) + i * 2.4)
+              const y = wave * halfThickness * (0.08 + i * 0.025)
+              if (step === 0) ctx.moveTo(along, y)
+              else ctx.lineTo(along, y)
+            }
+            ctx.strokeStyle = i === 1 ? '#FEF3C7' : i === 0 ? '#E879F9' : '#FB923C'
+            ctx.lineWidth = i === 1 ? 1.6 : 2.4
+            ctx.shadowColor = ctx.strokeStyle
+            ctx.shadowBlur = 12
+            ctx.stroke()
+            ctx.shadowBlur = 0
+          }
+
+          for (let i = 0; i < 26; i++) {
+            const seed = i * 2.39996
+            const along = Math.sin(seed * 1.7) * halfLength * 0.92
+            const drift = (fx.timer * (70 + (i % 4) * 13) + i * 19) % (halfThickness * 1.65 + 24)
+            const side = i % 2 === 0 ? -1 : 1
+            const py = side * (halfThickness * 0.24 + drift)
+            const px = along + Math.sin(seed + fx.timer * 8) * 10
+            const sparkSize = i % 5 === 0 ? 2.8 : 1.5
+            ctx.strokeStyle = i % 3 === 0 ? '#FEF08A' : i % 2 === 0 ? '#F0ABFC' : '#FDBA74'
+            ctx.lineWidth = sparkSize
+            ctx.beginPath()
+            ctx.moveTo(px - 5 - drift * 0.12, py - side * 3)
+            ctx.lineTo(px + 2, py + side * 2)
+            ctx.stroke()
+            ctx.fillStyle = '#FFF7ED'
+            ctx.beginPath()
+            ctx.arc(px + 2, py + side * 2, sparkSize * 0.72, 0, Math.PI * 2)
+            ctx.fill()
+          }
+
+          // A compact dark event horizon anchors the rift's singularity motif.
+          const coreRadius = 16 + open * 13
+          const horizon = ctx.createRadialGradient(0, 0, 1, 0, 0, coreRadius * 1.7)
+          horizon.addColorStop(0, 'rgba(0, 0, 8, 1)')
+          horizon.addColorStop(0.52, 'rgba(5, 4, 22, 0.98)')
+          horizon.addColorStop(0.78, 'rgba(168, 85, 247, 0.8)')
+          horizon.addColorStop(1, 'rgba(249, 115, 22, 0)')
+          ctx.fillStyle = horizon
+          ctx.beginPath()
+          ctx.arc(0, 0, coreRadius * 1.7, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.strokeStyle = '#FDE68A'
+          ctx.lineWidth = 1.6
+          ctx.beginPath()
+          ctx.ellipse(0, 0, coreRadius * 1.55, coreRadius * 0.62, fx.timer * 2.8, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.restore()
+        }
+
         const activeShake = dogCutsceneRef.current?.active
           ? computeBossCutsceneShake({
               elapsed: dogCutsceneRef.current.elapsed,
@@ -6777,6 +6929,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
         // Reworked Weapon Attack Effects (Lightning, Crescent Slash, Muramasa Bloodmoon, Sky Beam, Siphon, Heal Wave)
         for (const fx of attackEffectsRef.current) {
+          if (fx.kind === 'solar_void_rift') continue
           const progress = Math.min(1, fx.timer / fx.duration)
           const alpha = Math.max(0, 1 - progress)
           ctx.save()

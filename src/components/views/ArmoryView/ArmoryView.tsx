@@ -15,7 +15,7 @@ import { ALL_HEROES, getUnlockableHeroSpec } from '../../../config/unlockableHer
 import { AREA_TWO_UPGRADES, isAreaTwoUpgrade, isAreaTwoUpgradesUnlocked } from '../../../config/areaUpgrades'
 import { CRIT_CONFIG, getWeaponCritProfile, UNIVERSAL_CRIT_UPGRADES } from '../../../config/critSystem'
 import { getLocalPlayerTelemetry } from '../../../services/scores'
-import { BOSS_CRAFTING_RECIPES, PLAYABLE_BOSS_DROP_SETS } from '../../../config/bossCrafting'
+import { ALL_CRAFTING_RECIPES, PLAYABLE_BOSS_DROP_SETS } from '../../../config/bossCrafting'
 import { GAME_CONFIG, getUpgradeOverdriveHint } from '../../../config/gameConstants'
 import {
   getHeroAbility,
@@ -772,7 +772,7 @@ export function ArmoryView() {
               resetBuilder()
             }}
           >
-            Crafting ({BOSS_CRAFTING_RECIPES.length} Recipes)
+            Crafting ({ALL_CRAFTING_RECIPES.length} Recipes)
           </Button>
           <Button
             variant={activeTab === 'loadouts' ? 'primary' : 'secondary'}
@@ -982,20 +982,24 @@ export function ArmoryView() {
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
               <h2 className="text-2xl font-bold text-cyan-accent">Boss Drop Crafting</h2>
               <p className="text-sm text-gray-400 mt-1">
-                Defeat bosses in either arena to collect their three materials. Each recipe consumes
-                one of each material and adds usable gear to your inventory.
+                Defeat bosses to collect materials. Some advanced recipes also consume existing
+                weapons or accessories to forge new gear.
               </p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {BOSS_CRAFTING_RECIPES.map((recipe) => {
+              {ALL_CRAFTING_RECIPES.map((recipe) => {
                 const boss = PLAYABLE_BOSS_DROP_SETS.find((entry) => entry.id === recipe.bossId)
                 const item = getShopItemById(recipe.itemId)
                 if (!boss || !item) return null
-                const canCraft = recipe.materials.every(
-                  ({ materialId, quantity }) =>
-                    (shopState.bossMaterials[materialId] || 0) >= quantity
-                )
+                const canCraft =
+                  recipe.materials.every(
+                    ({ materialId, quantity }) =>
+                      (shopState.bossMaterials[materialId] || 0) >= quantity
+                  ) &&
+                  (recipe.gearIngredients || []).every(
+                    ({ itemId, quantity }) => getTotalStackCount(shopState, itemId) >= quantity
+                  )
                 const ownedCount = getTotalStackCount(shopState, item.id)
 
                 return (
@@ -1046,6 +1050,32 @@ export function ArmoryView() {
                       </div>
                     </div>
 
+                    {recipe.gearIngredients && recipe.gearIngredients.length > 0 && (
+                      <div>
+                        <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-2">
+                          Required Gear
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {recipe.gearIngredients.map(({ itemId, quantity }) => {
+                            const ingredient = getShopItemById(itemId)
+                            return (
+                              <div
+                                key={itemId}
+                                className="rounded border border-purple-400/30 bg-gray-950/60 p-3"
+                              >
+                                <p className="text-sm font-semibold text-white">
+                                  {ingredient?.name || itemId}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-1">
+                                  Need ×{quantity} · Owned ×{getTotalStackCount(shopState, itemId)}
+                                </p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     <div>
                       <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-2">
                         Required Materials
@@ -1078,7 +1108,7 @@ export function ArmoryView() {
                       disabled={!canCraft}
                       onClick={() => handleCraftRecipe(recipe.id)}
                     >
-                      {canCraft ? `Craft ${item.name}` : 'Missing Boss Materials'}
+                      {canCraft ? `Craft ${item.name}` : 'Missing Required Inputs'}
                     </Button>
                   </article>
                 )

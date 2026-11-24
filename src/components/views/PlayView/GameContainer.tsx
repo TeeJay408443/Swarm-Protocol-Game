@@ -3564,6 +3564,78 @@ const GameContainer: React.FC<GameContainerProps> = ({
           playSoundRef.current('shoot')
           return
         }
+        case 'wpn_crafted_solar_void_reaper': {
+          const targetCenter = nearest
+            ? nearest.getCenter()
+            : {
+                x: pc.x + Math.cos(player.facingAngle) * 240,
+                y: pc.y + Math.sin(player.facingAngle) * 240
+              }
+          const baseAngle = Math.atan2(targetCenter.y - pc.y, targetCenter.x - pc.x)
+          const cleaveRadius = 142 + lv * 18
+          attackEffectsRef.current.push({
+            kind: 'slash',
+            x: pc.x,
+            y: pc.y,
+            angle: baseAngle,
+            radius: cleaveRadius,
+            color: isCloneCast ? '#C084FC' : isLv5 ? '#FEF08A' : '#F97316',
+            timer: 0,
+            duration: 0.32
+          })
+          for (const e of aliveEnemies) {
+            if (Math.hypot(e.getCenter().x - pc.x, e.getCenter().y - pc.y) <= cleaveRadius + e.width / 2) {
+              damageEnemy(e, weaponDmg, pc, {
+                critChanceBonus: weaponCrit.critChanceBonus,
+                critDamageBonus: weaponCrit.critDamageBonus
+              })
+            }
+          }
+
+          voidVorticesRef.current.push({
+            x: targetCenter.x,
+            y: targetCenter.y,
+            radius: 92 + lv * 15,
+            timer: 0,
+            duration: 1.8 + lv * 0.12,
+            damage: Math.max(1, Math.round(weaponDmg * 0.52)),
+            isLv5
+          })
+
+          const targetDist = Math.hypot(targetCenter.x - pc.x, targetCenter.y - pc.y)
+          solarFlailsRef.current.push({
+            x: pc.x,
+            y: pc.y,
+            originX: pc.x,
+            originY: pc.y,
+            angle: baseAngle,
+            maxDistance: Math.max(185, Math.min(320, targetDist + 45 + lv * 12)),
+            traveled: 0,
+            phase: 'outbound',
+            apexTimer: 0,
+            apexDuration: 0.22,
+            speed: 560 + lv * 30,
+            spinAngle: 0,
+            headRadius: 24 + lv * 2,
+            damage: Math.max(1, Math.round(weaponDmg * 0.8)),
+            burnDamage: Math.max(4, Math.round(weaponDmg * 0.24)),
+            burnRadius: 56 + lv * 10,
+            burnDuration: 2 + lv * 0.2,
+            isLv5,
+            isCloneCast,
+            cloneId,
+            trailDropDist: 0,
+            critChanceBonus: weaponCrit.critChanceBonus,
+            critDamageBonus: weaponCrit.critDamageBonus,
+            hitCooldowns: new Map(),
+            timer: 0,
+            trail: [{ x: pc.x, y: pc.y }]
+          })
+
+          triggerMount(baseAngle)
+          playSoundRef.current('shoot')
+          return
+        }
         case 'wpn_muramasa': {
           const heroId = player.hero?.id || 'hero_01'
           const muramasaCfg = getMuramasaWeaponConfig(weaponDmg, lv, heroId)

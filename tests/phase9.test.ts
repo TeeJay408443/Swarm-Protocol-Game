@@ -60,6 +60,7 @@ import {
 } from '../src/config/arenas'
 import {
   BOSS_CRAFTING_RECIPES,
+  GEAR_FUSION_RECIPES,
   getBossDropSetId,
   PLAYABLE_BOSS_DROP_SETS
 } from '../src/config/bossCrafting'
@@ -3023,6 +3024,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getWeaponVisualBehavior('wpn_solar_flail').kind, 'flail_whip')
     assert.equal(getWeaponVisualBehavior('wpn_phantom_sniper').kind, 'ranged_recoil')
     assert.equal(getWeaponVisualBehavior('wpn_chrono_gatling').kind, 'gatling_spin')
+    assert.equal(getWeaponVisualBehavior('wpn_crafted_solar_void_reaper').kind, 'melee_swing')
     assert.equal(getWeaponVisualBehavior('upg_a2_03').kind, 'spear_thrust')
     assert.equal(getWeaponVisualBehavior('wpn_storm_glaive').kind, 'glaive_spin')
 
@@ -3747,6 +3749,68 @@ describe('Boss drop crafting', () => {
     const secondCraft = craftBossRecipe(userId, recipe.id)
     assert.equal(secondCraft.success, false, 'spent materials cannot be reused')
     assert.equal(getTotalStackCount(getShopAccountState(userId), recipe.itemId), 1)
+  })
+
+  it('fuses owned weapons with a boss drop into the Solar Void Reaper', () => {
+    const userId = 'solar_void_reaper_fusion_test'
+    const recipe = GEAR_FUSION_RECIPES.find(
+      (entry) => entry.id === 'recipe_solar_void_reaper'
+    )!
+    const starheart = 'mat_astral_scourge_starheart'
+    creditShopCoins(userId, 10_000)
+    const legendaryPool = SHOP_CATALOG.filter((item) => item.rarity === 'legendary')
+    for (const itemId of ['wpn_void_reaper', 'wpn_solar_flail']) {
+      const index = legendaryPool.findIndex((entry) => entry.id === itemId)
+      assert.ok(index >= 0, `${itemId} should be available in the legendary crate pool`)
+      let rngCall = 0
+      const opened = openSupplyCrate(userId, 'crate_mythic', () =>
+        rngCall++ === 0 ? 0.9 : (index + 0.5) / legendaryPool.length
+      )
+      assert.equal(opened.success, true)
+      assert.equal(opened.item?.id, itemId)
+    }
+    assert.equal(awardBossDropsForEnemy(userId, 'boss_a2_20').success, true)
+    assert.equal(equipShopWeapon(userId, 'wpn_void_reaper').success, true)
+
+    const crafted = craftBossRecipe(userId, recipe.id)
+    const state = getShopAccountState(userId)
+    assert.equal(crafted.success, true)
+    assert.equal(crafted.item?.id, 'wpn_crafted_solar_void_reaper')
+    assert.equal(getTotalStackCount(state, 'wpn_void_reaper'), 0)
+    assert.equal(getTotalStackCount(state, 'wpn_solar_flail'), 0)
+    assert.equal(state.bossMaterials[starheart] || 0, 0)
+    assert.equal(state.equippedWeaponId, null, 'consumed equipped gear should be unequipped')
+    assert.equal(getTotalStackCount(state, recipe.itemId), 1)
+
+    const missingInputs = craftBossRecipe(userId, recipe.id)
+    assert.equal(missingInputs.success, false)
+  })
+
+  it('crafts combination accessories from existing accessories and boss drops', () => {
+    const userId = 'eclipse_aegis_fusion_test'
+    const omegaRecipe = BOSS_CRAFTING_RECIPES.find(
+      (entry) => entry.bossId === 'omega_overlord'
+    )!
+    const seraphRecipe = BOSS_CRAFTING_RECIPES.find(
+      (entry) => entry.bossId === 'solar_archon_seraph'
+    )!
+    const fusionRecipe = GEAR_FUSION_RECIPES.find(
+      (entry) => entry.id === 'recipe_eclipse_aegis'
+    )!
+    assert.equal(awardBossDropsForEnemy(userId, 'ene_04', true).success, true)
+    assert.equal(awardBossDropsForEnemy(userId, 'boss_a2_15').success, true)
+    assert.equal(craftBossRecipe(userId, omegaRecipe.id).success, true)
+    assert.equal(craftBossRecipe(userId, seraphRecipe.id).success, true)
+    assert.equal(awardBossDropsForEnemy(userId, 'boss_a2_20').success, true)
+
+    const crafted = craftBossRecipe(userId, fusionRecipe.id)
+    const state = getShopAccountState(userId)
+    assert.equal(crafted.success, true)
+    assert.equal(crafted.item?.id, 'acc_crafted_eclipse_aegis')
+    assert.equal(getTotalStackCount(state, 'acc_crafted_omega_overlord'), 0)
+    assert.equal(getTotalStackCount(state, 'acc_crafted_solar_archon_seraph'), 0)
+    assert.equal(getTotalStackCount(state, 'acc_crafted_eclipse_aegis'), 1)
+    assert.equal(getShopAccessoryById('acc_crafted_vortex_harness')?.id, 'acc_crafted_vortex_harness')
   })
 })
 

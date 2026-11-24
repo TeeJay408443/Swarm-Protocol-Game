@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { getLocalPlayerTelemetry } from './scores'
 import type { UpgradesRow } from '../types/database'
 import {
-  BOSS_CRAFTING_RECIPES,
+  ALL_CRAFTING_RECIPES,
   getBossDropSetId,
   PLAYABLE_BOSS_DROP_SETS
 } from '../config/bossCrafting'
@@ -795,6 +795,22 @@ export const CRAFTED_WEAPONS: ShopWeaponItem[] = [
     special: 'Rift-charged starburst',
     function_desc: 'A mythic lance forged from the Astral Scourge’s starheart and riftborne hide.',
     accentColor: '#34D399'
+  },
+  {
+    id: 'wpn_crafted_solar_void_reaper',
+    kind: 'weapon',
+    name: 'Solar Void Reaper',
+    category: 'Melee Weapon',
+    rarity: 'mythic',
+    tierLabel: 'Eclipse Forged',
+    price: 0,
+    salvageValue: 1120,
+    damage: 128,
+    cooldown_s: 1.3,
+    special: 'Solar cleave + gravity vortex',
+    function_desc:
+      'Fuses the Void Singularity Scythe and Solar Flare Flail into a burning crescent that opens a crushing starheart vortex.',
+    accentColor: '#F97316'
   }
 ]
 
@@ -837,6 +853,34 @@ export const CRAFTED_ACCESSORIES: ShopAccessoryItem[] = [
     function_desc: 'A solar lattice that focuses the Seraph’s radiant power into each strike.',
     accentColor: '#FACC15',
     bonuses: { damageMultiplier: 0.18, critChance: 0.12, speedMultiplier: 0.08 }
+  },
+  {
+    id: 'acc_crafted_eclipse_aegis',
+    kind: 'accessory',
+    name: 'Eclipse Aegis',
+    slotLabel: 'Eclipse Core',
+    rarity: 'mythic',
+    price: 0,
+    salvageValue: 1040,
+    statSummary: '+85 Max HP • +18% Damage • +10% Crit Chance',
+    function_desc:
+      'A fused reactor shield powered by the Overlord and Seraph, stabilized with an Astral Scourge starheart.',
+    accentColor: '#FB923C',
+    bonuses: { bonusHp: 85, damageMultiplier: 0.18, critChance: 0.1 }
+  },
+  {
+    id: 'acc_crafted_vortex_harness',
+    kind: 'accessory',
+    name: 'Vortex Harness',
+    slotLabel: 'Gravity Harness',
+    rarity: 'legendary',
+    price: 0,
+    salvageValue: 840,
+    statSummary: '+70 Max HP • -12% Damage Taken • +8% Fire Rate',
+    function_desc:
+      'A Warden-plated harness powered by the Colossus singularity drive for durable, rapid strikes.',
+    accentColor: '#38BDF8',
+    bonuses: { bonusHp: 70, damageReduction: 0.12, cooldownReduction: 0.08 }
   }
 ]
 
@@ -1316,6 +1360,27 @@ function addItemStackToRecord(
   }
 }
 
+function consumeItemStackFromRecord(
+  gearStacks: Record<string, number[]>,
+  itemId: string,
+  amount: number
+): Record<string, number[]> {
+  const nextStacks = normalizeStarArray(gearStacks[itemId])
+  let remaining = Math.max(0, Math.floor(amount))
+
+  for (let stars = 0; stars <= MAX_GEAR_STARS && remaining > 0; stars++) {
+    const available = nextStacks[stars] || 0
+    const consumed = Math.min(available, remaining)
+    nextStacks[stars] = available - consumed
+    remaining -= consumed
+  }
+
+  const next = { ...gearStacks }
+  if (nextStacks.some((count) => count > 0)) next[itemId] = nextStacks
+  else delete next[itemId]
+  return next
+}
+
 function normalizeAccountState(raw: ShopAccountState, effectiveUserId: string): ShopAccountState {
   const normalizedStacks: Record<string, number[]> = {}
   if (raw.gearStacks && typeof raw.gearStacks === 'object') {
@@ -1488,14 +1553,14 @@ export function awardBossDropsForEnemy(
 }
 
 /**
- * Atomically consume a recipe's boss materials and add its resulting gear.
+ * Atomically consume a recipe's boss materials and gear ingredients, then add its result.
  */
 export function craftBossRecipe(
   userId: string | null | undefined,
   recipeId: string
 ): BossLootResult {
   const current = getShopAccountState(userId)
-  const recipe = BOSS_CRAFTING_RECIPES.find((entry) => entry.id === recipeId)
+  const recipe = ALL_CRAFTING_RECIPES.find((entry) => entry.id === recipeId)
   if (!recipe) {
     return { success: false, state: current, error: 'Crafting recipe not found.' }
   }
@@ -1520,13 +1585,34 @@ export function craftBossRecipe(
     }
   }
 
+  const missingGear = recipe.gearIngredients?.find(
+    ({ itemId, quantity }) => getTotalStackCount(current, itemId) < quantity
+  )
+  if (missingGear) {
+    const gearName = getShopItemById(missingGear.itemId)?.name || 'required gear'
+    return {
+      success: false,
+      state: current,
+      item,
+      error: `Not enough ${gearName}.`
+    }
+  }
+
   const bossMaterials = { ...current.bossMaterials }
   for (const { materialId, quantity } of recipe.materials) {
     const remaining = bossMaterials[materialId] - quantity
     if (remaining > 0) bossMaterials[materialId] = remaining
     else delete bossMaterials[materialId]
   }
-  const gearStacks = addItemStackToRecord(current.gearStacks, item.id, 0, 1)
+  let gearStacks = { ...current.gearStacks }
+  for (const ingredient of recipe.gearIngredients || []) {
+    gearStacks = consumeItemStackFromRecord(
+      gearStacks,
+      ingredient.itemId,
+      ingredient.quantity
+    )
+  }
+  gearStacks = addItemStackToRecord(gearStacks, item.id, 0, 1)
   const next = normalizeAccountState(
     {
       ...current,

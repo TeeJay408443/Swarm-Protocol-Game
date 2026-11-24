@@ -18,6 +18,7 @@ export interface BossCraftingRecipe {
   bossId: string
   itemId: string
   materials: Array<{ materialId: string; quantity: number }>
+  gearIngredients?: Array<{ itemId: string; quantity: number }>
 }
 
 function createMaterials(
@@ -123,6 +124,44 @@ export const BOSS_CRAFTING_RECIPES: BossCraftingRecipe[] = PLAYABLE_BOSS_DROP_SE
     }))
   })
 )
+
+export const GEAR_FUSION_RECIPES: BossCraftingRecipe[] = [
+  {
+    id: 'recipe_solar_void_reaper',
+    bossId: 'astral_scourge',
+    itemId: 'wpn_crafted_solar_void_reaper',
+    gearIngredients: [
+      { itemId: 'wpn_void_reaper', quantity: 1 },
+      { itemId: 'wpn_solar_flail', quantity: 1 }
+    ],
+    materials: [{ materialId: 'mat_astral_scourge_starheart', quantity: 1 }]
+  },
+  {
+    id: 'recipe_eclipse_aegis',
+    bossId: 'astral_scourge',
+    itemId: 'acc_crafted_eclipse_aegis',
+    gearIngredients: [
+      { itemId: 'acc_crafted_omega_overlord', quantity: 1 },
+      { itemId: 'acc_crafted_solar_archon_seraph', quantity: 1 }
+    ],
+    materials: [{ materialId: 'mat_astral_scourge_starheart', quantity: 1 }]
+  },
+  {
+    id: 'recipe_vortex_harness',
+    bossId: 'astral_vortex_colossus',
+    itemId: 'acc_crafted_vortex_harness',
+    gearIngredients: [
+      { itemId: 'wpn_crafted_astral_vortex_colossus', quantity: 1 },
+      { itemId: 'acc_crafted_astral_bastion_warden', quantity: 1 }
+    ],
+    materials: [{ materialId: 'mat_astral_vortex_colossus_singularity', quantity: 1 }]
+  }
+]
+
+export const ALL_CRAFTING_RECIPES: BossCraftingRecipe[] = [
+  ...BOSS_CRAFTING_RECIPES,
+  ...GEAR_FUSION_RECIPES
+]
 
 export const BOSS_DROP_MATERIALS: BossDropMaterial[] = PLAYABLE_BOSS_DROP_SETS.flatMap(
   (boss) => boss.materials

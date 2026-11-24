@@ -330,6 +330,14 @@ const WEAPON_BEHAVIORS: Record<string, WeaponVisualBehavior> = {
     accentColor: '#F5D0FE',
     label: 'Void Scythe'
   },
+  wpn_crafted_solar_void_reaper: {
+    kind: 'melee_swing',
+    duration: 0.34,
+    primaryColor: '#F97316',
+    secondaryColor: '#312E81',
+    accentColor: '#FEF08A',
+    label: 'Solar Void Reaper'
+  },
   wpn_muramasa: {
     kind: 'melee_swing',
     duration: 0.3,
@@ -448,8 +456,13 @@ function drawWeaponGeometry(
   }
 
   // 2. Scythes (Void Singularity Scythe, Grim Reaper Soul Harvester)
-  if (weaponId === 'wpn_void_reaper' || weaponId === 'wpn_grim_reaper') {
-    const shaftLen = weaponId === 'wpn_grim_reaper' ? 34 : 31
+  if (
+    weaponId === 'wpn_void_reaper' ||
+    weaponId === 'wpn_grim_reaper' ||
+    weaponId === 'wpn_crafted_solar_void_reaper'
+  ) {
+    const shaftLen =
+      weaponId === 'wpn_grim_reaper' ? 34 : weaponId === 'wpn_crafted_solar_void_reaper' ? 36 : 31
     // Dark metal shaft
     ctx.strokeStyle = '#E2E8F0'
     ctx.lineWidth = 3.2
@@ -487,6 +500,17 @@ function drawWeaponGeometry(
     ctx.beginPath()
     ctx.arc(shaftLen - 2, -1, 3.3, 0, Math.PI * 2)
     ctx.fill()
+    if (weaponId === 'wpn_crafted_solar_void_reaper') {
+      ctx.strokeStyle = glow
+      ctx.lineWidth = 1.4
+      ctx.beginPath()
+      ctx.arc(shaftLen - 2, -1, 7, -0.9, 1.7)
+      ctx.stroke()
+      ctx.fillStyle = '#F97316'
+      ctx.beginPath()
+      ctx.arc(shaftLen - 2, -1, 2.1, 0, Math.PI * 2)
+      ctx.fill()
+    }
     return
   }
 

@@ -2583,6 +2583,34 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(phaseTwoTheme.line1, "IT'S NOT OVER YET")
   })
 
+  it('keeps Astral Scourge moving through the player after a phase-two ram', () => {
+    const scourge = new Enemy({
+      x: 100,
+      y: 470,
+      enemyData: AREA_TWO_BOSSES[3],
+      isBoss: true,
+      isFinalBoss: true
+    })
+    const player = new Player({ x: 420, y: 470, hero: heroes[0] })
+    scourge.isSpawning = false
+    scourge.bossPhase = 2
+    scourge.specialCooldown = 100
+    scourge.shootCooldown = 100
+    const dashState = scourge as unknown as { dogDashCooldown: number }
+    dashState.dogDashCooldown = 0.01
+
+    const playerCenter = player.getCenter()
+    for (let step = 0; step < 26; step++) {
+      scourge.update(0.05, player)
+    }
+
+    assert.ok(
+      scourge.getCenter().x > playerCenter.x + 100,
+      'The ram should carry the boss past the player instead of stopping on contact'
+    )
+    assert.ok(scourge.velocity.x > 0, 'The boss should retain its forward momentum after crossing')
+  })
+
   it('locks Astral Scourge into a formed circle and keeps weighted grids stationary', () => {
     const scourge = new Enemy({
       x: 500,

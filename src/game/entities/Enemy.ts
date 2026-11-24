@@ -318,6 +318,7 @@ export class Enemy {
   private dogDashTimer: number = 0
   private dogDashCooldown: number = 4.2
   private dogDashDir: Vector2 = { x: 1, y: 0 }
+  private astralRamCoastTimer: number = 0
 
   get isWormBoss(): boolean {
     return this.isDevourerOfGods || this.isAstralScourge
@@ -925,7 +926,10 @@ export class Enemy {
 
     if (this.dogDashTimer > 0) {
       this.dogDashTimer = Math.max(0, this.dogDashTimer - deltaTime)
-      const dashMult = astralPhaseTwo ? 3.2 : this.isEnraged ? 2.85 : 2.35
+      if (astralPhaseTwo && this.dogDashTimer === 0) {
+        this.astralRamCoastTimer = 0.42
+      }
+      const dashMult = astralPhaseTwo ? 3.8 : this.isEnraged ? 2.85 : 2.35
       this.velocity = {
         x: this.dogDashDir.x * this.speed * dashMult,
         y: this.dogDashDir.y * this.speed * dashMult
@@ -934,14 +938,24 @@ export class Enemy {
       return
     }
 
+    if (astralPhaseTwo && this.astralRamCoastTimer > 0) {
+      this.astralRamCoastTimer = Math.max(0, this.astralRamCoastTimer - deltaTime)
+      this.velocity = {
+        x: this.dogDashDir.x * this.speed * 3.8,
+        y: this.dogDashDir.y * this.speed * 3.8
+      }
+      this.direction = this.dogDashDir
+      return
+    }
+
     this.dogDashCooldown -= deltaTime
     if (this.dogDashCooldown <= 0 && dist > 110) {
-      this.dogDashTimer = astralPhaseTwo ? 0.72 : this.isEnraged ? 0.96 : 0.84
+      this.dogDashTimer = astralPhaseTwo ? 0.9 : this.isEnraged ? 0.96 : 0.84
       this.dogDashCooldown = astralPhaseTwo ? 1.45 : this.isEnraged ? 2.9 : 4.0
       this.dogDashDir = toward
       this.velocity = {
-        x: toward.x * this.speed * (astralPhaseTwo ? 3.2 : 2.4),
-        y: toward.y * this.speed * (astralPhaseTwo ? 3.2 : 2.4)
+        x: toward.x * this.speed * (astralPhaseTwo ? 3.8 : 2.4),
+        y: toward.y * this.speed * (astralPhaseTwo ? 3.8 : 2.4)
       }
       this.direction = toward
       return
@@ -1142,6 +1156,9 @@ export class Enemy {
       ? this.shootCooldownMax
       : Math.min(this.shootCooldown, 0.25)
     this.specialCooldown = 0.2
+    this.dogDashTimer = 0
+    this.dogDashCooldown = 0.8
+    this.astralRamCoastTimer = 0
     this.telegraphs = []
     this.projectiles = []
     this.aoeProjectiles = []

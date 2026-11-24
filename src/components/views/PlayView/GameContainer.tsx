@@ -6,6 +6,7 @@
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
+import astralGalaxyBackgroundUrl from '../../../../attached_assets/image_1795561136880.png'
 import { Camera } from '../../../game/engine/Camera'
 import { InputManager } from '../../../game/engine/InputManager'
 import { isVisiblePlayerWeaponId, Player } from '../../../game/entities/Player'
@@ -852,6 +853,17 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const astralGalaxyImageRef = useRef<HTMLImageElement | null>(null)
+
+  useEffect(() => {
+    const galaxyImage = new Image()
+    galaxyImage.decoding = 'async'
+    galaxyImage.src = astralGalaxyBackgroundUrl
+    astralGalaxyImageRef.current = galaxyImage
+    return () => {
+      astralGalaxyImageRef.current = null
+    }
+  }, [])
 
   // React UI state (synced periodically or on discrete events)
   const [gameState, setGameState] = useState<EngineState>('menu')
@@ -6310,8 +6322,51 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
         // --- RENDER FRAME ---
         const currentArea = areaRef.current
+        const astralScourgeBackdropActive =
+          currentArea.id === 'astral_citadel' &&
+          enemiesRef.current.some((enemy) => enemy.isAstralScourge && enemy.isAlive)
         ctx.fillStyle = currentArea.floorColor
         ctx.fillRect(0, 0, canvas.width, canvas.height)
+        if (astralScourgeBackdropActive) {
+          const galaxyImage = astralGalaxyImageRef.current
+          ctx.save()
+          if (galaxyImage?.complete && galaxyImage.naturalWidth > 0) {
+            ctx.imageSmoothingEnabled = true
+            ctx.imageSmoothingQuality = 'high'
+            ctx.globalAlpha = 0.96
+            ctx.drawImage(galaxyImage, 0, 0, canvas.width, canvas.height)
+          } else {
+            const fallbackGlow = ctx.createRadialGradient(
+              canvas.width * 0.48,
+              canvas.height * 0.42,
+              4,
+              canvas.width * 0.48,
+              canvas.height * 0.42,
+              Math.max(canvas.width, canvas.height) * 0.8
+            )
+            fallbackGlow.addColorStop(0, '#171333')
+            fallbackGlow.addColorStop(0.6, '#090a20')
+            fallbackGlow.addColorStop(1, '#02040f')
+            ctx.fillStyle = fallbackGlow
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
+          }
+          ctx.globalAlpha = 1
+          ctx.fillStyle = 'rgba(12, 8, 38, 0.18)'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          const galaxyVignette = ctx.createRadialGradient(
+            canvas.width / 2,
+            canvas.height / 2,
+            canvas.height * 0.14,
+            canvas.width / 2,
+            canvas.height / 2,
+            Math.max(canvas.width, canvas.height) * 0.82
+          )
+          galaxyVignette.addColorStop(0, 'rgba(2, 4, 20, 0)')
+          galaxyVignette.addColorStop(1, 'rgba(2, 3, 16, 0.5)')
+          ctx.fillStyle = galaxyVignette
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.restore()
+        }
 
         const activeShake = dogCutsceneRef.current?.active
           ? computeBossCutsceneShake({

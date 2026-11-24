@@ -126,6 +126,8 @@ import {
   checkEnemyAoeHit,
   Enemy,
   getAstralOrbitalGridLines,
+  getAstralScourgePhaseTwoAttackKind,
+  getAstralTargetedLaserLines,
   getRotatingCrossLaserSegments,
   getClosingSideLaserRects,
   getClosingSideLaserTrackRects,
@@ -2534,7 +2536,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(phaseTwoTheme.line1, "IT'S NOT OVER YET")
   })
 
-  it('gives Astral Scourge a thin orbital grid instead of rotating cross lasers in phase two', () => {
+  it('gives Astral Scourge a stationary random grid, aimed lasers, and aggressive phase-two movement', () => {
     const scourge = new Enemy({
       x: 500,
       y: 500,
@@ -2553,11 +2555,11 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(grid?.kind, 'astral_orbital_grid')
     assert.ok(grid?.gridLines?.length === 6 || grid?.gridLines?.length === 8)
     assert.ok((grid?.gridLines?.filter((line) => line.aimMode === 'random').length ?? 0) >= 3)
-    assert.ok((grid?.gridLines?.filter((line) => line.aimMode === 'player').length ?? 0) >= 3)
+    assert.ok(grid?.gridLines?.every((line) => line.aimMode === 'random'))
     assert.ok(grid?.gridLines?.every((line) => line.width <= 6))
     assert.ok(grid?.gridOffsets?.length === 3 || grid?.gridOffsets?.length === 4)
     assert.equal(grid?.orbitRadius, ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS)
-    assert.equal(grid?.chargeDuration, 3.6)
+    assert.equal(grid?.chargeDuration, 5)
     assert.equal(grid?.laserDuration, 1.8)
     assert.equal(grid?.escapeDuration, 1.35)
     assert.ok(Math.abs((grid?.activeDuration ?? 0) - 3.15) < 0.001)
@@ -2567,17 +2569,24 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
 
     const startingOrbitAngle = grid!.orbitAngle
+    const fixedOrbitCenter = { x: grid!.orbitCenterX!, y: grid!.orbitCenterY! }
+    player.x += 45
     scourge.projectiles = []
     scourge.shootCooldown = 0
+    scourge.slowMultiplier = 0.55
     scourge.update(0.1, player)
     assert.equal(scourge.projectiles.length, 0)
     assert.notEqual(grid!.orbitAngle, startingOrbitAngle)
     assert.ok(
       Math.abs(
-        Math.hypot(scourge.getCenter().x - player.getCenter().x, scourge.getCenter().y - player.getCenter().y) -
-          grid!.orbitRadius!
+        Math.hypot(
+          scourge.getCenter().x - fixedOrbitCenter.x,
+          scourge.getCenter().y - fixedOrbitCenter.y
+        ) - grid!.orbitRadius!
       ) < 2
     )
+    assert.equal(grid!.orbitCenterX, fixedOrbitCenter.x)
+    assert.equal(grid!.orbitCenterY, fixedOrbitCenter.y)
 
     grid!.hasTriggered = true
     grid!.activeTimer = grid!.laserDuration!
@@ -2598,17 +2607,57 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const nextAttacks = Array.from({ length: 5 }, () => scourge.spawnTelegraphedAttack())
     assert.ok(nextAttacks.every((attack) => attack?.kind !== 'rotating_cross_lasers'))
     assert.ok(nextAttacks.every((attack) => attack?.kind !== 'cosmic_orb_barrage'))
+    assert.ok(
+      nextAttacks.every((attack) =>
+        ['astral_orbital_grid', 'astral_targeted_lasers', 'cosmic_laser_walls', 'cosmic_portal_lunge'].includes(
+          attack?.kind ?? ''
+        )
+      )
+    )
+
+    const targeted = scourge.spawnTelegraphedAttack('astral_targeted_lasers')
+    assert.equal(targeted?.gridLines?.length, 3)
+    assert.ok(targeted?.gridLines?.every((line) => line.aimMode === 'targeted' && line.width <= 6))
+    assert.equal(targeted?.targetLockTime, 0.28)
+    assert.equal(
+      checkBossTelegraphHit(targeted!, {
+        x: player.getCenter().x,
+        y: player.getCenter().y,
+        radius: 10
+      }),
+      true
+    )
 
     scourge.telegraphs = []
     scourge.projectiles = []
     scourge.shootCooldown = 0
     scourge.specialCooldown = 100
+    const distanceBeforeRam = Math.hypot(
+      scourge.getCenter().x - player.getCenter().x,
+      scourge.getCenter().y - player.getCenter().y
+    )
     scourge.update(0.01, player)
     assert.equal(scourge.projectiles.length, 3)
+    const distanceAfterRam = Math.hypot(
+      scourge.getCenter().x - player.getCenter().x,
+      scourge.getCenter().y - player.getCenter().y
+    )
+    assert.ok(distanceAfterRam < distanceBeforeRam)
 
-    const lines = getAstralOrbitalGridLines({ x: 0, y: 0 }, Math.PI / 4, Math.PI / 2)
+    const lines = getAstralOrbitalGridLines({ x: 0, y: 0 }, Math.PI / 4, [-120, 0, 120])
     assert.equal(lines.length, 6)
     assert.ok(lines.every((line) => line.width < 10))
+    const perpendicularFamily = lines[3]
+    assert.ok(Math.abs(Math.abs(Math.atan2(
+      perpendicularFamily.y2 - perpendicularFamily.y1,
+      perpendicularFamily.x2 - perpendicularFamily.x1
+    ) - Math.atan2(lines[0].y2 - lines[0].y1, lines[0].x2 - lines[0].x1)) - Math.PI / 2) < 0.001)
+
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0), 'astral_orbital_grid')
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0.25), 'astral_targeted_lasers')
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0.5), 'cosmic_laser_walls')
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0.75), 'cosmic_portal_lunge')
+    assert.equal(getAstralTargetedLaserLines({ x: 0, y: 0 }, { x: 100, y: 0 }).length, 3)
   })
 
   it('sets base crit chance to 1% and introduces unlockable Storm Assassin hero (hero_07)', async () => {

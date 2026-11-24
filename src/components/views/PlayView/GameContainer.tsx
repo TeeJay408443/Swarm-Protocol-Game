@@ -5842,6 +5842,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'singularity_grid' ||
                   telegraph.kind === 'cosmic_laser_walls' ||
                   telegraph.kind === 'astral_orbital_grid' ||
+                  telegraph.kind === 'astral_targeted_lasers' ||
                   telegraph.kind === 'cosmic_portal_lunge' ||
                   telegraph.kind === 'cosmic_orb_barrage'
 
@@ -5876,7 +5877,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'rotating_cross_lasers' ||
                   telegraph.kind === 'singularity_grid' ||
                   telegraph.kind === 'cosmic_laser_walls' ||
-                  telegraph.kind === 'astral_orbital_grid'
+                  telegraph.kind === 'astral_orbital_grid' ||
+                  telegraph.kind === 'astral_targeted_lasers'
                 ) {
                   // Sweeping/active beams stay lethal across frames and only lock out after actually landing
                   if (!telegraph.hasDamagedPlayer && checkBossTelegraphHit(telegraph, playerCircle)) {

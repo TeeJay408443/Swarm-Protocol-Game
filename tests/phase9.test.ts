@@ -120,6 +120,7 @@ import { isVisiblePlayerWeaponId, Player } from '../src/game/entities/Player'
 import {
   BossArenaBounds,
   ClosingSideLaserMode,
+  ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS,
   checkBossTelegraphHit,
   checkAstralScourgeTailHit,
   checkDevourerSegmentHit,
@@ -2596,8 +2597,11 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     scourge.bossPhase = 2
     scourge.specialCooldown = 100
     scourge.shootCooldown = 100
-    const dashState = scourge as unknown as { dogDashCooldown: number }
-    dashState.dogDashCooldown = 0.01
+    const movementState = scourge as unknown as {
+      dogDashCooldown: number
+      astralRamSpeed: number
+    }
+    movementState.dogDashCooldown = 100
 
     const playerCenter = player.getCenter()
     for (let step = 0; step < 26; step++) {
@@ -2609,6 +2613,68 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       'The ram should carry the boss past the player instead of stopping on contact'
     )
     assert.ok(scourge.velocity.x > 0, 'The boss should retain its forward momentum after crossing')
+    assert.ok(movementState.astralRamSpeed > 0, 'Normal pursuit should accelerate into the ram')
+    assert.equal(
+      movementState.dogDashCooldown,
+      100,
+      'Phase-two ramming must not depend on the separate periodic dash cooldown'
+    )
+  })
+
+  it('enforces a 20-second cooldown after a completed Astral orbital grid', () => {
+    const scourge = new Enemy({
+      x: 500,
+      y: 500,
+      enemyData: AREA_TWO_BOSSES[3],
+      isBoss: true,
+      isFinalBoss: true
+    })
+    const player = new Player({ x: 700, y: 680, hero: heroes[0] })
+    scourge.isSpawning = false
+    scourge.bossPhase = 2
+    scourge.specialCooldown = 100
+    scourge.shootCooldown = 100
+    scourge.update(0.01, player)
+
+    const grid = scourge.spawnTelegraphedAttack('astral_orbital_grid')!
+    grid.chargeTimer = grid.chargeDuration - 0.01
+    scourge.update(0.02, player)
+    assert.equal(grid.hasTriggered, true)
+
+    grid.activeTimer = grid.activeDuration - 0.001
+    scourge.update(0.002, player)
+    assert.equal(scourge.telegraphs.includes(grid), false)
+    const cooldownState = scourge as unknown as { astralGridCooldownRemaining: number }
+    assert.equal(
+      cooldownState.astralGridCooldownRemaining,
+      ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS
+    )
+
+    const originalRandom = Math.random
+    try {
+      Math.random = () => 0
+      const blockedGrid = scourge.spawnTelegraphedAttack('astral_orbital_grid')
+      assert.equal(
+        blockedGrid?.kind,
+        'astral_targeted_lasers',
+        'A forced grid selection should resolve to another Phase 2 pattern during cooldown'
+      )
+      scourge.telegraphs = []
+
+      for (let step = 0; step < 199; step++) scourge.update(0.1, player)
+      scourge.update(0.09, player)
+      assert.ok(cooldownState.astralGridCooldownRemaining > 0)
+      const beforeBoundary = scourge.spawnTelegraphedAttack('astral_orbital_grid')
+      assert.notEqual(beforeBoundary?.kind, 'astral_orbital_grid')
+      scourge.telegraphs = []
+
+      scourge.update(0.01, player)
+      assert.equal(cooldownState.astralGridCooldownRemaining, 0)
+      const atBoundary = scourge.spawnTelegraphedAttack('astral_orbital_grid')
+      assert.equal(atBoundary?.kind, 'astral_orbital_grid')
+    } finally {
+      Math.random = originalRandom
+    }
   })
 
   it('locks Astral Scourge into a formed circle and keeps weighted grids stationary', () => {
@@ -2778,17 +2844,12 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     scourge.projectiles = []
     scourge.shootCooldown = 0
     scourge.specialCooldown = 100
-    const distanceBeforeRam = Math.hypot(
-      scourge.getCenter().x - player.getCenter().x,
-      scourge.getCenter().y - player.getCenter().y
-    )
     scourge.update(0.01, player)
     assert.equal(scourge.projectiles.length, 3)
-    const distanceAfterRam = Math.hypot(
-      scourge.getCenter().x - player.getCenter().x,
-      scourge.getCenter().y - player.getCenter().y
+    assert.ok(
+      Math.hypot(scourge.velocity.x, scourge.velocity.y) > 0,
+      'Normal Phase 2 pursuit should keep the Scourge moving after retreat'
     )
-    assert.ok(distanceAfterRam < distanceBeforeRam)
 
     const lines = getAstralOrbitalGridLines({ x: 0, y: 0 }, Math.PI / 4, [-120, 0, 120])
     assert.equal(lines.length, 6)

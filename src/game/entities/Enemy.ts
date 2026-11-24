@@ -21,6 +21,8 @@ import {
 import { EnemiesRow } from '../../types/database'
 import { Player } from './Player'
 
+export const ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS = 20
+
 export type EnemyType =
   | 'Swarm'
   | 'Heavy Swarm'
@@ -318,7 +320,9 @@ export class Enemy {
   private dogDashTimer: number = 0
   private dogDashCooldown: number = 4.2
   private dogDashDir: Vector2 = { x: 1, y: 0 }
-  private astralRamCoastTimer: number = 0
+  private astralRamHeading: number | null = null
+  private astralRamSpeed: number = 0
+  private astralGridCooldownRemaining: number = 0
 
   get isWormBoss(): boolean {
     return this.isDevourerOfGods || this.isAstralScourge
@@ -696,6 +700,12 @@ export class Enemy {
     if (this.phaseTransitionTimer > 0) {
       this.phaseTransitionTimer = Math.max(0, this.phaseTransitionTimer - deltaTime)
     }
+    if (this.astralGridCooldownRemaining > 0) {
+      this.astralGridCooldownRemaining = Math.max(
+        0,
+        this.astralGridCooldownRemaining - deltaTime
+      )
+    }
     if (this.hitFlashTimer > 0) {
       this.hitFlashTimer -= deltaTime
       if (this.hitFlashTimer <= 0) {
@@ -924,12 +934,54 @@ export class Enemy {
     const perp = { x: -toward.y, y: toward.x }
     const astralPhaseTwo = this.isAstralScourge && this.bossPhase >= 2
 
+    if (astralPhaseTwo) {
+      // Preserve the explicit rift lunge, but make ordinary pursuit a continuous,
+      // momentum-carrying ram that steers gradually rather than firing on a timer.
+      if (this.dogDashTimer > 0) {
+        this.dogDashTimer = Math.max(0, this.dogDashTimer - deltaTime)
+        this.velocity = {
+          x: this.dogDashDir.x * this.speed * 3.8,
+          y: this.dogDashDir.y * this.speed * 3.8
+        }
+        this.direction = this.dogDashDir
+        return
+      }
+
+      if (this.astralRamHeading === null) {
+        this.astralRamHeading =
+          Math.hypot(this.velocity.x, this.velocity.y) > 1
+            ? Math.atan2(this.velocity.y, this.velocity.x)
+            : Math.atan2(toward.y, toward.x)
+      }
+      const desiredHeading = Math.atan2(toward.y, toward.x)
+      let headingDifference = desiredHeading - this.astralRamHeading
+      while (headingDifference > Math.PI) headingDifference -= Math.PI * 2
+      while (headingDifference < -Math.PI) headingDifference += Math.PI * 2
+      const maxTurn = 0.9 * deltaTime
+      this.astralRamHeading +=
+        Math.abs(headingDifference) <= maxTurn
+          ? headingDifference
+          : Math.sign(headingDifference) * maxTurn
+
+      const maxRamSpeed = this.speed * 3.8
+      this.astralRamSpeed = Math.min(
+        maxRamSpeed,
+        this.astralRamSpeed + this.speed * 2.8 * deltaTime
+      )
+      this.velocity = {
+        x: Math.cos(this.astralRamHeading) * this.astralRamSpeed,
+        y: Math.sin(this.astralRamHeading) * this.astralRamSpeed
+      }
+      this.direction = {
+        x: Math.cos(this.astralRamHeading),
+        y: Math.sin(this.astralRamHeading)
+      }
+      return
+    }
+
     if (this.dogDashTimer > 0) {
       this.dogDashTimer = Math.max(0, this.dogDashTimer - deltaTime)
-      if (astralPhaseTwo && this.dogDashTimer === 0) {
-        this.astralRamCoastTimer = 0.42
-      }
-      const dashMult = astralPhaseTwo ? 3.8 : this.isEnraged ? 2.85 : 2.35
+      const dashMult = this.isEnraged ? 2.85 : 2.35
       this.velocity = {
         x: this.dogDashDir.x * this.speed * dashMult,
         y: this.dogDashDir.y * this.speed * dashMult
@@ -938,31 +990,15 @@ export class Enemy {
       return
     }
 
-    if (astralPhaseTwo && this.astralRamCoastTimer > 0) {
-      this.astralRamCoastTimer = Math.max(0, this.astralRamCoastTimer - deltaTime)
-      this.velocity = {
-        x: this.dogDashDir.x * this.speed * 3.8,
-        y: this.dogDashDir.y * this.speed * 3.8
-      }
-      this.direction = this.dogDashDir
-      return
-    }
-
     this.dogDashCooldown -= deltaTime
     if (this.dogDashCooldown <= 0 && dist > 110) {
-      this.dogDashTimer = astralPhaseTwo ? 0.9 : this.isEnraged ? 0.96 : 0.84
-      this.dogDashCooldown = astralPhaseTwo ? 1.45 : this.isEnraged ? 2.9 : 4.0
+      this.dogDashTimer = this.isEnraged ? 0.96 : 0.84
+      this.dogDashCooldown = this.isEnraged ? 2.9 : 4.0
       this.dogDashDir = toward
       this.velocity = {
-        x: toward.x * this.speed * (astralPhaseTwo ? 3.8 : 2.4),
-        y: toward.y * this.speed * (astralPhaseTwo ? 3.8 : 2.4)
+        x: toward.x * this.speed * 2.4,
+        y: toward.y * this.speed * 2.4
       }
-      this.direction = toward
-      return
-    }
-
-    if (astralPhaseTwo) {
-      this.velocity = { x: toward.x * this.speed * 1.3, y: toward.y * this.speed * 1.3 }
       this.direction = toward
       return
     }
@@ -1158,7 +1194,9 @@ export class Enemy {
     this.specialCooldown = 0.2
     this.dogDashTimer = 0
     this.dogDashCooldown = 0.8
-    this.astralRamCoastTimer = 0
+    this.astralRamHeading = null
+    this.astralRamSpeed = 0
+    this.astralGridCooldownRemaining = 0
     this.telegraphs = []
     this.projectiles = []
     this.aoeProjectiles = []
@@ -1715,6 +1753,15 @@ export class Enemy {
     } else {
       const kinds: BossAttackKind[] = ['orbital_slam', 'mega_laser', 'bombardment_ring']
       kind = kinds[(this.specialAttackCounter - 1) % kinds.length]
+    }
+
+    if (
+      this.isAstralScourge &&
+      this.bossPhase >= 2 &&
+      this.astralGridCooldownRemaining > 0 &&
+      kind === 'astral_orbital_grid'
+    ) {
+      kind = getAstralScourgePhaseTwoAttackKind(Math.random(), false)
     }
 
     let telegraph: BossTelegraphAttack
@@ -2644,6 +2691,15 @@ export class Enemy {
         }
 
         if (t.activeTimer >= t.activeDuration) {
+          if (
+            t.kind === 'astral_orbital_grid' &&
+            t.hasTriggered &&
+            this.isAstralScourge &&
+            this.bossPhase >= 2
+          ) {
+            this.astralGridCooldownRemaining =
+              ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS
+          }
           this.telegraphs.splice(i, 1)
         }
       }
@@ -4996,8 +5052,16 @@ export function getAstralTargetedLaserLines(
   })
 }
 
-export function getAstralScourgePhaseTwoAttackKind(randomValue = Math.random()): BossAttackKind {
+export function getAstralScourgePhaseTwoAttackKind(
+  randomValue = Math.random(),
+  allowOrbitalGrid = true
+): BossAttackKind {
   const roll = Math.max(0, Math.min(0.999999, randomValue))
+  if (!allowOrbitalGrid) {
+    if (roll < 1 / 3) return 'astral_targeted_lasers'
+    if (roll < 2 / 3) return 'cosmic_laser_walls'
+    return 'cosmic_portal_lunge'
+  }
   if (roll < 0.4) return 'astral_orbital_grid'
   if (roll < 0.6) return 'astral_targeted_lasers'
   if (roll < 0.8) return 'cosmic_laser_walls'

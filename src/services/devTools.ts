@@ -34,6 +34,7 @@ export type DevLiveAction =
   | { type: 'add_max_health'; amount: number }
   | { type: 'apply_health_multiplier'; multiplier: number }
   | { type: 'skip_wave'; mode: 'delta' | 'set'; value: number }
+  | { type: 'spawn_enemy'; enemyId: string; count?: number }
 
 export interface DevRunStatus {
   isInRun: boolean

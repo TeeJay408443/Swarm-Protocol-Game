@@ -12,6 +12,7 @@ import { isVisiblePlayerWeaponId, Player } from '../../../game/entities/Player'
 import {
   BossArenaBounds,
   checkBossTelegraphHit,
+  checkDevourerSegmentHit,
   checkEnemyAoeHit,
   Enemy,
   resolveEnemyCollisions
@@ -40,14 +41,28 @@ import {
 import {
   AREA_TWO_ENEMIES,
   ArenaId,
+  ASTRAL_SCOURGE_BOSS_ID,
+  BossCutsceneKind,
+  BossCutsceneTheme,
+  computeBossCutsceneShake,
+  computeDevourerCutsceneCameraFrame,
+  DEVOURER_CUTSCENE_DURATION_SECONDS,
+  DEVOURER_CUTSCENE_THEME,
   getAreaBossTemplateForWave,
   getAreaById,
+  getAreaFinalBossCombatProfile,
+  getAreaFinalBossCutsceneTheme,
+  getAreaFinalBossHp,
+  getAreaMaxWave,
   getAreaMiniBossCap,
   getAreaOneBossBuff,
-  getWave15BossCombatProfile,
-  getWave15FinalBossHp,
+  getAreaTwoBossBuff,
+  getDevSpawnableEnemyById,
+  SECRET_DEVOURER_OF_GODS_ID,
+  SECRET_DEVOURER_OF_GODS_TEMPLATE,
   selectAreaEnemyTemplateForWave,
-  shouldSpawnRegularEnemiesInWave
+  shouldSpawnRegularEnemiesInWave,
+  WAVE_15_CUTSCENE_DURATION_SECONDS
 } from '../../../config/arenas'
 import {
   computeDifficultyCoinPayout,
@@ -122,6 +137,7 @@ import {
 import { useSupabase } from '../../../hooks/useSupabase'
 import { useAudio } from '../../../context/AudioContext'
 import { useToast } from '../../ui/ToastContainer'
+import YouTubeBossMusicPlayer from '../../ui/YouTubeBossMusicPlayer'
 import GameCanvas from './GameCanvas'
 import HUD, { type ActiveBossHudState } from './HUD'
 import LevelUpModal, { UpgradeOption } from './LevelUpModal'
@@ -334,6 +350,312 @@ type AttackFx =
       duration: number
     }
 
+type DogCutsceneParticle =
+  | {
+      kind: 'shard'
+      x: number
+      y: number
+      vx: number
+      vy: number
+      size: number
+      angle: number
+      spin: number
+      timer: number
+      duration: number
+      color: string
+    }
+  | {
+      kind: 'spark'
+      x: number
+      y: number
+      vx: number
+      vy: number
+      size: number
+      timer: number
+      duration: number
+      color: string
+      attractX?: number
+      attractY?: number
+    }
+  | {
+      kind: 'shockwave'
+      x: number
+      y: number
+      maxRadius: number
+      lineWidth: number
+      timer: number
+      duration: number
+      color: string
+    }
+  | {
+      kind: 'lightning'
+      points: Array<{ x: number; y: number }>
+      timer: number
+      duration: number
+      color: string
+    }
+  | {
+      kind: 'flame'
+      x: number
+      y: number
+      vx: number
+      vy: number
+      radius: number
+      riseSpeed: number
+      swayPhase: number
+      swayAmp: number
+      timer: number
+      duration: number
+      color: string
+      coreColor: string
+    }
+  | {
+      kind: 'ember'
+      x: number
+      y: number
+      vx: number
+      vy: number
+      size: number
+      timer: number
+      duration: number
+      color: string
+      swayPhase: number
+    }
+
+interface DogGroundCrack {
+  segments: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }>
+  timer: number
+  maxDuration: number
+  color: string
+}
+
+const DOG_SHARD_PALETTE = ['#22D3EE', '#E879F9', '#A855F7', '#F0ABFC', '#67E8F9']
+
+function createDogGroundCracks(
+  originX: number,
+  originY: number,
+  branchCount: number,
+  maxReach: number,
+  maxDuration: number,
+  palette: string[] = ['#22D3EE', '#E879F9']
+): DogGroundCrack[] {
+  const cracks: DogGroundCrack[] = []
+  const colors = palette.length > 0 ? palette : ['#22D3EE', '#E879F9']
+  for (let b = 0; b < branchCount; b++) {
+    const baseAngle = (b / branchCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.45
+    const segs: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }> = []
+    let cx = originX + Math.cos(baseAngle) * 18
+    let cy = originY + Math.sin(baseAngle) * 10
+    let angle = baseAngle
+    const steps = 4 + Math.floor(Math.random() * 3)
+    const stepLen = maxReach / steps
+    for (let s = 0; s < steps; s++) {
+      angle += (Math.random() - 0.5) * 0.65
+      const len = stepLen * (0.75 + Math.random() * 0.5)
+      const nx = cx + Math.cos(angle) * len
+      const ny = cy + Math.sin(angle) * len
+      segs.push({
+        x1: cx,
+        y1: cy,
+        x2: nx,
+        y2: ny,
+        width: Math.max(1.2, 4.2 - s * 0.65)
+      })
+      if (s >= 1 && Math.random() < 0.55) {
+        const subAngle = angle + (Math.random() < 0.5 ? 0.55 : -0.55)
+        segs.push({
+          x1: nx,
+          y1: ny,
+          x2: nx + Math.cos(subAngle) * (len * 0.6),
+          y2: ny + Math.sin(subAngle) * (len * 0.6),
+          width: 1.5
+        })
+      }
+      cx = nx
+      cy = ny
+    }
+    cracks.push({
+      segments: segs,
+      timer: 0,
+      maxDuration,
+      color: colors[b % colors.length]
+    })
+  }
+  return cracks
+}
+
+function createDogLightningArc(
+  originX: number,
+  originY: number,
+  angle: number,
+  reach: number,
+  color: string
+): DogCutsceneParticle {
+  const points: Array<{ x: number; y: number }> = [{ x: originX, y: originY }]
+  const segments = 5
+  for (let i = 1; i <= segments; i++) {
+    const frac = i / segments
+    const jitter = i < segments ? (Math.random() - 0.5) * 34 : 0
+    const perp = angle + Math.PI / 2
+    points.push({
+      x: originX + Math.cos(angle) * reach * frac + Math.cos(perp) * jitter,
+      y: originY + Math.sin(angle) * reach * frac + Math.sin(perp) * jitter
+    })
+  }
+  return {
+    kind: 'lightning',
+    points,
+    timer: 0,
+    duration: 0.22 + Math.random() * 0.14,
+    color
+  }
+}
+
+function pushDogDestructiveBurst(
+  list: DogCutsceneParticle[],
+  originX: number,
+  originY: number,
+  options: {
+    shards: number
+    sparks: number
+    bolts: number
+    speedScale?: number
+    palette?: string[]
+    shockwaves?: Array<{ maxRadius: number; color: string; lineWidth: number; duration: number }>
+  }
+): void {
+  const spd = options.speedScale ?? 1
+  const pal = options.palette && options.palette.length > 0 ? options.palette : DOG_SHARD_PALETTE
+  const primaryCol = pal[0]
+  const secondaryCol = pal[1 % pal.length]
+  for (let i = 0; i < options.shards; i++) {
+    const angle = Math.random() * Math.PI * 2
+    const speed = (140 + Math.random() * 340) * spd
+    list.push({
+      kind: 'shard',
+      x: originX + Math.cos(angle) * (6 + Math.random() * 24),
+      y: originY + Math.sin(angle) * (4 + Math.random() * 14),
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: 5 + Math.random() * 9,
+      angle: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 16,
+      timer: 0,
+      duration: 0.55 + Math.random() * 0.55,
+      color: pal[i % pal.length]
+    })
+  }
+  for (let i = 0; i < options.sparks; i++) {
+    const angle = Math.random() * Math.PI * 2
+    const speed = (220 + Math.random() * 420) * spd
+    list.push({
+      kind: 'spark',
+      x: originX,
+      y: originY,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: 2 + Math.random() * 3,
+      timer: 0,
+      duration: 0.35 + Math.random() * 0.4,
+      color: i % 2 === 0 ? primaryCol : secondaryCol
+    })
+  }
+  for (let i = 0; i < options.bolts; i++) {
+    const angle = (i / Math.max(1, options.bolts)) * Math.PI * 2 + (Math.random() - 0.5) * 0.5
+    const reach = (110 + Math.random() * 170) * spd
+    list.push(
+      createDogLightningArc(
+        originX,
+        originY,
+        angle,
+        reach,
+        i % 2 === 0 ? primaryCol : secondaryCol
+      )
+    )
+  }
+  if (options.shockwaves) {
+    for (const sw of options.shockwaves) {
+      list.push({
+        kind: 'shockwave',
+        x: originX,
+        y: originY,
+        maxRadius: sw.maxRadius,
+        lineWidth: sw.lineWidth,
+        timer: 0,
+        duration: sw.duration,
+        color: sw.color
+      })
+    }
+  }
+}
+
+function pushBossAreaInfernoBurst(
+  list: DogCutsceneParticle[],
+  originX: number,
+  originY: number,
+  options: {
+    flames: number
+    embers: number
+    speedScale?: number
+    palette: string[]
+    coreColor: string
+    shockwaves?: Array<{ maxRadius: number; color: string; lineWidth: number; duration: number }>
+  }
+): void {
+  const spd = options.speedScale ?? 1
+  const pal = options.palette.length > 0 ? options.palette : ['#F97316', '#EF4444', '#FDE047']
+  for (let i = 0; i < options.flames; i++) {
+    const angle = Math.random() * Math.PI * 2
+    const ringRadius = 10 + Math.random() * 44
+    const radialSpeed = (65 + Math.random() * 230) * spd
+    list.push({
+      kind: 'flame',
+      x: originX + Math.cos(angle) * ringRadius,
+      y: originY + Math.sin(angle) * ringRadius * 0.65 + 8,
+      vx: Math.cos(angle) * radialSpeed,
+      vy: Math.sin(angle) * radialSpeed * 0.55 - (70 + Math.random() * 120) * spd,
+      radius: (10 + Math.random() * 15) * (0.85 + spd * 0.2),
+      riseSpeed: (130 + Math.random() * 170) * spd,
+      swayPhase: Math.random() * Math.PI * 2,
+      swayAmp: 28 + Math.random() * 48,
+      timer: 0,
+      duration: 0.48 + Math.random() * 0.52,
+      color: pal[i % pal.length],
+      coreColor: options.coreColor
+    })
+  }
+  for (let i = 0; i < options.embers; i++) {
+    const angle = Math.random() * Math.PI * 2
+    const speed = (110 + Math.random() * 290) * spd
+    list.push({
+      kind: 'ember',
+      x: originX + (Math.random() - 0.5) * 48,
+      y: originY + (Math.random() - 0.5) * 32,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed * 0.65 - (60 + Math.random() * 110) * spd,
+      size: 2.2 + Math.random() * 3.4,
+      timer: 0,
+      duration: 0.55 + Math.random() * 0.65,
+      color: pal[i % pal.length],
+      swayPhase: Math.random() * Math.PI * 2
+    })
+  }
+  if (options.shockwaves) {
+    for (const sw of options.shockwaves) {
+      list.push({
+        kind: 'shockwave',
+        x: originX,
+        y: originY,
+        maxRadius: sw.maxRadius,
+        lineWidth: sw.lineWidth,
+        timer: 0,
+        duration: sw.duration,
+        color: sw.color
+      })
+    }
+  }
+}
+
 interface ChronoClone {
   id: number
   x: number
@@ -371,7 +693,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
   const { user } = useSupabase()
   const { authorized: isDevUser, settings: devSettings } = useDevSettings(user?.email)
-  const { playSound } = useAudio()
+  const {
+    playSound,
+    playMusic,
+    stopMusic,
+    pauseMusic,
+    resumeMusic,
+    youtubePlaybackStarted,
+    youtubeCurrentTime
+  } = useAudio()
   const toast = useToast()
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -401,6 +731,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const [finalScore, setFinalScore] = useState<number>(0)
   const [isVictory, setIsVictory] = useState<boolean>(false)
   const [isEndlessMode, setIsEndlessMode] = useState<boolean>(false)
+  const [dogCutsceneUi, setDogCutsceneUi] = useState<{
+    active: boolean
+    showSecondLine: boolean
+    opacity: number
+    theme: BossCutsceneTheme
+  } | null>(null)
   const [finalStats, setFinalStats] = useState<GameOverStats>({
     survivalSeconds: 0,
     coinsCollected: 0,
@@ -465,6 +801,29 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const bossArenaRef = useRef<BossArenaBounds | null>(null)
   const finalBossSpawnedRef = useRef<boolean>(false)
   const announcedHalfTelegraphIdsRef = useRef<Set<string>>(new Set())
+  const dogCutsceneRef = useRef<{
+    active: boolean
+    kind: BossCutsceneKind
+    theme: BossCutsceneTheme
+    elapsed: number
+    wallElapsed: number
+    duration: number
+    line2Delay: number
+    portalX: number
+    portalY: number
+    triggeredPhase2Sound: boolean
+    lastOpacityStep: number
+    particleAccumulator: number
+    pulseStep: number
+  } | null>(null)
+  const dogPostDropRef = useRef<{
+    elapsed: number
+    duration: number
+    line2Delay: number
+    theme: BossCutsceneTheme
+  } | null>(null)
+  const dogCutsceneParticlesRef = useRef<DogCutsceneParticle[]>([])
+  const dogGroundCracksRef = useRef<DogGroundCrack[]>([])
 
   const timeSurvivedRef = useRef<number>(0)
   const coinsCollectedRef = useRef<number>(0)
@@ -508,6 +867,19 @@ const GameContainer: React.FC<GameContainerProps> = ({
   // Keep latest callbacks in refs for loop safety
   const playSoundRef = useRef(playSound)
   playSoundRef.current = playSound
+  const playMusicRef = useRef(playMusic)
+  playMusicRef.current = playMusic
+  const stopMusicRef = useRef(stopMusic)
+  stopMusicRef.current = stopMusic
+  const pauseMusicRef = useRef(pauseMusic)
+  pauseMusicRef.current = pauseMusic
+  const resumeMusicRef = useRef(resumeMusic)
+  resumeMusicRef.current = resumeMusic
+  const youtubePlaybackStartedRef = useRef<boolean>(youtubePlaybackStarted)
+  youtubePlaybackStartedRef.current = youtubePlaybackStarted
+  const youtubeCurrentTimeRef = useRef<number | null>(youtubeCurrentTime)
+  youtubeCurrentTimeRef.current = youtubeCurrentTime
+  const dogBossActiveRef = useRef<boolean>(false)
 
   const setEngineState = useCallback((next: EngineState) => {
     gameStateRef.current = next
@@ -609,6 +981,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
       if (gameStateRef.current === 'gameover') return
 
       flushBankedCoins()
+      dogBossActiveRef.current = false
+      stopMusicRef.current()
       setDevRunStatus({ isInRun: false })
       setIsVictory(victory)
       setEngineState('gameover')
@@ -675,13 +1049,16 @@ const GameContainer: React.FC<GameContainerProps> = ({
           coinsAlreadyBanked: true
         })
           .then(({ newlyUnlocked }) => {
+            const areaMaxWave = getAreaMaxWave(areaRef.current.id)
             const heroUnlocks = checkAndSyncMilestoneHeroUnlocks(
               user?.id || 'guest_user',
-              Math.max(waveRef.current, victory ? WAVE_CONFIG.MAX_WAVE : waveRef.current)
+              Math.max(waveRef.current, victory ? areaMaxWave : waveRef.current)
             )
             toast.success(
               victory
-                ? `VICTORY! Wave 15 Cleared — Area 2 Unlocked! Score: ${computedScore.toLocaleString()}`
+                ? areaRef.current.id === 'astral_citadel'
+                  ? `VICTORY! Astral Scourge Vanquished — Wave ${areaMaxWave} Cleared! Score: ${computedScore.toLocaleString()}`
+                  : `VICTORY! Wave ${areaMaxWave} Cleared — Area 2 Unlocked! Score: ${computedScore.toLocaleString()}`
                 : `Mission logged! Final Score: ${computedScore.toLocaleString()}`
             )
             for (const unlockedHero of heroUnlocks) {
@@ -879,17 +1256,31 @@ const GameContainer: React.FC<GameContainerProps> = ({
     (waveNumber: number, forceBoss = false, allowRanged = true) => {
       const player = playerRef.current
       if (!player) return
+      if (
+        dogBossActiveRef.current ||
+        enemiesRef.current.some((e) => e.isAlive && e.isDevourerOfGods)
+      ) {
+        return
+      }
 
-      const isWave15Boss =
-        forceBoss && waveNumber === WAVE_CONFIG.MAX_WAVE && !endlessModeRef.current
+      const areaMeta = areaRef.current
+      const isAreaTwo = areaMeta.id === 'astral_citadel'
+      const areaMaxWave = getAreaMaxWave(areaMeta.id)
+      const isFinalAreaBoss = forceBoss && waveNumber === areaMaxWave && !endlessModeRef.current
+      const bossTemplate = forceBoss ? getAreaBossTemplateForWave(areaMeta.id, waveNumber) : null
+      const isWormBoss = bossTemplate?.id === ASTRAL_SCOURGE_BOSS_ID
+      const isStationaryFinalBoss = isFinalAreaBoss && !isWormBoss
       const bossArena = bossArenaRef.current
       const playerCenter = player.getCenter()
 
       let spawnX: number
       let spawnY: number
-      if (isWave15Boss && bossArena) {
+      if (isStationaryFinalBoss && bossArena) {
         spawnX = bossArena.left + bossArena.width / 2 - 46
         spawnY = bossArena.top + 195 - 46
+      } else if (isFinalAreaBoss && isWormBoss) {
+        spawnX = Math.max(140, Math.min(ARENA_SIZE - 140, playerCenter.x)) - 38
+        spawnY = Math.max(120, Math.min(ARENA_SIZE - 160, playerCenter.y - 235)) - 38
       } else {
         const angle = Math.random() * Math.PI * 2
         const distance = forceBoss ? 320 : 260 + Math.random() * 200
@@ -897,12 +1288,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
         spawnY = Math.max(40, Math.min(ARENA_SIZE - 80, playerCenter.y + Math.sin(angle) * distance))
       }
 
-      const isAreaTwo = areaRef.current.id === 'astral_citadel'
       let template = isAreaTwo ? AREA_TWO_ENEMIES[0] : seedEnemies[0]
-      if (forceBoss) {
-        template = getAreaBossTemplateForWave(areaRef.current.id, waveNumber)
+      if (bossTemplate) {
+        template = bossTemplate
       } else {
-        const rangedLimit = getWaveRangedSpawnLimit(waveNumber)
+        const rangedLimit = getWaveRangedSpawnLimit(waveNumber) + (isAreaTwo ? 3 : 0)
         const underRangedCap = allowRanged && rangedSpawnedInWaveRef.current < rangedLimit
         const waveProgress = Math.min(1, waveElapsedRef.current / WAVE_CONFIG.WAVE_DURATION_SECONDS)
         const expectedRangedSoFar = Math.floor(waveProgress * rangedLimit)
@@ -913,7 +1303,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           ).length
           const miniBossCap = getAreaMiniBossCap(waveNumber)
           const needsGuaranteedMiniBoss =
-            allowRanged && waveNumber >= 3 && waveElapsedRef.current >= 7 && activeMiniBossCount === 0
+            allowRanged && waveNumber >= 3 && waveElapsedRef.current >= 5 && activeMiniBossCount === 0
 
           if (needsGuaranteedMiniBoss && miniBossCap > 0) {
             template = AREA_TWO_ENEMIES[4]
@@ -952,7 +1342,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
       }
 
       const anchorPos =
-        isWave15Boss && bossArena
+        isStationaryFinalBoss && bossArena
           ? {
               x: bossArena.left + bossArena.width / 2,
               y: bossArena.top + Math.max(210, Math.round(bossArena.height * 0.27))
@@ -965,54 +1355,112 @@ const GameContainer: React.FC<GameContainerProps> = ({
         enemyData: template,
         target: player,
         isBoss: forceBoss,
-        isStationaryBoss: isWave15Boss,
-        isFinalBoss: isWave15Boss,
+        isStationaryBoss: isStationaryFinalBoss,
+        isFinalBoss: isFinalAreaBoss,
         anchorPos,
-        arenaBounds: isWave15Boss ? bossArena : null
+        arenaBounds: isStationaryFinalBoss ? bossArena : null
       })
 
       // Overtime, wave, area & difficulty progression scaling
       const scaling = getEnemyScaling(waveNumber, timeSurvivedRef.current)
-      const areaMeta = areaRef.current
       const diffMeta = difficultyRef.current
-      if (isWave15Boss) {
-        const w15Combat = getWave15BossCombatProfile(areaMeta.id)
-        const w15Hp = Math.round(
-          getWave15FinalBossHp(areaMeta.id) *
-            w15Combat.hpMultiplier *
+      if (isFinalAreaBoss) {
+        const finalCombat = getAreaFinalBossCombatProfile(areaMeta.id)
+        const finalHp = Math.round(
+          getAreaFinalBossHp(areaMeta.id) *
+            finalCombat.hpMultiplier *
             diffMeta.enemyHpMultiplier
         )
-        enemy.maxHealth = w15Hp
-        enemy.health = w15Hp
+        enemy.maxHealth = finalHp
+        enemy.health = finalHp
         enemy.damage = Math.round(
-          32 *
+          (isWormBoss ? 36 : 32) *
             Math.min(2.5, scaling.damageMultiplier * 0.7) *
-            areaMeta.enemyHpMultiplier *
+            areaMeta.enemyDamageMultiplier *
             diffMeta.enemyDamageMultiplier *
-            w15Combat.damageMultiplier
+            finalCombat.damageMultiplier
         )
-        enemy.powerScale = w15Hp / 2300
+        enemy.powerScale = finalHp / 2300
         enemy.damageScale =
           Math.min(2.4, scaling.damageMultiplier * 0.6) *
+          areaMeta.enemyDamageMultiplier *
           diffMeta.enemyDamageMultiplier *
-          w15Combat.damageMultiplier
+          finalCombat.damageMultiplier
         enemy.coinValue = Math.round(
-          250 * areaMeta.coinBonusMultiplier * w15Combat.coinMultiplier
+          (isWormBoss ? 450 : 250) * areaMeta.coinBonusMultiplier * finalCombat.coinMultiplier
         )
-        enemy.damageReduction = w15Combat.damageReduction
+        enemy.damageReduction = finalCombat.damageReduction
         enemy.enableEnrage = true
-        enemy.shootCooldownMax = Math.max(0.9, enemy.shootCooldownMax * w15Combat.shootCooldownScale)
+        enemy.shootCooldownMax = Math.max(0.9, enemy.shootCooldownMax * finalCombat.shootCooldownScale)
         enemy.specialCooldownMax = Math.max(
           2.0,
-          enemy.specialCooldownMax * w15Combat.specialCooldownScale
+          enemy.specialCooldownMax * finalCombat.specialCooldownScale
         )
-        enemy.bossTier = 3
+        enemy.bossTier = isAreaTwo ? 4 : 3
         enemy.bossTitle =
           areaMeta.id === 'astral_citadel'
-            ? 'SOLAR ARCHON SERAPH — FINAL BOSS (W15)'
+            ? 'ASTRAL SCOURGE — FINAL BOSS (W20)'
             : 'OMEGA OVERLORD — FINAL BOSS (W15)'
+
+        if (!dogBossActiveRef.current) {
+          const finalTheme = getAreaFinalBossCutsceneTheme(areaMeta.id)
+          const finalDur = WAVE_15_CUTSCENE_DURATION_SECONDS
+          const finalLine2Delay = 1.6
+          const focusPos = anchorPos || enemy.getCenter()
+          enemy.isSpawning = true
+          enemy.spawnTime = 0
+          enemy.spawnDelay = finalDur
+          enemy.cutsceneDelayTimer = finalDur
+          player.isInvulnerable = true
+          player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, finalDur + 0.5)
+          dogCutsceneRef.current = {
+            active: true,
+            kind: finalTheme.kind,
+            theme: finalTheme,
+            elapsed: 0,
+            wallElapsed: 0,
+            duration: finalDur,
+            line2Delay: finalLine2Delay,
+            portalX: focusPos.x,
+            portalY: focusPos.y,
+            triggeredPhase2Sound: false,
+            lastOpacityStep: 100,
+            particleAccumulator: 0,
+            pulseStep: 0
+          }
+          dogPostDropRef.current = null
+          dogCutsceneParticlesRef.current = []
+          dogGroundCracksRef.current = createDogGroundCracks(
+            focusPos.x,
+            focusPos.y,
+            8,
+            220,
+            finalDur + 1.8,
+            [finalTheme.primaryColor, finalTheme.secondaryColor]
+          )
+          pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, {
+            flames: 32,
+            embers: 28,
+            speedScale: 0.95,
+            palette: finalTheme.palette,
+            coreColor: finalTheme.coreColor,
+            shockwaves: [
+              { maxRadius: 230, color: finalTheme.primaryColor, lineWidth: 4.5, duration: 0.65 }
+            ]
+          })
+          setDogCutsceneUi({
+            active: true,
+            showSecondLine: false,
+            opacity: 1,
+            theme: finalTheme
+          })
+        }
       } else {
-        const a1Buff = forceBoss && !isAreaTwo ? getAreaOneBossBuff(waveNumber, false) : null
+        const bossBuff = forceBoss
+          ? isAreaTwo
+            ? getAreaTwoBossBuff(waveNumber)
+            : getAreaOneBossBuff(waveNumber, false)
+          : null
         enemy.maxHealth = Math.max(
           1,
           Math.round(
@@ -1020,7 +1468,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               scaling.hpMultiplier *
               areaMeta.enemyHpMultiplier *
               diffMeta.enemyHpMultiplier *
-              (a1Buff ? a1Buff.hpMultiplier : 1)
+              (bossBuff ? bossBuff.hpMultiplier : 1)
           )
         )
         enemy.health = enemy.maxHealth
@@ -1028,46 +1476,53 @@ const GameContainer: React.FC<GameContainerProps> = ({
           scaling.speedMultiplier *
           areaMeta.enemySpeedMultiplier *
           diffMeta.enemySpeedMultiplier *
-          (a1Buff ? a1Buff.speedMultiplier : 1)
+          (bossBuff ? bossBuff.speedMultiplier : 1)
         enemy.speed = enemy.baseSpeed
         enemy.damage = Math.max(
           1,
           Math.round(
             enemy.damage *
               scaling.damageMultiplier *
+              areaMeta.enemyDamageMultiplier *
               diffMeta.enemyDamageMultiplier *
-              (a1Buff ? a1Buff.damageMultiplier : 1)
+              (bossBuff ? bossBuff.damageMultiplier : 1)
           )
         )
         enemy.coinValue = Math.max(
           1,
           Math.round(
-            enemy.coinValue * areaMeta.coinBonusMultiplier * (a1Buff ? a1Buff.coinMultiplier : 1)
+            enemy.coinValue * areaMeta.coinBonusMultiplier * (bossBuff ? bossBuff.coinMultiplier : 1)
           )
         )
         enemy.powerScale =
           scaling.hpMultiplier *
+          areaMeta.enemyHpMultiplier *
           diffMeta.enemyHpMultiplier *
-          (a1Buff ? a1Buff.hpMultiplier : 1)
+          (bossBuff ? bossBuff.hpMultiplier : 1)
         enemy.damageScale =
           scaling.damageMultiplier *
+          areaMeta.enemyDamageMultiplier *
           diffMeta.enemyDamageMultiplier *
-          (a1Buff ? a1Buff.damageMultiplier : 1)
+          (bossBuff ? bossBuff.damageMultiplier : 1)
 
-        if (a1Buff) {
-          enemy.damageReduction = a1Buff.damageReduction
-          enemy.enableEnrage = a1Buff.enableEnrage
-          enemy.shootCooldownMax = Math.max(0.85, enemy.shootCooldownMax * a1Buff.shootCooldownScale)
-          enemy.specialCooldownMax = Math.max(2.2, enemy.specialCooldownMax * a1Buff.specialCooldownScale)
+        if (bossBuff) {
+          enemy.damageReduction = bossBuff.damageReduction
+          enemy.enableEnrage = bossBuff.enableEnrage
+          enemy.shootCooldownMax = Math.max(0.85, enemy.shootCooldownMax * bossBuff.shootCooldownScale)
+          enemy.specialCooldownMax = Math.max(2.2, enemy.specialCooldownMax * bossBuff.specialCooldownScale)
         }
 
         if (forceBoss) {
           const tier = Math.max(1, Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL))
           enemy.bossTier = tier
           enemy.bossTitle = isAreaTwo
-            ? template.id === 'boss_a2_10'
-              ? `ASTRAL VORTEX COLOSSUS (W${waveNumber})`
-              : `EMERALD PRISM MONARCH (W${waveNumber})`
+            ? template.id === ASTRAL_SCOURGE_BOSS_ID
+              ? `ASTRAL SCOURGE (W${waveNumber})`
+              : template.id === 'boss_a2_15'
+                ? `SOLAR ARCHON SERAPH (W${waveNumber})`
+                : template.id === 'boss_a2_10'
+                  ? `ASTRAL VORTEX COLOSSUS (W${waveNumber})`
+                  : `EMERALD PRISM MONARCH (W${waveNumber})`
             : tier >= 3
               ? `APEX LEVIATHAN (W${waveNumber})`
               : tier === 2
@@ -1077,6 +1532,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
       }
 
       enemiesRef.current.push(enemy)
+      if (forceBoss && !dogBossActiveRef.current) {
+        playMusicRef.current('boss')
+      }
     },
     []
   )
@@ -1244,6 +1702,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
     bossArenaRef.current = null
     finalBossSpawnedRef.current = false
     announcedHalfTelegraphIdsRef.current.clear()
+    dogCutsceneRef.current = null
+    dogPostDropRef.current = null
+    dogCutsceneParticlesRef.current = []
+    dogGroundCracksRef.current = []
+    dogBossActiveRef.current = false
+    setDogCutsceneUi(null)
     setIsVictory(false)
 
     timeSurvivedRef.current = 0
@@ -1293,8 +1757,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
     const warpToWaveInternal = (targetWave: number) => {
       const safeWave = Math.max(1, Math.floor(targetWave))
-      const isW15 = safeWave === WAVE_CONFIG.MAX_WAVE
-      const isEndless = safeWave > WAVE_CONFIG.MAX_WAVE
+      const areaMaxWave = getAreaMaxWave(areaRef.current.id)
+      const isFinalWave = safeWave === areaMaxWave
+      const isEndless = safeWave > areaMaxWave
+      const locksBossArena = isFinalWave && areaRef.current.id !== 'astral_citadel'
 
       enemiesRef.current = []
       playerProjectilesRef.current = []
@@ -1312,21 +1778,25 @@ const GameContainer: React.FC<GameContainerProps> = ({
       setWaveTimeRemaining(WAVE_CONFIG.WAVE_DURATION_SECONDS)
       setDevRunStatus({ isInRun: true, currentWave: safeWave, areaId: areaRef.current.id })
 
-      if (isW15) {
-        const aw = canvas.width
-        const ah = canvas.height
-        const pcNow = newPlayer.getCenter()
-        const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, pcNow.x - aw / 2))
-        const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, pcNow.y - ah / 2))
-        bossArenaRef.current = { left, top, width: aw, height: ah }
-        const bossAnchorX = left + aw / 2
-        const bossAnchorY = top + Math.max(210, Math.round(ah * 0.27))
-        if (Math.hypot(pcNow.x - bossAnchorX, pcNow.y - bossAnchorY) < 130) {
-          newPlayer.y = Math.min(top + ah - newPlayer.height - 40, bossAnchorY + 185)
+      if (isFinalWave) {
+        if (locksBossArena) {
+          const aw = canvas.width
+          const ah = canvas.height
+          const pcNow = newPlayer.getCenter()
+          const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, pcNow.x - aw / 2))
+          const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, pcNow.y - ah / 2))
+          bossArenaRef.current = { left, top, width: aw, height: ah }
+          const bossAnchorX = left + aw / 2
+          const bossAnchorY = top + Math.max(210, Math.round(ah * 0.27))
+          if (Math.hypot(pcNow.x - bossAnchorX, pcNow.y - bossAnchorY) < 130) {
+            newPlayer.y = Math.min(top + ah - newPlayer.height - 40, bossAnchorY + 185)
+          }
+        } else {
+          bossArenaRef.current = null
         }
         finalBossSpawnedRef.current = true
-        bossSpawnedWaveRef.current = WAVE_CONFIG.MAX_WAVE
-        spawnEnemyForWave(WAVE_CONFIG.MAX_WAVE, true)
+        bossSpawnedWaveRef.current = areaMaxWave
+        spawnEnemyForWave(areaMaxWave, true)
       } else {
         bossArenaRef.current = null
         finalBossSpawnedRef.current = false
@@ -1356,6 +1826,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
       setDevRunStatus({ isInRun: true, currentWave: 1, areaId: areaRef.current.id })
     }
 
+    const areaMaxWave = getAreaMaxWave(areaRef.current.id)
+    const isStartBossWave =
+      startWave === areaMaxWave || startWave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0
+    if (!isStartBossWave) {
+      playMusicRef.current('gameplay')
+    }
+
     setEngineState('playing')
     playSoundRef.current('wave')
   }, [
@@ -1374,6 +1851,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
   useEffect(() => {
     return () => {
       flushBankedCoins()
+      stopMusicRef.current()
       setDevRunStatus({ isInRun: false })
     }
   }, [flushBankedCoins])
@@ -1422,11 +1900,18 @@ const GameContainer: React.FC<GameContainerProps> = ({
           action.mode === 'delta'
             ? Math.max(1, waveRef.current + Math.round(action.value))
             : Math.max(1, Math.round(action.value))
-        const isW15 = targetWave === WAVE_CONFIG.MAX_WAVE
-        const isEndless = targetWave > WAVE_CONFIG.MAX_WAVE
+        const areaMaxWave = getAreaMaxWave(areaRef.current.id)
+        const isFinalWave = targetWave === areaMaxWave
+        const isEndless = targetWave > areaMaxWave
+        const locksBossArena = isFinalWave && areaRef.current.id !== 'astral_citadel'
 
         enemiesRef.current = []
         playerProjectilesRef.current = []
+        dogCutsceneRef.current = null
+        dogPostDropRef.current = null
+        dogCutsceneParticlesRef.current = []
+        dogGroundCracksRef.current = []
+        setDogCutsceneUi(null)
         waveRef.current = targetWave
         waveElapsedRef.current = 0
         breatherElapsedRef.current = 0
@@ -1441,24 +1926,29 @@ const GameContainer: React.FC<GameContainerProps> = ({
         setWaveTimeRemaining(WAVE_CONFIG.WAVE_DURATION_SECONDS)
         setDevRunStatus({ isInRun: true, currentWave: targetWave, areaId: areaRef.current.id })
 
-        if (isW15 && canvas) {
-          const aw = canvas.width
-          const ah = canvas.height
-          const pcNow = player.getCenter()
-          const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, pcNow.x - aw / 2))
-          const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, pcNow.y - ah / 2))
-          bossArenaRef.current = { left, top, width: aw, height: ah }
-          const bossAnchorX = left + aw / 2
-          const bossAnchorY = top + Math.max(210, Math.round(ah * 0.27))
-          if (Math.hypot(pcNow.x - bossAnchorX, pcNow.y - bossAnchorY) < 130) {
-            player.y = Math.min(top + ah - player.height - 40, bossAnchorY + 185)
+        if (isFinalWave) {
+          if (locksBossArena && canvas) {
+            const aw = canvas.width
+            const ah = canvas.height
+            const pcNow = player.getCenter()
+            const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, pcNow.x - aw / 2))
+            const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, pcNow.y - ah / 2))
+            bossArenaRef.current = { left, top, width: aw, height: ah }
+            const bossAnchorX = left + aw / 2
+            const bossAnchorY = top + Math.max(210, Math.round(ah * 0.27))
+            if (Math.hypot(pcNow.x - bossAnchorX, pcNow.y - bossAnchorY) < 130) {
+              player.y = Math.min(top + ah - player.height - 40, bossAnchorY + 185)
+            }
+          } else {
+            bossArenaRef.current = null
           }
           finalBossSpawnedRef.current = true
-          bossSpawnedWaveRef.current = WAVE_CONFIG.MAX_WAVE
-          spawnEnemyForWave(WAVE_CONFIG.MAX_WAVE, true)
+          bossSpawnedWaveRef.current = areaMaxWave
+          spawnEnemyForWave(areaMaxWave, true)
         } else {
           bossArenaRef.current = null
           finalBossSpawnedRef.current = false
+          dogBossActiveRef.current = false
           bossSpawnedWaveRef.current = targetWave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0 ? targetWave : 0
           const burst = getWaveSpawnConfig(targetWave, timeSurvivedRef.current).waveBurst
           for (let i = 0; i < burst; i++) {
@@ -1466,7 +1956,235 @@ const GameContainer: React.FC<GameContainerProps> = ({
           }
           if (targetWave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0) {
             spawnEnemyForWave(targetWave, true)
+          } else {
+            playMusicRef.current('gameplay')
           }
+        }
+        playSoundRef.current('wave')
+      } else if (action.type === 'spawn_enemy') {
+        const spawnOpt = getDevSpawnableEnemyById(action.enemyId)
+        if (!spawnOpt) return
+
+        const pc = player.getCenter()
+        const areaMeta = areaRef.current
+        const diffMeta = difficultyRef.current
+        const scaling = getEnemyScaling(waveRef.current, timeSurvivedRef.current)
+
+        if (spawnOpt.id === SECRET_DEVOURER_OF_GODS_ID) {
+          const portalX = Math.max(140, Math.min(ARENA_SIZE - 140, pc.x))
+          const portalY = Math.max(120, Math.min(ARENA_SIZE - 160, pc.y - 235))
+          const boss = new Enemy({
+            x: portalX - 38,
+            y: portalY - 38,
+            enemyData: SECRET_DEVOURER_OF_GODS_TEMPLATE,
+            target: player,
+            isBoss: true
+          })
+          boss.maxHealth = Math.max(
+            100000,
+            Math.round(boss.maxHealth * diffMeta.enemyHpMultiplier)
+          )
+          boss.health = boss.maxHealth
+          boss.damage = Math.max(24, Math.round(46 * diffMeta.enemyDamageMultiplier))
+          boss.powerScale = Math.max(2.0, boss.maxHealth / 400000)
+          boss.damageScale = Math.max(1.2, diffMeta.enemyDamageMultiplier * 1.4)
+          boss.coinValue = Math.round(
+            SECRET_DEVOURER_OF_GODS_TEMPLATE.coin_value * areaMeta.coinBonusMultiplier
+          )
+          const cutsceneDur = DEVOURER_CUTSCENE_DURATION_SECONDS
+          boss.isSpawning = true
+          boss.spawnTime = 0
+          boss.spawnDelay = cutsceneDur
+          boss.cutsceneDelayTimer = cutsceneDur
+
+          // Clear all currently alive enemies and pause arena/wave spawns while Devourer of Gods reigns
+          enemiesRef.current = [boss]
+          bossArenaRef.current = null
+          spawnAccumulatorRef.current = 0
+          if (isBreatherRef.current) {
+            isBreatherRef.current = false
+            breatherElapsedRef.current = 0
+            setIsBreather(false)
+          }
+
+          player.isInvulnerable = true
+          player.invulnerabilityTimer = cutsceneDur + 0.5
+          dogCutsceneRef.current = {
+            active: true,
+            kind: 'dog',
+            theme: DEVOURER_CUTSCENE_THEME,
+            elapsed: 0,
+            wallElapsed: 0,
+            duration: cutsceneDur,
+            line2Delay: 3.4,
+            portalX,
+            portalY,
+            triggeredPhase2Sound: false,
+            lastOpacityStep: 100,
+            particleAccumulator: 0,
+            pulseStep: 0
+          }
+          dogPostDropRef.current = null
+          dogCutsceneParticlesRef.current = []
+          dogGroundCracksRef.current = createDogGroundCracks(
+            portalX,
+            portalY,
+            8,
+            230,
+            cutsceneDur + 1.8,
+            [DEVOURER_CUTSCENE_THEME.primaryColor, DEVOURER_CUTSCENE_THEME.secondaryColor]
+          )
+          pushDogDestructiveBurst(dogCutsceneParticlesRef.current, portalX, portalY, {
+            shards: 28,
+            sparks: 24,
+            bolts: 6,
+            speedScale: 0.95,
+            palette: DEVOURER_CUTSCENE_THEME.palette,
+            shockwaves: [
+              {
+                maxRadius: 230,
+                color: DEVOURER_CUTSCENE_THEME.secondaryColor,
+                lineWidth: 4.5,
+                duration: 0.65
+              }
+            ]
+          })
+          dogBossActiveRef.current = true
+          setDogCutsceneUi({
+            active: true,
+            showSecondLine: false,
+            opacity: 1,
+            theme: DEVOURER_CUTSCENE_THEME
+          })
+          playMusicRef.current('universal_collapse')
+          return
+        }
+
+        const count = spawnOpt.isBoss
+          ? 1
+          : Math.max(1, Math.min(25, Math.round(action.count ?? 1)))
+        for (let k = 0; k < count; k++) {
+          const angle = (k / Math.max(1, count)) * Math.PI * 2 + Math.random() * 0.45
+          const dist = spawnOpt.isBoss ? 300 : 210 + Math.random() * 140
+          const sx = Math.max(40, Math.min(ARENA_SIZE - 80, pc.x + Math.cos(angle) * dist))
+          const sy = Math.max(40, Math.min(ARENA_SIZE - 80, pc.y + Math.sin(angle) * dist))
+          const spawned = new Enemy({
+            x: sx,
+            y: sy,
+            enemyData: spawnOpt.template,
+            target: player,
+            isBoss: spawnOpt.isBoss
+          })
+
+          const isDevAstralScourge = spawnOpt.id === ASTRAL_SCOURGE_BOSS_ID
+          const bossBuff = spawnOpt.isBoss
+            ? spawnOpt.id === 'ene_04'
+              ? getAreaOneBossBuff(waveRef.current, false)
+              : isDevAstralScourge
+                ? getAreaFinalBossCombatProfile('astral_citadel')
+                : spawnOpt.id.startsWith('boss_a2_')
+                  ? getAreaTwoBossBuff(waveRef.current)
+                  : null
+            : null
+
+          if (isDevAstralScourge) {
+            const finalHp = Math.round(
+              getAreaFinalBossHp('astral_citadel') *
+                (bossBuff ? bossBuff.hpMultiplier : 1) *
+                diffMeta.enemyHpMultiplier
+            )
+            spawned.maxHealth = finalHp
+            spawned.health = finalHp
+            spawned.damage = Math.max(
+              20,
+              Math.round(
+                36 *
+                  Math.min(2.5, scaling.damageMultiplier * 0.7) *
+                  areaMeta.enemyDamageMultiplier *
+                  diffMeta.enemyDamageMultiplier *
+                  (bossBuff ? bossBuff.damageMultiplier : 1)
+              )
+            )
+            spawned.coinValue = Math.round(
+              450 * areaMeta.coinBonusMultiplier * (bossBuff ? bossBuff.coinMultiplier : 1)
+            )
+            spawned.powerScale = finalHp / 2300
+            spawned.damageScale =
+              Math.min(2.4, scaling.damageMultiplier * 0.6) *
+              areaMeta.enemyDamageMultiplier *
+              diffMeta.enemyDamageMultiplier *
+              (bossBuff ? bossBuff.damageMultiplier : 1)
+            spawned.spawnDelay = 0.5
+            spawned.cutsceneDelayTimer = 0
+          } else {
+            spawned.maxHealth = Math.max(
+              1,
+              Math.round(
+                spawned.maxHealth *
+                  scaling.hpMultiplier *
+                  areaMeta.enemyHpMultiplier *
+                  diffMeta.enemyHpMultiplier *
+                  (bossBuff ? bossBuff.hpMultiplier : 1)
+              )
+            )
+            spawned.health = spawned.maxHealth
+            spawned.baseSpeed *=
+              scaling.speedMultiplier *
+              areaMeta.enemySpeedMultiplier *
+              diffMeta.enemySpeedMultiplier *
+              (bossBuff ? bossBuff.speedMultiplier : 1)
+            spawned.speed = spawned.baseSpeed
+            spawned.damage = Math.max(
+              1,
+              Math.round(
+                spawned.damage *
+                  scaling.damageMultiplier *
+                  areaMeta.enemyDamageMultiplier *
+                  diffMeta.enemyDamageMultiplier *
+                  (bossBuff ? bossBuff.damageMultiplier : 1)
+              )
+            )
+            spawned.coinValue = Math.max(
+              1,
+              Math.round(
+                spawned.coinValue *
+                  areaMeta.coinBonusMultiplier *
+                  (bossBuff ? bossBuff.coinMultiplier : 1)
+              )
+            )
+            spawned.powerScale =
+              scaling.hpMultiplier *
+              areaMeta.enemyHpMultiplier *
+              diffMeta.enemyHpMultiplier *
+              (bossBuff ? bossBuff.hpMultiplier : 1)
+            spawned.damageScale =
+              scaling.damageMultiplier *
+              areaMeta.enemyDamageMultiplier *
+              diffMeta.enemyDamageMultiplier *
+              (bossBuff ? bossBuff.damageMultiplier : 1)
+          }
+
+          if (bossBuff) {
+            spawned.damageReduction = bossBuff.damageReduction
+            spawned.enableEnrage = bossBuff.enableEnrage
+            spawned.shootCooldownMax = Math.max(
+              0.85,
+              spawned.shootCooldownMax * bossBuff.shootCooldownScale
+            )
+            spawned.specialCooldownMax = Math.max(
+              2.2,
+              spawned.specialCooldownMax * bossBuff.specialCooldownScale
+            )
+          }
+
+          if (spawnOpt.isBoss) {
+            spawned.bossTitle = spawnOpt.name.toUpperCase()
+            spawned.bossTier = isDevAstralScourge
+              ? 4
+              : Math.max(1, Math.floor(waveRef.current / WAVE_CONFIG.BOSS_WAVE_INTERVAL))
+          }
+
+          enemiesRef.current.push(spawned)
         }
         playSoundRef.current('wave')
       }
@@ -1811,6 +2529,37 @@ const GameContainer: React.FC<GameContainerProps> = ({
           )
         }
 
+        if (enemy.isDevourerOfGods) {
+          explosionsRef.current.push({
+            x: coinCenter.x,
+            y: coinCenter.y,
+            radius: 260,
+            timer: 0,
+            duration: 0.7,
+            color: 'rgba(34, 211, 238, 0.72)'
+          })
+          playSoundRef.current('levelup')
+          toast.success('DEVOURER OF GODS VANQUISHED! +1,000 Coin drop!')
+          const anyDogLeft = enemiesRef.current.some(
+            (other) => other !== enemy && other.isAlive && other.isDevourerOfGods
+          )
+          if (!anyDogLeft) {
+            dogBossActiveRef.current = false
+            spawnAccumulatorRef.current = 0
+            const anyRegularBossLeft = enemiesRef.current.some(
+              (other) => other !== enemy && other.isAlive && other.isBoss
+            )
+            playMusicRef.current(anyRegularBossLeft ? 'boss' : 'gameplay')
+          }
+        } else if (enemy.isBoss && !enemy.isFinalBoss && !dogBossActiveRef.current) {
+          const anyBossLeft = enemiesRef.current.some(
+            (other) => other !== enemy && other.isAlive && other.isBoss
+          )
+          if (!anyBossLeft) {
+            playMusicRef.current('gameplay')
+          }
+        }
+
         // Victory trigger upon defeating the Wave 15 Final Boss!
         if (enemy.isFinalBoss) {
           const totalBonusCoinChanceW15 =
@@ -1876,6 +2625,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
     const damagePlayer = (amount: number, knockbackOrigin?: { x: number; y: number }): boolean => {
       const player = playerRef.current
       if (!player || !player.isAlive || player.isInvulnerable) return false
+      if (dogCutsceneRef.current?.active) return false
       if (isDevUserRef.current && devSettingsRef.current.godMode) return false
 
       // Check Defensive Matrix / Plasma Barrier cooldown
@@ -3401,8 +4151,363 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const camera = cameraRef.current
 
       if (canvas && ctx && player && camera) {
+        let cutsceneZoom = 1
+        if (dogCutsceneRef.current?.active && gameStateRef.current !== 'playing') {
+          const cs = dogCutsceneRef.current
+          const liveCutsceneBoss = enemiesRef.current.find(
+            (e) => (cs.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss) && e.isAlive
+          )
+          const camFrame = computeDevourerCutsceneCameraFrame({
+            elapsed: cs.elapsed,
+            duration: cs.duration,
+            playerCenter: player.getCenter(),
+            bossFocus: liveCutsceneBoss ? liveCutsceneBoss.getCenter() : { x: cs.portalX, y: cs.portalY }
+          })
+          cutsceneZoom = camFrame.zoom
+        }
         if (gameStateRef.current === 'playing') {
           timeSurvivedRef.current += deltaTime
+
+          // Advance active boss entrance cutscene (Devourer of Gods beat-drop sync OR Wave 15 Final Boss)
+          const activeCutscene = dogCutsceneRef.current
+          if (activeCutscene?.active) {
+            activeCutscene.wallElapsed += deltaTime
+            if (activeCutscene.kind === 'dog') {
+              const ytPlaying = youtubePlaybackStartedRef.current
+              const ytTime = youtubeCurrentTimeRef.current
+              if (ytPlaying && ytTime !== null) {
+                // Lock cutscene progression directly to the live YouTube stream timestamp so it ends right on the beat drop
+                activeCutscene.elapsed = Math.min(
+                  activeCutscene.duration,
+                  Math.max(activeCutscene.elapsed, ytTime)
+                )
+              } else if (activeCutscene.wallElapsed > 3.5) {
+                // Offline/blocked embed fallback: continue advancing smoothly toward drop duration
+                activeCutscene.elapsed = Math.min(
+                  activeCutscene.duration,
+                  activeCutscene.elapsed + deltaTime
+                )
+              } else {
+                // Gentle rift buildup crawl while YouTube embed buffers audio
+                activeCutscene.elapsed = Math.min(1.0, activeCutscene.elapsed + deltaTime * 0.45)
+              }
+            } else {
+              activeCutscene.elapsed = Math.min(
+                activeCutscene.duration,
+                activeCutscene.elapsed + deltaTime
+              )
+            }
+
+            const remainingCutscene = Math.max(0, activeCutscene.duration - activeCutscene.elapsed)
+            for (const e of enemiesRef.current) {
+              if (e.isAlive && (activeCutscene.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss)) {
+                e.cutsceneDelayTimer = Math.max(0.02, remainingCutscene)
+              }
+            }
+            player.isInvulnerable = true
+            player.invulnerabilityTimer = Math.max(0.4, remainingCutscene + 0.35)
+
+            const theme = activeCutscene.theme
+            if (!activeCutscene.triggeredPhase2Sound && activeCutscene.elapsed >= activeCutscene.line2Delay) {
+              activeCutscene.triggeredPhase2Sound = true
+              if (activeCutscene.kind !== 'dog') {
+                playSoundRef.current('levelup')
+              }
+              setDogCutsceneUi({
+                active: true,
+                showSecondLine: true,
+                opacity: 1,
+                theme
+              })
+              dogGroundCracksRef.current.push(
+                ...createDogGroundCracks(
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  6,
+                  295,
+                  Math.max(3.5, remainingCutscene + 1.6),
+                  [theme.primaryColor, theme.secondaryColor]
+                )
+              )
+              if (activeCutscene.kind === 'dog') {
+                pushDogDestructiveBurst(
+                  dogCutsceneParticlesRef.current,
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  {
+                    shards: 34,
+                    sparks: 28,
+                    bolts: 7,
+                    speedScale: 1.15,
+                    palette: theme.palette,
+                    shockwaves: [
+                      { maxRadius: 340, color: theme.primaryColor, lineWidth: 5, duration: 0.85 },
+                      { maxRadius: 240, color: theme.secondaryColor, lineWidth: 3.5, duration: 0.65 }
+                    ]
+                  }
+                )
+              } else {
+                pushBossAreaInfernoBurst(
+                  dogCutsceneParticlesRef.current,
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  {
+                    flames: 42,
+                    embers: 36,
+                    speedScale: 1.15,
+                    palette: theme.palette,
+                    coreColor: theme.coreColor,
+                    shockwaves: [
+                      { maxRadius: 340, color: theme.primaryColor, lineWidth: 5, duration: 0.85 },
+                      { maxRadius: 240, color: theme.secondaryColor, lineWidth: 3.5, duration: 0.65 }
+                    ]
+                  }
+                )
+              }
+            }
+
+            // Continuous boss entrance particle buildup (cosmic rift for DoG vs area-themed flames/embers for Wave 15)
+            const buildupRatio = Math.min(1, activeCutscene.elapsed / activeCutscene.duration)
+            activeCutscene.particleAccumulator += deltaTime * (16 + buildupRatio * 34)
+            const liveBossHead = enemiesRef.current.find(
+              (e) => (activeCutscene.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss) && e.isAlive
+            )
+            const burstOrigin = liveBossHead
+              ? liveBossHead.getCenter()
+              : { x: activeCutscene.portalX, y: activeCutscene.portalY }
+            while (activeCutscene.particleAccumulator >= 1) {
+              activeCutscene.particleAccumulator -= 1
+              if (activeCutscene.kind === 'dog') {
+                const ang = Math.random() * Math.PI * 2
+                const spawnDist = 110 + Math.random() * 190
+                dogCutsceneParticlesRef.current.push({
+                  kind: 'spark',
+                  x: activeCutscene.portalX + Math.cos(ang) * spawnDist,
+                  y: activeCutscene.portalY + Math.sin(ang) * spawnDist * 0.65,
+                  vx: -Math.cos(ang) * (160 + buildupRatio * 180),
+                  vy: -Math.sin(ang) * (120 + buildupRatio * 140),
+                  size: 2.2 + Math.random() * 2.6,
+                  timer: 0,
+                  duration: 0.42 + Math.random() * 0.25,
+                  color: Math.random() < 0.5 ? theme.primaryColor : theme.secondaryColor,
+                  attractX: activeCutscene.portalX,
+                  attractY: activeCutscene.portalY
+                })
+                if (
+                  activeCutscene.elapsed >= activeCutscene.line2Delay * 0.75 &&
+                  Math.random() < 0.48 + buildupRatio * 0.35
+                ) {
+                  const sAng = Math.random() * Math.PI * 2
+                  const sSpd = 95 + Math.random() * (180 + buildupRatio * 220)
+                  dogCutsceneParticlesRef.current.push({
+                    kind: 'shard',
+                    x: burstOrigin.x + (Math.random() - 0.5) * 32,
+                    y: burstOrigin.y + (Math.random() - 0.5) * 24,
+                    vx: Math.cos(sAng) * sSpd,
+                    vy: Math.sin(sAng) * sSpd,
+                    size: 4 + Math.random() * 7.5,
+                    angle: Math.random() * Math.PI * 2,
+                    spin: (Math.random() - 0.5) * 14,
+                    timer: 0,
+                    duration: 0.48 + Math.random() * 0.42,
+                    color: theme.palette[Math.floor(Math.random() * theme.palette.length)]
+                  })
+                }
+                if (Math.random() < 0.22 + buildupRatio * 0.28) {
+                  dogCutsceneParticlesRef.current.push(
+                    createDogLightningArc(
+                      activeCutscene.portalX,
+                      activeCutscene.portalY,
+                      Math.random() * Math.PI * 2,
+                      90 + Math.random() * (110 + buildupRatio * 110),
+                      Math.random() < 0.5 ? theme.primaryColor : theme.coreColor
+                    )
+                  )
+                }
+              } else {
+                // Area-themed roaring flame tongues & convective rising embers around Wave 15 Final Boss
+                const fAng = Math.random() * Math.PI * 2
+                const ringR = 16 + Math.random() * (56 + buildupRatio * 48)
+                const radialOut = 32 + buildupRatio * 105
+                dogCutsceneParticlesRef.current.push({
+                  kind: 'flame',
+                  x: burstOrigin.x + Math.cos(fAng) * ringR,
+                  y: burstOrigin.y + Math.sin(fAng) * ringR * 0.55 + 16,
+                  vx: Math.cos(fAng) * radialOut,
+                  vy: Math.sin(fAng) * radialOut * 0.35 - (55 + Math.random() * 95),
+                  radius: 9 + Math.random() * (12 + buildupRatio * 9),
+                  riseSpeed: 120 + Math.random() * (140 + buildupRatio * 110),
+                  swayPhase: Math.random() * Math.PI * 2,
+                  swayAmp: 24 + Math.random() * 38,
+                  timer: 0,
+                  duration: 0.45 + Math.random() * 0.45,
+                  color: theme.palette[Math.floor(Math.random() * theme.palette.length)],
+                  coreColor: theme.coreColor
+                })
+                if (Math.random() < 0.72 + buildupRatio * 0.25) {
+                  const eAng = Math.random() * Math.PI * 2
+                  const eSpd = 65 + Math.random() * (145 + buildupRatio * 140)
+                  dogCutsceneParticlesRef.current.push({
+                    kind: 'ember',
+                    x: burstOrigin.x + (Math.random() - 0.5) * 90,
+                    y: burstOrigin.y + (Math.random() - 0.5) * 45 + 12,
+                    vx: Math.cos(eAng) * eSpd,
+                    vy: -75 - Math.random() * (110 + buildupRatio * 90),
+                    size: 2.0 + Math.random() * 3.0,
+                    timer: 0,
+                    duration: 0.55 + Math.random() * 0.55,
+                    color: Math.random() < 0.5 ? theme.primaryColor : theme.secondaryColor,
+                    swayPhase: Math.random() * Math.PI * 2
+                  })
+                }
+              }
+            }
+
+            // Rhythmic pre-drop shockwave pulses during final buildup crescendo
+            const preDropStart =
+              activeCutscene.kind === 'dog'
+                ? Math.max(4.5, activeCutscene.duration - 3.6)
+                : Math.max(activeCutscene.line2Delay + 0.5, activeCutscene.duration - 2.0)
+            const pulseInterval = activeCutscene.kind === 'dog' ? 0.85 : 0.62
+            if (activeCutscene.elapsed >= preDropStart) {
+              const pulseBucket = Math.floor((activeCutscene.elapsed - preDropStart) / pulseInterval) + 1
+              if (pulseBucket > activeCutscene.pulseStep) {
+                activeCutscene.pulseStep = pulseBucket
+                if (activeCutscene.kind === 'dog') {
+                  pushDogDestructiveBurst(
+                    dogCutsceneParticlesRef.current,
+                    activeCutscene.portalX,
+                    activeCutscene.portalY,
+                    {
+                      shards: 16,
+                      sparks: 16,
+                      bolts: 5,
+                      speedScale: 1.05,
+                      palette: theme.palette,
+                      shockwaves: [
+                        {
+                          maxRadius: 240 + pulseBucket * 38,
+                          color: pulseBucket % 2 === 0 ? theme.primaryColor : theme.secondaryColor,
+                          lineWidth: 4,
+                          duration: 0.55
+                        }
+                      ]
+                    }
+                  )
+                } else {
+                  pushBossAreaInfernoBurst(
+                    dogCutsceneParticlesRef.current,
+                    activeCutscene.portalX,
+                    activeCutscene.portalY,
+                    {
+                      flames: 26,
+                      embers: 22,
+                      speedScale: 1.08,
+                      palette: theme.palette,
+                      coreColor: theme.coreColor,
+                      shockwaves: [
+                        {
+                          maxRadius: 240 + pulseBucket * 38,
+                          color: pulseBucket % 2 === 0 ? theme.primaryColor : theme.secondaryColor,
+                          lineWidth: 4,
+                          duration: 0.55
+                        }
+                      ]
+                    }
+                  )
+                }
+              }
+            }
+
+            const fadeSpan = activeCutscene.kind === 'dog' ? 1.1 : 0.75
+            const fadeStart = Math.max(0, activeCutscene.duration - fadeSpan)
+            if (activeCutscene.elapsed >= fadeStart && activeCutscene.elapsed < activeCutscene.duration) {
+              const fadeAlpha = Math.max(0, Math.min(1, remainingCutscene / fadeSpan))
+              const quantized = Math.round(fadeAlpha * 20) * 5
+              if (quantized !== activeCutscene.lastOpacityStep) {
+                activeCutscene.lastOpacityStep = quantized
+                setDogCutsceneUi({
+                  active: true,
+                  showSecondLine: true,
+                  opacity: fadeAlpha,
+                  theme
+                })
+              }
+            }
+            if (activeCutscene.elapsed >= activeCutscene.duration) {
+              for (const e of enemiesRef.current) {
+                if (e.isAlive && (activeCutscene.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss)) {
+                  e.cutsceneDelayTimer = 0
+                  e.spawnTime = Math.max(e.spawnTime, e.spawnDelay)
+                  e.isSpawning = false
+                }
+              }
+              explosionsRef.current.push({
+                x: activeCutscene.portalX,
+                y: activeCutscene.portalY,
+                radius: 340,
+                timer: 0,
+                duration: 0.65,
+                color: theme.secondaryColor
+              })
+              dogGroundCracksRef.current.push(
+                ...createDogGroundCracks(
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  10,
+                  360,
+                  1.8,
+                  [theme.primaryColor, theme.secondaryColor]
+                )
+              )
+              if (activeCutscene.kind === 'dog') {
+                pushDogDestructiveBurst(
+                  dogCutsceneParticlesRef.current,
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  {
+                    shards: 64,
+                    sparks: 56,
+                    bolts: 12,
+                    speedScale: 1.45,
+                    palette: theme.palette,
+                    shockwaves: [
+                      { maxRadius: 520, color: theme.primaryColor, lineWidth: 7, duration: 0.78 },
+                      { maxRadius: 380, color: theme.secondaryColor, lineWidth: 5.5, duration: 0.6 },
+                      { maxRadius: 260, color: '#FFFFFF', lineWidth: 4, duration: 0.42 }
+                    ]
+                  }
+                )
+              } else {
+                pushBossAreaInfernoBurst(
+                  dogCutsceneParticlesRef.current,
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  {
+                    flames: 72,
+                    embers: 68,
+                    speedScale: 1.45,
+                    palette: theme.palette,
+                    coreColor: theme.coreColor,
+                    shockwaves: [
+                      { maxRadius: 520, color: theme.primaryColor, lineWidth: 7, duration: 0.78 },
+                      { maxRadius: 380, color: theme.secondaryColor, lineWidth: 5.5, duration: 0.6 },
+                      { maxRadius: 260, color: '#FFFFFF', lineWidth: 4, duration: 0.42 }
+                    ]
+                  }
+                )
+              }
+              dogPostDropRef.current = {
+                elapsed: 0,
+                duration: activeCutscene.duration,
+                line2Delay: activeCutscene.line2Delay,
+                theme
+              }
+              dogCutsceneRef.current = null
+              setDogCutsceneUi(null)
+              playSoundRef.current('wave')
+            }
+          }
 
           // 1. Movement (Keyboard + Touch D-pad + Shield Paladin Spacebar Dash)
           dashCooldownRef.current = Math.max(0, dashCooldownRef.current - deltaTime)
@@ -3490,20 +4595,40 @@ const GameContainer: React.FC<GameContainerProps> = ({
           if (playerTrailRef.current.length > 48) {
             playerTrailRef.current.shift()
           }
-          if (bossArenaRef.current) {
+          const activeCutsceneCamera = dogCutsceneRef.current
+          if (activeCutsceneCamera?.active) {
+            const liveFocusBoss = enemiesRef.current.find(
+              (e) =>
+                (activeCutsceneCamera.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss) && e.isAlive
+            )
+            const bossFocus = liveFocusBoss
+              ? liveFocusBoss.getCenter()
+              : { x: activeCutsceneCamera.portalX, y: activeCutsceneCamera.portalY }
+            const camFrame = computeDevourerCutsceneCameraFrame({
+              elapsed: activeCutsceneCamera.elapsed,
+              duration: activeCutsceneCamera.duration,
+              playerCenter: updatedCenter,
+              bossFocus
+            })
+            camera.updateWithLerp(camFrame.focusX, camFrame.focusY, 0.24)
+            cutsceneZoom = camFrame.zoom
+          } else if (bossArenaRef.current) {
             const ba = bossArenaRef.current
             camera.update(ba.left + ba.width / 2, ba.top + ba.height / 2)
           } else {
             camera.update(updatedCenter.x, updatedCenter.y)
           }
 
-          // 2. Wave + Breather State Machine (30s Active / 3s Breather; Wave 15 Boss solo showdown; Endless 16+ in Area 2)
-          if (isBreatherRef.current) {
+          // 2. Wave + Breather State Machine (paused completely while Devourer of Gods is active)
+          const areaMaxWave = getAreaMaxWave(areaRef.current.id)
+          if (dogBossActiveRef.current) {
+            spawnAccumulatorRef.current = 0
+          } else if (isBreatherRef.current) {
             breatherElapsedRef.current += deltaTime
             if (breatherElapsedRef.current >= WAVE_CONFIG.BREATHER_DURATION_SECONDS) {
               isBreatherRef.current = false
               breatherElapsedRef.current = 0
-              if (waveRef.current < WAVE_CONFIG.MAX_WAVE || endlessModeRef.current) {
+              if (waveRef.current < areaMaxWave || endlessModeRef.current) {
                 waveRef.current += 1
               }
               waveElapsedRef.current = 0
@@ -3521,37 +4646,49 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 toast.success(`HERO UNLOCKED: ${unlockedHero.name}!`)
               }
 
-              if (waveRef.current === WAVE_CONFIG.MAX_WAVE && !endlessModeRef.current) {
-                // Disable regular spawns & remove leftover regular adds for pure Wave 15 Final Boss duel
+              if (waveRef.current === areaMaxWave && !endlessModeRef.current) {
+                // Disable regular spawns & remove leftover regular adds for pure Final Boss duel
                 enemiesRef.current = enemiesRef.current.filter((e) => e.isBoss && e.isAlive)
 
-                // Lock visible Boss Arena around current screen and spawn stationary upper-center Wave 15 Final Boss
-                if (!bossArenaRef.current) {
-                  const aw = canvas.width
-                  const ah = canvas.height
-                  const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, updatedCenter.x - aw / 2))
-                  const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, updatedCenter.y - ah / 2))
-                  bossArenaRef.current = { left, top, width: aw, height: ah }
-                  // Ensure player is not spawned overlapping the upper-center boss perch
-                  const bossAnchorX = left + aw / 2
-                  const bossAnchorY = top + Math.max(210, Math.round(ah * 0.27))
-                  if (Math.hypot(updatedCenter.x - bossAnchorX, updatedCenter.y - bossAnchorY) < 130) {
-                    player.y = Math.min(top + ah - player.height - 40, bossAnchorY + 185)
+                if (areaRef.current.id !== 'astral_citadel') {
+                  // Lock visible Boss Arena around current screen for stationary Area 1 Wave 15 Final Boss
+                  if (!bossArenaRef.current) {
+                    const aw = canvas.width
+                    const ah = canvas.height
+                    const left = Math.max(24, Math.min(ARENA_SIZE - aw - 24, updatedCenter.x - aw / 2))
+                    const top = Math.max(24, Math.min(ARENA_SIZE - ah - 24, updatedCenter.y - ah / 2))
+                    bossArenaRef.current = { left, top, width: aw, height: ah }
+                    const bossAnchorX = left + aw / 2
+                    const bossAnchorY = top + Math.max(210, Math.round(ah * 0.27))
+                    if (Math.hypot(updatedCenter.x - bossAnchorX, updatedCenter.y - bossAnchorY) < 130) {
+                      player.y = Math.min(top + ah - player.height - 40, bossAnchorY + 185)
+                    }
                   }
+                } else {
+                  // Area 2 Wave 20 Astral Scourge roams/lunges freely across the full arena like a cosmic worm
+                  bossArenaRef.current = null
                 }
+
                 if (!finalBossSpawnedRef.current) {
                   finalBossSpawnedRef.current = true
-                  bossSpawnedWaveRef.current = WAVE_CONFIG.MAX_WAVE
-                  spawnEnemyForWave(WAVE_CONFIG.MAX_WAVE, true)
+                  bossSpawnedWaveRef.current = areaMaxWave
+                  spawnEnemyForWave(areaMaxWave, true)
                   toast.warning(
                     areaRef.current.id === 'astral_citadel'
-                      ? 'FINAL WAVE 15: Dodge closing side lasers, tracking strikes & bullet hell!'
+                      ? 'FINAL WAVE 20 — ASTRAL SCOURGE: Evade laser grids, portal lunges & splitting astral orbs!'
                       : 'FINAL WAVE 15: Dodge closing side lasers, tracking strikes & bullet hell!'
                   )
                 }
               } else {
                 // Wave-start swarm reinforcement surge scaled per wave (melee first so ranged don't stack)
-                if (shouldSpawnRegularEnemiesInWave(waveRef.current, endlessModeRef.current)) {
+                if (
+                  shouldSpawnRegularEnemiesInWave(
+                    waveRef.current,
+                    endlessModeRef.current,
+                    dogBossActiveRef.current,
+                    areaRef.current.id
+                  )
+                ) {
                   const waveCfg = getWaveSpawnConfig(waveRef.current, timeSurvivedRef.current)
                   for (
                     let i = 0;
@@ -3562,7 +4699,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   }
                 }
 
-                // Boss alert every 5 waves (Wave 5, 10, and Endless Wave 20, 25, 30...)
+                // Boss alert every 5 waves (Wave 5, 10, Area 2 Wave 15, and Endless bosses)
                 if (waveRef.current % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0) {
                   spawnEnemyForWave(waveRef.current, true)
                   bossSpawnedWaveRef.current = waveRef.current
@@ -3573,21 +4710,32 @@ const GameContainer: React.FC<GameContainerProps> = ({
           } else {
             waveElapsedRef.current += deltaTime
 
-            // Continuous swarm spawning (completely disabled during Wave 15 Final Boss showdown)
-            if (shouldSpawnRegularEnemiesInWave(waveRef.current, endlessModeRef.current)) {
+            // Continuous swarm spawning (disabled during Final Boss showdown & Devourer of Gods)
+            if (
+              shouldSpawnRegularEnemiesInWave(
+                waveRef.current,
+                endlessModeRef.current,
+                dogBossActiveRef.current,
+                areaRef.current.id
+              )
+            ) {
               const waveCfg = getWaveSpawnConfig(waveRef.current, timeSurvivedRef.current)
               const diffMeta = difficultyRef.current
+              const areaMeta = areaRef.current
               const capMult =
-                diffMeta.id === 'expert'
+                (diffMeta.id === 'expert'
                   ? 1.15
                   : diffMeta.id === 'hard'
                     ? 1.08
                     : diffMeta.id === 'easy'
                       ? 0.85
-                      : 1
-              const effectiveMaxActive = Math.min(360, Math.round(waveCfg.maxActiveEnemies * capMult))
+                      : 1) * (areaMeta.id === 'astral_citadel' ? 1.15 : 1)
+              const effectiveMaxActive = Math.min(380, Math.round(waveCfg.maxActiveEnemies * capMult))
               spawnAccumulatorRef.current +=
-                waveCfg.spawnRate * diffMeta.spawnRateMultiplier * deltaTime
+                waveCfg.spawnRate *
+                diffMeta.spawnRateMultiplier *
+                areaMeta.enemySpawnRateMultiplier *
+                deltaTime
               while (
                 spawnAccumulatorRef.current >= 1 &&
                 enemiesRef.current.length < effectiveMaxActive
@@ -3598,7 +4746,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
 
             if (
-              (waveRef.current < WAVE_CONFIG.MAX_WAVE || endlessModeRef.current) &&
+              (waveRef.current < areaMaxWave || endlessModeRef.current) &&
               waveElapsedRef.current >= WAVE_CONFIG.WAVE_DURATION_SECONDS
             ) {
               isBreatherRef.current = true
@@ -4397,6 +5545,17 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   color: phaseNum === 2 ? '#38BDF8' : '#FF0055',
                   timer: 1.8
                 })
+              } else if (enemy.isDevourerOfGods) {
+                toast.warning(
+                  `${enemy.bossTitle} — PHASE 2: UNIVERSAL COLLAPSE & DIAGONAL LASER WEBS!`
+                )
+                floatingTextsRef.current.push({
+                  x: ec.x,
+                  y: enemy.y - 26,
+                  text: 'UNIVERSAL COLLAPSE!',
+                  color: '#E879F9',
+                  timer: 2.0
+                })
               } else {
                 toast.warning(`${enemy.bossTitle} ENRAGED!`)
                 floatingTextsRef.current.push({
@@ -4425,6 +5584,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const enemyCircle = { x: ec.x, y: ec.y, radius: enemy.width / 2 }
             if (!enemy.isSpawning && Collision.circleCircle(playerCircle, enemyCircle)) {
               damagePlayer(enemy.damage, ec)
+            } else if (!enemy.isSpawning && checkDevourerSegmentHit(enemy, playerCircle)) {
+              damagePlayer(Math.max(12, Math.round(enemy.damage * 0.65)), ec)
             }
 
             // Enemy projectile collisions against player
@@ -4460,7 +5621,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'half_arena' ||
                   telegraph.kind === 'rotating_cross_lasers' ||
                   telegraph.kind === 'void_meteor_salvo' ||
-                  telegraph.kind === 'singularity_grid'
+                  telegraph.kind === 'singularity_grid' ||
+                  telegraph.kind === 'cosmic_laser_walls' ||
+                  telegraph.kind === 'cosmic_portal_lunge' ||
+                  telegraph.kind === 'cosmic_orb_barrage'
 
                 if (
                   isMajorWave15Warning &&
@@ -4491,7 +5655,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'pursuit_beam' ||
                   telegraph.kind === 'mega_laser' ||
                   telegraph.kind === 'rotating_cross_lasers' ||
-                  telegraph.kind === 'singularity_grid'
+                  telegraph.kind === 'singularity_grid' ||
+                  telegraph.kind === 'cosmic_laser_walls'
                 ) {
                   // Sweeping/active beams stay lethal across frames and only lock out after actually landing
                   if (!telegraph.hasDamagedPlayer && checkBossTelegraphHit(telegraph, playerCircle)) {
@@ -4567,11 +5732,14 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const projCircle = { x: proj.x, y: proj.y, radius: proj.width / 2 }
             for (const enemy of enemiesRef.current) {
               if (!enemy.isAlive || enemy.isSpawning) continue
-              if (proj.explodeAtEnd && proj.hitEntities.has(enemy)) continue
+              if ((proj.explodeAtEnd || enemy.isWormBoss) && proj.hitEntities.has(enemy)) continue
               const ec = enemy.getCenter()
               const enemyCircle = { x: ec.x, y: ec.y, radius: enemy.width / 2 }
 
-              if (Collision.circleCircle(projCircle, enemyCircle)) {
+              if (Collision.circleCircle(projCircle, enemyCircle) || checkDevourerSegmentHit(enemy, projCircle)) {
+                if (enemy.isWormBoss) {
+                  proj.hitEntities.add(enemy)
+                }
                 if (proj.explodeAtEnd) {
                   proj.hitEntities.add(enemy)
                   const willExpireNow = proj.pierceCount >= proj.maxPierces
@@ -4677,6 +5845,54 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
           }
 
+          if (dogPostDropRef.current) {
+            dogPostDropRef.current.elapsed += deltaTime
+            if (dogPostDropRef.current.elapsed >= 0.95) {
+              dogPostDropRef.current = null
+            }
+          }
+          for (let i = dogGroundCracksRef.current.length - 1; i >= 0; i--) {
+            const crack = dogGroundCracksRef.current[i]
+            crack.timer += deltaTime
+            if (crack.timer >= crack.maxDuration) {
+              dogGroundCracksRef.current.splice(i, 1)
+            }
+          }
+          for (let i = dogCutsceneParticlesRef.current.length - 1; i >= 0; i--) {
+            const pt = dogCutsceneParticlesRef.current[i]
+            pt.timer += deltaTime
+            if (pt.timer >= pt.duration) {
+              dogCutsceneParticlesRef.current.splice(i, 1)
+              continue
+            }
+            if (pt.kind === 'shard') {
+              pt.x += pt.vx * deltaTime
+              pt.y += pt.vy * deltaTime
+              pt.vx *= Math.pow(0.28, deltaTime)
+              pt.vy *= Math.pow(0.28, deltaTime)
+              pt.angle += pt.spin * deltaTime
+            } else if (pt.kind === 'spark') {
+              if (pt.attractX !== undefined && pt.attractY !== undefined) {
+                const dx = pt.attractX - pt.x
+                const dy = pt.attractY - pt.y
+                const dist = Math.hypot(dx, dy) || 1
+                pt.vx += (dx / dist) * 780 * deltaTime
+                pt.vy += (dy / dist) * 780 * deltaTime
+              }
+              pt.x += pt.vx * deltaTime
+              pt.y += pt.vy * deltaTime
+            } else if (pt.kind === 'flame') {
+              pt.vy -= pt.riseSpeed * deltaTime
+              pt.vx *= Math.pow(0.32, deltaTime)
+              pt.x += (pt.vx + Math.sin(pt.timer * 14 + pt.swayPhase) * pt.swayAmp) * deltaTime
+              pt.y += pt.vy * deltaTime
+            } else if (pt.kind === 'ember') {
+              pt.vy -= 145 * deltaTime
+              pt.x += (pt.vx + Math.sin(pt.timer * 10 + pt.swayPhase) * 42) * deltaTime
+              pt.y += pt.vy * deltaTime
+            }
+          }
+
           // 9. Periodic HUD State Sync & Battle Coin Wallet Sync (~10 Hz to keep React ultra-fast)
           hudSyncTimerRef.current += deltaTime
           if (hudSyncTimerRef.current >= 0.1) {
@@ -4719,20 +5935,52 @@ const GameContainer: React.FC<GameContainerProps> = ({
         ctx.fillStyle = currentArea.floorColor
         ctx.fillRect(0, 0, canvas.width, canvas.height)
 
+        const activeShake = dogCutsceneRef.current?.active
+          ? computeBossCutsceneShake({
+              elapsed: dogCutsceneRef.current.elapsed,
+              duration: dogCutsceneRef.current.duration,
+              sampleTime: dogCutsceneRef.current.wallElapsed,
+              line2Time: dogCutsceneRef.current.line2Delay
+            })
+          : dogPostDropRef.current
+            ? computeBossCutsceneShake({
+                elapsed: dogPostDropRef.current.duration + dogPostDropRef.current.elapsed,
+                duration: dogPostDropRef.current.duration,
+                sampleTime: timeSurvivedRef.current,
+                line2Time: dogPostDropRef.current.line2Delay
+              })
+            : { offsetX: 0, offsetY: 0, intensity: 0, flashAlpha: 0 }
+
+        const hasWorldTransform =
+          cutsceneZoom > 1.001 ||
+          Math.abs(activeShake.offsetX) > 0.05 ||
+          Math.abs(activeShake.offsetY) > 0.05
+
+        if (hasWorldTransform) {
+          ctx.save()
+          ctx.translate(activeShake.offsetX, activeShake.offsetY)
+          if (cutsceneZoom > 1.001) {
+            ctx.translate(canvas.width / 2, canvas.height / 2)
+            ctx.scale(cutsceneZoom, cutsceneZoom)
+            ctx.translate(-canvas.width / 2, -canvas.height / 2)
+          }
+        }
+
         // Tactical Grid
         const gridSize = 64
+        const gridPad = hasWorldTransform ? gridSize * 2 : 0
         const startX = -(camera.x % gridSize)
         const startY = -(camera.y % gridSize)
         ctx.strokeStyle = currentArea.gridColor
         ctx.lineWidth = 1
         ctx.beginPath()
-        for (let x = startX; x < canvas.width; x += gridSize) {
-          ctx.moveTo(x, 0)
-          ctx.lineTo(x, canvas.height)
+        for (let x = startX - gridPad; x < canvas.width + gridPad; x += gridSize) {
+          ctx.moveTo(x, -gridPad)
+          ctx.lineTo(x, canvas.height + gridPad)
         }
-        for (let y = startY; y < canvas.height; y += gridSize) {
-          ctx.moveTo(0, y)
-          ctx.lineTo(canvas.width, y)
+        for (let y = startY - gridPad; y < canvas.height + gridPad; y += gridSize) {
+          ctx.moveTo(-gridPad, y)
+          ctx.lineTo(canvas.width + gridPad, y)
         }
         ctx.stroke()
 
@@ -4750,6 +5998,42 @@ const GameContainer: React.FC<GameContainerProps> = ({
               ctx.fill()
             }
           }
+        }
+
+        // Arena ground fracture fault lines scarred by the Devourer of Gods' cosmic rift
+        for (const crack of dogGroundCracksRef.current) {
+          const remain = Math.max(0, crack.maxDuration - crack.timer)
+          const crackAlpha =
+            crack.timer < 0.18
+              ? crack.timer / 0.18
+              : remain < 0.75
+                ? Math.max(0, remain / 0.75)
+                : 0.92
+          ctx.save()
+          ctx.lineCap = 'round'
+          ctx.globalAlpha = crackAlpha * 0.42
+          ctx.strokeStyle = crack.color
+          for (const seg of crack.segments) {
+            const p1 = camera.worldToScreen(seg.x1, seg.y1)
+            const p2 = camera.worldToScreen(seg.x2, seg.y2)
+            ctx.lineWidth = seg.width * 2.4
+            ctx.beginPath()
+            ctx.moveTo(p1.x, p1.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
+          }
+          ctx.globalAlpha = crackAlpha * 0.9
+          ctx.strokeStyle = '#F8FAFC'
+          for (const seg of crack.segments) {
+            const p1 = camera.worldToScreen(seg.x1, seg.y1)
+            const p2 = camera.worldToScreen(seg.x2, seg.y2)
+            ctx.lineWidth = Math.max(0.8, seg.width * 0.55)
+            ctx.beginPath()
+            ctx.moveTo(p1.x, p1.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
+          }
+          ctx.restore()
         }
 
         // Arena Boundary
@@ -5610,6 +6894,108 @@ const GameContainer: React.FC<GameContainerProps> = ({
           ctx.restore()
         }
 
+        // Boss Cutscene Dimensional Rift (Devourer of Gods) OR Area Inferno Pyre Crown (Wave 15 Final Bosses)
+        if (dogCutsceneRef.current?.active) {
+          const cs = dogCutsceneRef.current
+          const pScr = camera.worldToScreen(cs.portalX, cs.portalY)
+          const tFrac = Math.min(1, cs.elapsed / cs.duration)
+          const openFrac = tFrac < 0.25 ? tFrac / 0.25 : tFrac > 0.85 ? Math.max(0, (1 - tFrac) / 0.15) : 1
+
+          ctx.save()
+          if (cs.kind === 'dog') {
+            const riftRx = 42 + openFrac * 86
+            const riftRy = 16 + openFrac * 34
+
+            ctx.globalAlpha = 0.88 * openFrac
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)'
+            ctx.beginPath()
+            ctx.ellipse(pScr.x, pScr.y, riftRx * 1.18, riftRy * 1.18, 0, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.globalAlpha = 0.26 * openFrac
+            ctx.fillStyle = cs.theme.secondaryColor
+            ctx.beginPath()
+            ctx.ellipse(pScr.x, pScr.y, riftRx * 1.38, riftRy * 1.38, 0, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.globalAlpha = 0.92
+            ctx.strokeStyle = cs.theme.secondaryColor
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.ellipse(pScr.x, pScr.y, riftRx, riftRy, 0, 0, Math.PI * 2)
+            ctx.stroke()
+
+            ctx.strokeStyle = cs.theme.primaryColor
+            ctx.lineWidth = 2
+            ctx.setLineDash([12, 8])
+            ctx.lineDashOffset = -cs.elapsed * 95
+            ctx.beginPath()
+            ctx.ellipse(pScr.x, pScr.y, riftRx * 0.78, riftRy * 0.78, 0, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.setLineDash([])
+          } else {
+            // Area-specific blazing inferno / solar pyre pedestal beneath Wave 15 Boss
+            const blazeR = 64 + openFrac * (68 + tFrac * 34)
+            const flicker = 0.92 + Math.sin(cs.elapsed * 22) * 0.08
+
+            ctx.globalAlpha = 0.36 * openFrac * flicker
+            ctx.fillStyle = cs.theme.primaryColor
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, blazeR * 1.35, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.globalAlpha = 0.42 * openFrac * flicker
+            ctx.fillStyle = cs.theme.secondaryColor
+            ctx.beginPath()
+            ctx.ellipse(pScr.x, pScr.y + 18, blazeR * 1.15, blazeR * 0.48, 0, 0, Math.PI * 2)
+            ctx.fill()
+
+            // Swirling flame petals around the awakening boss core
+            const petalCount = 10
+            for (let f = 0; f < petalCount; f++) {
+              const fa = cs.elapsed * 3.4 + (f / petalCount) * Math.PI * 2
+              const fx = pScr.x + Math.cos(fa) * (blazeR * 0.72)
+              const fy = pScr.y + Math.sin(fa) * (blazeR * 0.34)
+              const fh = 24 + openFrac * 26 + Math.sin(cs.elapsed * 16 + f) * 7
+              ctx.globalAlpha = 0.55 * openFrac
+              ctx.fillStyle = f % 2 === 0 ? cs.theme.primaryColor : cs.theme.secondaryColor
+              ctx.beginPath()
+              ctx.moveTo(fx, fy - fh)
+              ctx.quadraticCurveTo(fx + fh * 0.42, fy - fh * 0.25, fx, fy + fh * 0.22)
+              ctx.quadraticCurveTo(fx - fh * 0.42, fy - fh * 0.25, fx, fy - fh)
+              ctx.fill()
+            }
+
+            ctx.globalAlpha = 0.85 * openFrac
+            ctx.strokeStyle = cs.theme.coreColor
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.ellipse(pScr.x, pScr.y + 12, blazeR * 0.88, blazeR * 0.36, 0, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+
+          // Burst shockwave ring when second phase triggers & pre-drop surge
+          if (cs.elapsed >= cs.line2Delay && cs.elapsed <= cs.line2Delay + 1.1) {
+            const burstFrac = (cs.elapsed - cs.line2Delay) / 1.1
+            ctx.globalAlpha = Math.max(0, 1 - burstFrac)
+            ctx.strokeStyle = cs.theme.primaryColor
+            ctx.lineWidth = 4
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, 40 + burstFrac * 260, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+          if (cs.elapsed >= cs.duration - 0.85) {
+            const dropFrac = Math.min(1, (cs.elapsed - (cs.duration - 0.85)) / 0.85)
+            ctx.globalAlpha = 0.25 + dropFrac * 0.65
+            ctx.strokeStyle = cs.theme.coreColor
+            ctx.lineWidth = 5
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, 22 + dropFrac * 180, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
+
         // Enemies
         for (const enemy of enemiesRef.current) {
           enemy.draw(ctx, camera)
@@ -5772,6 +7158,156 @@ const GameContainer: React.FC<GameContainerProps> = ({
             ctx.restore()
           }
         }
+
+        // Devourer of Gods destructive cutscene particles (debris shards, implosion sparks, lightning, shockwaves)
+        for (const pt of dogCutsceneParticlesRef.current) {
+          const frac = Math.min(1, pt.timer / pt.duration)
+          const alpha = Math.max(0, 1 - frac)
+          ctx.save()
+          if (pt.kind === 'shard') {
+            const sp = camera.worldToScreen(pt.x, pt.y)
+            ctx.translate(sp.x, sp.y)
+            ctx.rotate(pt.angle)
+            ctx.globalAlpha = alpha * 0.95
+            ctx.fillStyle = pt.color
+            ctx.strokeStyle = '#FFFFFF'
+            ctx.lineWidth = 1.1
+            ctx.beginPath()
+            ctx.moveTo(pt.size * 1.1, 0)
+            ctx.lineTo(-pt.size * 0.55, pt.size * 0.55)
+            ctx.lineTo(-pt.size * 0.9, 0)
+            ctx.lineTo(-pt.size * 0.45, -pt.size * 0.6)
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+          } else if (pt.kind === 'spark') {
+            const sp = camera.worldToScreen(pt.x, pt.y)
+            const tailScale = 0.032
+            ctx.globalAlpha = alpha
+            ctx.strokeStyle = pt.color
+            ctx.lineWidth = pt.size
+            ctx.lineCap = 'round'
+            ctx.beginPath()
+            ctx.moveTo(sp.x, sp.y)
+            ctx.lineTo(sp.x - pt.vx * tailScale, sp.y - pt.vy * tailScale)
+            ctx.stroke()
+          } else if (pt.kind === 'shockwave') {
+            const sp = camera.worldToScreen(pt.x, pt.y)
+            const r = 18 + pt.maxRadius * (1 - Math.pow(1 - frac, 2.2))
+            ctx.globalAlpha = alpha * 0.88
+            ctx.strokeStyle = pt.color
+            ctx.lineWidth = pt.lineWidth * (1 - frac * 0.45)
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+            ctx.stroke()
+          } else if (pt.kind === 'lightning') {
+            ctx.globalAlpha = alpha
+            ctx.lineCap = 'round'
+            ctx.lineJoin = 'round'
+            ctx.strokeStyle = pt.color
+            ctx.lineWidth = 4.2
+            ctx.beginPath()
+            pt.points.forEach((p, idx) => {
+              const sp = camera.worldToScreen(p.x, p.y)
+              if (idx === 0) ctx.moveTo(sp.x, sp.y)
+              else ctx.lineTo(sp.x, sp.y)
+            })
+            ctx.stroke()
+            ctx.strokeStyle = '#FFFFFF'
+            ctx.lineWidth = 1.6
+            ctx.stroke()
+          } else if (pt.kind === 'flame') {
+            const sp = camera.worldToScreen(pt.x, pt.y)
+            const r = Math.max(2, pt.radius * (1 - frac * 0.68))
+            const tilt = Math.atan2(pt.vy, pt.vx) + Math.PI / 2
+            ctx.translate(sp.x, sp.y)
+            ctx.rotate(tilt * 0.25)
+
+            // Soft fire aura glow
+            ctx.globalAlpha = alpha * 0.34
+            ctx.fillStyle = pt.color
+            ctx.beginPath()
+            ctx.arc(0, 0, r * 1.45, 0, Math.PI * 2)
+            ctx.fill()
+
+            // Outer flame tongue teardrop
+            ctx.globalAlpha = alpha * 0.88
+            ctx.fillStyle = pt.color
+            ctx.beginPath()
+            ctx.moveTo(0, -r * 1.75)
+            ctx.quadraticCurveTo(r * 0.95, -r * 0.25, 0, r * 0.72)
+            ctx.quadraticCurveTo(-r * 0.95, -r * 0.25, 0, -r * 1.75)
+            ctx.closePath()
+            ctx.fill()
+
+            // White-hot inner flame core
+            ctx.globalAlpha = alpha * 0.92
+            ctx.fillStyle = pt.coreColor
+            ctx.beginPath()
+            ctx.moveTo(0, -r * 0.85)
+            ctx.quadraticCurveTo(r * 0.45, -r * 0.05, 0, r * 0.38)
+            ctx.quadraticCurveTo(-r * 0.45, -r * 0.05, 0, -r * 0.85)
+            ctx.closePath()
+            ctx.fill()
+          } else if (pt.kind === 'ember') {
+            const sp = camera.worldToScreen(pt.x, pt.y)
+            ctx.globalAlpha = alpha * 0.42
+            ctx.fillStyle = pt.color
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, pt.size * 2.1, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.globalAlpha = alpha * 0.95
+            ctx.fillStyle = '#FFFFFF'
+            ctx.beginPath()
+            ctx.arc(sp.x, sp.y, Math.max(1, pt.size * 0.65), 0, Math.PI * 2)
+            ctx.fill()
+          }
+          ctx.restore()
+        }
+
+        if (hasWorldTransform) {
+          ctx.restore()
+        }
+
+        // Screen-space atmospheric vignette & impact flash during boss cutscene / final drop
+        if (dogCutsceneRef.current?.active) {
+          const cs = dogCutsceneRef.current
+          const tFrac = Math.min(1, cs.elapsed / cs.duration)
+          const openFrac =
+            tFrac < 0.25 ? tFrac / 0.25 : tFrac > 0.9 ? Math.max(0.25, (1 - tFrac) / 0.1) : 1
+          const shakePulse = Math.min(1, activeShake.intensity / 14)
+          ctx.save()
+          const edgeGlow = ctx.createRadialGradient(
+            canvas.width / 2,
+            canvas.height / 2,
+            Math.min(canvas.width, canvas.height) * 0.28,
+            canvas.width / 2,
+            canvas.height / 2,
+            Math.max(canvas.width, canvas.height) * 0.74
+          )
+          edgeGlow.addColorStop(0, 'rgba(0, 0, 0, 0)')
+          edgeGlow.addColorStop(
+            0.75,
+            cs.theme.vignetteInnerRgba.replace(/1\)$/, `${((0.24 + shakePulse * 0.18) * openFrac).toFixed(3)})`)
+          )
+          edgeGlow.addColorStop(
+            1,
+            cs.theme.vignetteOuterRgba.replace(/1\)$/, `${((0.2 + shakePulse * 0.22) * openFrac).toFixed(3)})`)
+          )
+          ctx.fillStyle = edgeGlow
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.restore()
+        }
+        if (activeShake.flashAlpha > 0.01) {
+          const flashTheme =
+            dogCutsceneRef.current?.theme ?? dogPostDropRef.current?.theme ?? DEVOURER_CUTSCENE_THEME
+          ctx.save()
+          ctx.globalAlpha = activeShake.flashAlpha
+          ctx.fillStyle = dogPostDropRef.current ? flashTheme.flashDropColor : flashTheme.flashBuildColor
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.restore()
+        }
       }
 
       rafId = requestAnimationFrame(frame)
@@ -5921,19 +7457,23 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
   const handlePauseToggle = useCallback(() => {
     if (gameStateRef.current === 'playing') {
+      pauseMusicRef.current()
       setEngineState('paused')
     } else if (gameStateRef.current === 'paused') {
+      resumeMusicRef.current()
       setEngineState('playing')
     }
   }, [setEngineState])
 
   const handleContinueEndless = useCallback(() => {
     const player = playerRef.current
+    const endlessStartWave = getAreaMaxWave(areaRef.current.id) + 1
     endlessModeRef.current = true
+    dogBossActiveRef.current = false
     setIsEndlessMode(true)
     bossArenaRef.current = null
     enemiesRef.current = []
-    waveRef.current = WAVE_CONFIG.MAX_WAVE + 1
+    waveRef.current = endlessStartWave
     waveElapsedRef.current = 0
     breatherElapsedRef.current = 0
     isBreatherRef.current = false
@@ -5962,8 +7502,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
     }
 
     setEngineState('playing')
+    playMusicRef.current('gameplay')
     playSoundRef.current('wave')
-    toast.success('ENDLESS MODE ENGAGED! Wave 16+ unlocked — bosses arrive every 5 waves!')
+    toast.success(
+      `ENDLESS MODE ENGAGED! Wave ${endlessStartWave}+ unlocked — bosses arrive every 5 waves!`
+    )
   }, [setEngineState, spawnEnemyForWave, toast])
 
   const setTouchVector = (x: number, y: number) => {
@@ -5976,6 +7519,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
       className="relative w-full h-[calc(100vh-116px)] min-h-[540px] bg-slate-carbon border border-gray-700 rounded-xl overflow-hidden select-none"
     >
       <GameCanvas ref={canvasRef} />
+      <YouTubeBossMusicPlayer />
 
       {gameState === 'menu' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 z-30 p-6 text-center">
@@ -6004,6 +7548,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           health={health}
           maxHealth={maxHealth}
           wave={wave}
+          maxWave={getAreaMaxWave(activeArea.id)}
           time={timeSurvived}
           enemiesDefeated={enemiesDefeated}
           waveTimeRemaining={waveTimeRemaining}
@@ -6021,6 +7566,103 @@ const GameContainer: React.FC<GameContainerProps> = ({
           activeBoss={activeBossHud}
           onPause={handlePauseToggle}
         />
+      )}
+
+      {/* Boss Entrance Cutscene Presentation: Dialogue Banner (DoG) OR Flashing Top & Bottom Warning Strips (Wave 15 Area 1/2) */}
+      {gameState === 'playing' && dogCutsceneUi?.active && dogCutsceneUi.theme.presentation === 'dialogue' && (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-12 sm:bottom-16 z-30 flex justify-center px-4 transition-opacity duration-300"
+          style={{ opacity: dogCutsceneUi.opacity }}
+          role="status"
+          aria-live="assertive"
+        >
+          <div
+            className={`max-w-2xl w-full bg-slate-950/90 border rounded-xl px-6 py-4 text-center ${dogCutsceneUi.theme.borderClass}`}
+          >
+            <div
+              className={`text-[11px] font-mono uppercase tracking-[0.28em] mb-1.5 ${dogCutsceneUi.theme.speakerClass}`}
+            >
+              {dogCutsceneUi.theme.speaker}
+            </div>
+            <p
+              className={`text-lg sm:text-2xl font-black tracking-[0.14em] ${dogCutsceneUi.theme.line1Class}`}
+            >
+              {dogCutsceneUi.theme.line1}
+            </p>
+            {dogCutsceneUi.showSecondLine && (
+              <p
+                className={`mt-1.5 text-sm sm:text-lg font-extrabold tracking-[0.1em] ${dogCutsceneUi.theme.line2Class}`}
+              >
+                {dogCutsceneUi.theme.line2}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {gameState === 'playing' && dogCutsceneUi?.active && dogCutsceneUi.theme.presentation === 'warning' && (
+        <div
+          className="pointer-events-none fixed inset-0 z-40 flex flex-col justify-between transition-opacity duration-200"
+          style={{ opacity: dogCutsceneUi.opacity }}
+          role="status"
+          aria-live="assertive"
+        >
+          {(['top', 'bottom'] as const).map((edge) => (
+            <div
+              key={edge}
+              className={`relative w-full overflow-hidden bg-slate-950/92 animate-boss-warning-flash ${
+                edge === 'top' ? 'border-b-2' : 'border-t-2'
+              } ${dogCutsceneUi.theme.borderClass}`}
+            >
+              <div
+                className="h-2 w-full opacity-90"
+                style={{
+                  backgroundImage: `repeating-linear-gradient(-45deg, ${dogCutsceneUi.theme.stripeHex}, ${dogCutsceneUi.theme.stripeHex} 14px, rgba(15, 23, 42, 0.96) 14px, rgba(15, 23, 42, 0.96) 28px)`
+                }}
+              />
+              <div className="relative py-2.5 sm:py-3 px-4 flex flex-col items-center justify-center text-center">
+                <div
+                  className="pointer-events-none absolute inset-y-0 left-0 w-1/3 opacity-25 animate-boss-warning-sweep"
+                  style={{
+                    background: `linear-gradient(90deg, transparent, ${dogCutsceneUi.theme.primaryColor}, transparent)`
+                  }}
+                />
+                <div className="relative z-10 flex items-center justify-center gap-2.5 sm:gap-4">
+                  <span
+                    className={`text-base sm:text-xl font-black ${dogCutsceneUi.theme.line1Class}`}
+                    aria-hidden="true"
+                  >
+                    ⚠
+                  </span>
+                  <span
+                    className={`text-sm sm:text-xl font-black uppercase tracking-[0.2em] ${dogCutsceneUi.theme.line1Class}`}
+                  >
+                    {dogCutsceneUi.theme.warningTitle}
+                  </span>
+                  <span
+                    className={`text-base sm:text-xl font-black ${dogCutsceneUi.theme.line1Class}`}
+                    aria-hidden="true"
+                  >
+                    ⚠
+                  </span>
+                </div>
+                <div
+                  className={`relative z-10 mt-0.5 text-[10px] sm:text-xs font-mono font-bold uppercase tracking-[0.26em] ${dogCutsceneUi.theme.line2Class}`}
+                >
+                  {dogCutsceneUi.showSecondLine
+                    ? dogCutsceneUi.theme.warningCriticalText
+                    : dogCutsceneUi.theme.warningSubtitle}
+                </div>
+              </div>
+              <div
+                className="h-2 w-full opacity-90"
+                style={{
+                  backgroundImage: `repeating-linear-gradient(-45deg, ${dogCutsceneUi.theme.stripeHex}, ${dogCutsceneUi.theme.stripeHex} 14px, rgba(15, 23, 42, 0.96) 14px, rgba(15, 23, 42, 0.96) 28px)`
+                }}
+              />
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Mobile / Touch Shield Paladin Dash Trigger */}
@@ -6097,13 +7739,18 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
       {gameState === 'paused' && (
         <PauseMenu
-          onResume={() => setEngineState('playing')}
+          onResume={() => {
+            resumeMusicRef.current()
+            setEngineState('playing')
+          }}
           onRestart={() => {
             flushBankedCoins()
             initRun()
           }}
           onQuit={() => {
             flushBankedCoins()
+            dogBossActiveRef.current = false
+            stopMusicRef.current()
             if (onBack) onBack()
             else setEngineState('menu')
           }}
@@ -6124,13 +7771,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
         <div className="absolute inset-0 flex items-center justify-center bg-black/85 backdrop-blur-md z-50 p-4">
           <div className="bg-slate-900 border-2 border-emerald-400 rounded-2xl p-7 max-w-lg w-full text-center shadow-[0_0_50px_rgba(52,211,153,0.28)]">
             <div className="text-xs font-mono tracking-widest uppercase text-emerald-300 mb-2">
-              Astral Citadel • Wave 15 Cleared
+              {activeArea.name} • Wave {getAreaMaxWave(activeArea.id)} Cleared
             </div>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-yellow-300 mb-3">
-              SOLAR ARCHON DEFEATED!
+              {activeArea.id === 'astral_citadel'
+                ? 'ASTRAL SCOURGE VANQUISHED!'
+                : 'SECTOR BOSS DEFEATED!'}
             </h2>
             <p className="text-slate-200 text-sm sm:text-base mb-6">
-              You conquered the Astral Citadel Final Boss! Extract now to lock in your Victory, or
+              You conquered the {activeArea.name} Final Boss! Extract now to lock in your Victory, or
               push into <span className="text-emerald-300 font-bold">Endless Mode</span> with
               full HP, unlocked arena walls, and bosses every 5 waves.
             </p>
@@ -6155,7 +7804,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 onClick={handleContinueEndless}
                 className="w-full px-6 py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold text-base sm:text-lg rounded-xl transition-all shadow-lg shadow-emerald-500/20"
               >
-                GO ON FOREVER (ENDLESS WAVE 16+)
+                GO ON FOREVER (ENDLESS WAVE {getAreaMaxWave(activeArea.id) + 1}+)
               </button>
               <button
                 onClick={() => triggerEndGame(true)}
@@ -6175,6 +7824,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           isVictory={isVictory}
           isEndless={isEndlessMode}
           waveReached={wave}
+          maxWave={getAreaMaxWave(activeArea.id)}
           difficultyName={activeDifficulty.name}
           difficultyCoinLabel={formatDifficultyCoinLabel(activeDifficulty)}
           difficultyColor={activeDifficulty.accentColor}

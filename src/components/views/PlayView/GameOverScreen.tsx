@@ -17,6 +17,7 @@ export interface GameOverScreenProps {
   isVictory?: boolean
   isEndless?: boolean
   waveReached?: number
+  maxWave?: number
   difficultyName?: string
   difficultyCoinLabel?: string
   difficultyColor?: string
@@ -30,23 +31,25 @@ const GameOverScreen: React.FC<GameOverScreenProps> = ({
   isVictory = false,
   isEndless = false,
   waveReached,
+  maxWave = 15,
   difficultyName,
   difficultyCoinLabel,
   difficultyColor,
   onRestart,
   onQuit
 }) => {
+  const areaMaxWave = Math.max(1, maxWave)
   const metrics = computePostGameMetrics(stats)
-  const endedInEndless = isEndless || (typeof waveReached === 'number' && waveReached > 15)
+  const endedInEndless = isEndless || (typeof waveReached === 'number' && waveReached > areaMaxWave)
 
   const waveStatusText = isVictory
     ? endedInEndless
-      ? `Endless Record: Reached Wave ${waveReached || 16}`
-      : 'Wave 15 Final Boss Defeated'
+      ? `Endless Record: Reached Wave ${waveReached || areaMaxWave + 1}`
+      : `Wave ${areaMaxWave} Final Boss Defeated`
     : waveReached
       ? endedInEndless
         ? `Eliminated on Endless Wave ${waveReached}`
-        : `Eliminated on Wave ${waveReached} of 15`
+        : `Eliminated on Wave ${waveReached} of ${areaMaxWave}`
       : 'Session Complete'
 
   const metadataParts: Array<{ key: string; label: string; color?: string }> = []

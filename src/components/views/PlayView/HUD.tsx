@@ -26,6 +26,7 @@ export interface HUDProps {
   health: number
   maxHealth: number
   wave: number
+  maxWave?: number
   time: number
   enemiesDefeated: number
   waveTimeRemaining?: number
@@ -53,6 +54,7 @@ const HUD: React.FC<HUDProps> = ({
   health,
   maxHealth,
   wave,
+  maxWave = WAVE_CONFIG.MAX_WAVE,
   time,
   enemiesDefeated,
   waveTimeRemaining,
@@ -70,11 +72,12 @@ const HUD: React.FC<HUDProps> = ({
   activeBoss = null,
   onPause
 }) => {
+  const effectiveMaxWave = Math.max(1, maxWave)
   const xpForNextLevel = Math.max(1, xpToNext ?? getXpForNextLevel(level))
   const xpDisplay = Math.max(0, Math.floor(xp))
   const xpProgress = Math.min(100, Math.max(0, (xpDisplay / xpForNextLevel) * 100))
   const healthPercent = maxHealth > 0 ? Math.max(0, Math.min(100, (health / maxHealth) * 100)) : 0
-  const isFinalBossWave = wave === WAVE_CONFIG.MAX_WAVE && !isEndless
+  const isFinalBossWave = wave === effectiveMaxWave && !isEndless
 
   const formatTime = (seconds: number): string => {
     const safe = Math.max(0, Math.floor(seconds))
@@ -160,10 +163,10 @@ const HUD: React.FC<HUDProps> = ({
                 {isBreather
                   ? 'BREATHER WINDOW'
                   : isFinalBossWave
-                    ? `WAVE ${wave} / ${WAVE_CONFIG.MAX_WAVE} • FINAL BOSS`
+                    ? `WAVE ${wave} / ${effectiveMaxWave} • FINAL BOSS`
                     : isEndless
                       ? `WAVE ${wave} • ENDLESS${wave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0 ? ' • BOSS' : ''}`
-                      : `WAVE ${wave} / ${WAVE_CONFIG.MAX_WAVE}${wave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0 ? ' • BOSS' : ''}`}
+                      : `WAVE ${wave} / ${effectiveMaxWave}${wave % WAVE_CONFIG.BOSS_WAVE_INTERVAL === 0 ? ' • BOSS' : ''}`}
               </div>
               {isFinalBossWave && !isBreather ? (
                 <div className="text-[11px] text-hazard-gold font-mono font-semibold">

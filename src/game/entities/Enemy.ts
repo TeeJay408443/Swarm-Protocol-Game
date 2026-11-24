@@ -6,6 +6,10 @@
 import { Vector2 } from '../utils/vector'
 import { Camera } from '../engine/Camera'
 import { GAME_CONFIG } from '../../config/gameConstants'
+import {
+  DEVOURER_CUTSCENE_DURATION_SECONDS,
+  WAVE_15_CUTSCENE_DURATION_SECONDS
+} from '../../config/arenas'
 import { EnemiesRow } from '../../types/database'
 import { Player } from './Player'
 
@@ -59,6 +63,12 @@ export interface EnemyProjectile {
   maxLifetime: number
   homingTurnRate?: number
   homingRemaining?: number
+  splitAfter?: number
+  splitCount?: number
+  splitSpeed?: number
+  splitDone?: boolean
+  splitColors?: [string, string]
+  isCosmicStar?: boolean
 }
 
 export interface EnemyAoeProjectile {
@@ -95,6 +105,18 @@ export type BossAttackKind =
   | 'rotating_cross_lasers'
   | 'void_meteor_salvo'
   | 'singularity_grid'
+  | 'cosmic_laser_walls'
+  | 'cosmic_portal_lunge'
+  | 'cosmic_orb_barrage'
+
+export interface CosmicLaserWallLine {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  width: number
+  color?: string
+}
 
 export interface TrackingBlastNode {
   x: number
@@ -114,6 +136,8 @@ export interface BossTelegraphAttack {
   y: number
   endX?: number
   endY?: number
+  portalX?: number
+  portalY?: number
   angle?: number
   turnRate?: number
   radius: number
@@ -125,6 +149,8 @@ export interface BossTelegraphAttack {
   zoneRect?: { x: number; y: number; width: number; height: number }
   safeRect?: { x: number; y: number; width: number; height: number }
   gridRects?: Array<{ x: number; y: number; width: number; height: number }>
+  gridLines?: CosmicLaserWallLine[]
+  isDiagonalGrid?: boolean
   beamCount?: number
   beamSegments?: Array<[number, number]>
   subTargets?: Array<{ x: number; y: number; radius: number }>
@@ -139,6 +165,9 @@ export interface BossTelegraphAttack {
   activeTimer: number
   activeDuration: number
   damage: number
+  accentPrimary?: string
+  accentSecondary?: string
+  warningLabel?: string
   hasTriggered: boolean
   hasDamagedPlayer: boolean
 }
@@ -230,6 +259,19 @@ export class Enemy {
   private phaseThreeAttackIndex: number = 0
   private halfDirectionIndex: number = 0
   private sideLaserModeIndex: number = 0
+
+  /** Calamity-style Worm Boss (Devourer of Gods / Astral Scourge) multi-segment serpent state */
+  isDevourerOfGods: boolean = false
+  isAstralScourge: boolean = false
+  dogSegments: Array<{ x: number; y: number; angle: number }> = []
+  cutsceneDelayTimer: number = 0
+  private dogDashTimer: number = 0
+  private dogDashCooldown: number = 4.2
+  private dogDashDir: Vector2 = { x: 1, y: 0 }
+
+  get isWormBoss(): boolean {
+    return this.isDevourerOfGods || this.isAstralScourge
+  }
   
   /** Spawning & animation */
   spawnTime: number = 0
@@ -391,6 +433,61 @@ export class Enemy {
             this.aoeCooldownMax = 2.3
             this.specialCooldown = 1.5
             this.specialCooldownMax = 3.4
+          } else if (this.enemyId === 'boss_a2_20') {
+            this.isBoss = true
+            this.isAstralScourge = true
+            this.launchesAoeProjectiles = false
+            this.color = '#34D399'
+            this.baseColor = '#FACC15'
+            this.width = 76
+            this.height = 76
+            this.damage = 42
+            this.damageReduction = 0.45
+            this.enableEnrage = true
+            this.bossTier = 4
+            this.bossTitle = 'ASTRAL SCOURGE — FINAL BOSS (W20)'
+            this.canShoot = true
+            this.shootCooldown = 1.4
+            this.shootCooldownMax = 1.4
+            this.attackRange = 1800
+            this.specialCooldown = 2.2
+            this.specialCooldownMax = 3.1
+            this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
+            this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
+            const headCx = this.x + this.width / 2
+            const headCy = this.y + this.height / 2
+            this.dogSegments = Array.from({ length: 22 }, (_, idx) => ({
+              x: headCx,
+              y: headCy - (idx + 1) * 2,
+              angle: Math.PI / 2
+            }))
+          } else if (this.enemyId === 'boss_secret_dog') {
+            this.isBoss = true
+            this.isDevourerOfGods = true
+            this.launchesAoeProjectiles = false
+            this.color = '#22D3EE'
+            this.baseColor = '#E879F9'
+            this.width = 76
+            this.height = 76
+            this.damage = 46
+            this.damageReduction = 0.45
+            this.enableEnrage = true
+            this.bossTier = 4
+            this.bossTitle = 'DEVOURER OF GODS'
+            this.canShoot = true
+            this.shootCooldown = 1.6
+            this.shootCooldownMax = 1.45
+            this.attackRange = 1800
+            this.specialCooldown = 2.4
+            this.specialCooldownMax = 3.25
+            this.spawnDelay = DEVOURER_CUTSCENE_DURATION_SECONDS
+            this.cutsceneDelayTimer = DEVOURER_CUTSCENE_DURATION_SECONDS
+            const headCx = this.x + this.width / 2
+            const headCy = this.y + this.height / 2
+            this.dogSegments = Array.from({ length: 22 }, (_, idx) => ({
+              x: headCx,
+              y: headCy - (idx + 1) * 2
+            })).map((pos) => ({ ...pos, angle: Math.PI / 2 }))
           } else {
             this.isBoss = true
             this.color = '#FFD700' // Hazard gold for boss
@@ -442,10 +539,17 @@ export class Enemy {
       this.attackRange = 1600
       this.specialCooldown = 1.2
       this.specialCooldownMax = 3.4
+      if (this.isFinalBoss && !this.isDevourerOfGods) {
+        this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
+        this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
+      }
       if (this.anchorPos) {
         this.x = this.anchorPos.x - this.width / 2
         this.y = this.anchorPos.y - this.height / 2
       }
+    } else if (this.isFinalBoss && !this.isDevourerOfGods) {
+      this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
+      this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
     }
   }
 
@@ -462,13 +566,26 @@ export class Enemy {
     
     this.animTime += deltaTime
 
-    // Handle spawning
+    // Handle spawning (including Devourer of Gods cosmic rift emergence cutscene)
+    if (this.cutsceneDelayTimer > 0) {
+      this.cutsceneDelayTimer = Math.max(0, this.cutsceneDelayTimer - deltaTime)
+    }
     if (this.isSpawning) {
       this.spawnTime += deltaTime
-      if (this.spawnTime >= this.spawnDelay) {
+      if (this.isWormBoss) {
+        const defaultDelay = this.isDevourerOfGods
+          ? DEVOURER_CUTSCENE_DURATION_SECONDS
+          : WAVE_15_CUTSCENE_DURATION_SECONDS
+        const totalDelay = Math.max(0.5, this.spawnDelay || defaultDelay)
+        const emergeProgress = Math.max(0, Math.min(1, 1 - this.cutsceneDelayTimer / totalDelay))
+        this.facingAngle = Math.PI / 2 + Math.sin(this.animTime * 4) * 0.14
+        const headCenter = this.getCenter()
+        const targetSpacing = emergeProgress < 0.22 ? 2 : Math.min(24, ((emergeProgress - 0.22) / 0.78) * 24)
+        this.updateDogSegments(targetSpacing, headCenter)
+      }
+      if (this.spawnTime >= this.spawnDelay && this.cutsceneDelayTimer <= 0) {
         this.isSpawning = false
       }
-      // Spawn effect - pulse
       this.color = this.baseColor
       return
     }
@@ -512,13 +629,15 @@ export class Enemy {
       this.shootCooldown -= deltaTime
     }
     
-    // Movement pattern (stationary Wave 15 boss stays anchored in upper center)
+    // Movement pattern (stationary Wave 15 boss stays anchored; Worm bosses slither & dash)
     if (this.isStationaryBoss) {
       this.velocity = Vector2.zero()
       if (this.anchorPos) {
         this.x = this.anchorPos.x - this.width / 2
         this.y = this.anchorPos.y - this.height / 2 + Math.sin(this.animTime * 2.2) * 3
       }
+    } else if (this.isWormBoss) {
+      this.updateDevourerMovement(deltaTime)
     } else {
       switch (this.movementPattern) {
         case 'chase':
@@ -536,7 +655,9 @@ export class Enemy {
       }
     }
 
-    if (this.target) {
+    if (this.isWormBoss && Math.hypot(this.velocity.x, this.velocity.y) > 4) {
+      this.facingAngle = Math.atan2(this.velocity.y, this.velocity.x)
+    } else if (this.target) {
       const tc = this.target.getCenter()
       const mc = this.getCenter()
       this.facingAngle = Math.atan2(tc.y - mc.y, tc.x - mc.x)
@@ -548,6 +669,9 @@ export class Enemy {
     if (!this.isStationaryBoss) {
       this.x += this.velocity.x * this.slowMultiplier * deltaTime
       this.y += this.velocity.y * this.slowMultiplier * deltaTime
+    }
+    if (this.isWormBoss) {
+      this.updateDogSegments(24)
     }
     this.slowMultiplier = 1.0
     
@@ -593,7 +717,7 @@ export class Enemy {
         this.specialCooldown -= deltaTime
       }
       const hasPendingMajorPattern =
-        this.isStationaryBoss &&
+        (this.isStationaryBoss || this.isWormBoss) &&
         this.telegraphs.some(
           (t) =>
             !t.hasTriggered ||
@@ -603,11 +727,14 @@ export class Enemy {
             t.kind === 'pursuit_beam' ||
             t.kind === 'rotating_cross_lasers' ||
             t.kind === 'void_meteor_salvo' ||
-            t.kind === 'singularity_grid'
+            t.kind === 'singularity_grid' ||
+            t.kind === 'cosmic_laser_walls' ||
+            t.kind === 'cosmic_portal_lunge' ||
+            t.kind === 'cosmic_orb_barrage'
         )
       if (this.specialCooldown <= 0 && !hasPendingMajorPattern && this.target && this.target.isAlive) {
         const distToTarget = Vector2.distance(this.getCenter(), this.target.getCenter())
-        const triggerRange = this.isStationaryBoss ? 1800 : 560
+        const triggerRange = this.isStationaryBoss || this.isWormBoss ? 1800 : 560
         if (distToTarget <= triggerRange) {
           this.spawnTelegraphedAttack()
           this.specialCooldown = this.isStationaryBoss
@@ -616,7 +743,13 @@ export class Enemy {
               : this.bossPhase === 2
                 ? 1.95
                 : 2.25
-            : Math.max(2.6, this.specialCooldownMax - (this.bossTier - 1) * 0.15)
+            : this.isWormBoss
+              ? this.isEnraged || this.bossPhase >= 3
+                ? 2.05
+                : this.bossPhase === 2
+                  ? 2.4
+                  : 2.75
+              : Math.max(2.6, this.specialCooldownMax - (this.bossTier - 1) * 0.15)
         }
       }
     }
@@ -631,7 +764,7 @@ export class Enemy {
   /**
    * Chase movement - directly toward target
    */
-  private updateChase(deltaTime: number): void {
+  private updateChase(_deltaTime: number): void {
     if (!this.target || !this.target.isAlive) {
       this.velocity = Vector2.zero()
       return
@@ -643,6 +776,78 @@ export class Enemy {
     
     this.velocity = Vector2.multiply(direction, this.speed)
     this.direction = direction
+  }
+
+  /**
+   * Devourer of Gods cosmic serpent slither + periodic high-speed lunge dash
+   */
+  private updateDevourerMovement(deltaTime: number): void {
+    if (!this.target || !this.target.isAlive) {
+      this.velocity = Vector2.zero()
+      return
+    }
+
+    const headCenter = this.getCenter()
+    const targetCenter = this.target.getCenter()
+    const toTarget = Vector2.subtract(targetCenter, headCenter)
+    const dist = Math.hypot(toTarget.x, toTarget.y) || 1
+    const toward = { x: toTarget.x / dist, y: toTarget.y / dist }
+    const perp = { x: -toward.y, y: toward.x }
+
+    if (this.dogDashTimer > 0) {
+      this.dogDashTimer = Math.max(0, this.dogDashTimer - deltaTime)
+      const dashMult = this.isEnraged ? 2.85 : 2.35
+      this.velocity = {
+        x: this.dogDashDir.x * this.speed * dashMult,
+        y: this.dogDashDir.y * this.speed * dashMult
+      }
+      this.direction = this.dogDashDir
+      return
+    }
+
+    this.dogDashCooldown -= deltaTime
+    if (this.dogDashCooldown <= 0 && dist > 110) {
+      this.dogDashTimer = this.isEnraged ? 0.96 : 0.84
+      this.dogDashCooldown = this.isEnraged ? 2.9 : 4.0
+      this.dogDashDir = toward
+      this.velocity = {
+        x: toward.x * this.speed * 2.4,
+        y: toward.y * this.speed * 2.4
+      }
+      this.direction = toward
+      return
+    }
+
+    const waveAmp = dist > 180 ? 0.68 : 1.05
+    const slitherOffset = Math.sin(this.animTime * 3.1) * waveAmp
+    const rawDir = {
+      x: toward.x + perp.x * slitherOffset,
+      y: toward.y + perp.y * slitherOffset
+    }
+    const moveDir = Vector2.normalize(rawDir)
+    this.velocity = Vector2.multiply(moveDir, this.speed)
+    this.direction = moveDir
+  }
+
+  /**
+   * Follow-the-leader chain kinematics for the 22 Devourer of Gods segments
+   */
+  private updateDogSegments(spacing = 24, forcedHeadCenter?: Vector2): void {
+    if (this.dogSegments.length === 0) return
+    let leader = forcedHeadCenter ?? this.getCenter()
+    for (let i = 0; i < this.dogSegments.length; i++) {
+      const seg = this.dogSegments[i]
+      const dx = leader.x - seg.x
+      const dy = leader.y - seg.y
+      const dist = Math.hypot(dx, dy)
+      if (dist > 0.001) {
+        const angle = Math.atan2(dy, dx)
+        seg.angle = angle
+        seg.x = leader.x - Math.cos(angle) * spacing
+        seg.y = leader.y - Math.sin(angle) * spacing
+      }
+      leader = { x: seg.x, y: seg.y }
+    }
   }
 
   /**
@@ -768,6 +973,90 @@ export class Enemy {
     const direction = Vector2.normalize(
       Vector2.subtract(this.target.getCenter(), startPos)
     )
+
+    if (this.isWormBoss) {
+      this.attackPatternIndex++
+      const wormPrimary = this.isAstralScourge ? '#34D399' : '#22D3EE'
+      const wormSecondary = this.isAstralScourge ? '#FACC15' : '#E879F9'
+      const wormPair: [string, string] = [wormPrimary, wormSecondary]
+      const fireballDmg = Math.round((this.isEnraged ? 26 : 20) * Math.max(1, this.damageScale))
+      const mode = this.attackPatternIndex % 3
+      if (mode === 1) {
+        // Calamity Starburst Ring + Splitting Astral/Nebula Stars
+        const count = this.isEnraged ? 18 : 14
+        for (let i = 0; i < count; i++) {
+          const ang = (i / count) * Math.PI * 2 + this.attackPatternIndex * 0.28
+          const isSplitStar = i % 3 === 0
+          this.projectiles.push({
+            x: startPos.x,
+            y: startPos.y,
+            width: isSplitStar ? 18 : 13,
+            height: isSplitStar ? 18 : 13,
+            speed: isSplitStar ? 235 : this.isEnraged ? 305 : 265,
+            direction: { x: Math.cos(ang), y: Math.sin(ang) },
+            damage: fireballDmg,
+            color: i % 2 === 0 ? wormPrimary : wormSecondary,
+            lifetime: 0,
+            maxLifetime: 4.2,
+            isCosmicStar: isSplitStar,
+            splitAfter: isSplitStar ? 0.72 : undefined,
+            splitCount: isSplitStar ? (this.isEnraged ? 6 : 4) : undefined,
+            splitSpeed: 245,
+            splitColors: wormPair
+          })
+        }
+      } else if (mode === 2) {
+        // Body Segment Turret Volleys (segments along the worm fire aimed bolts)
+        const tc = this.target.getCenter()
+        for (let s = 3; s < this.dogSegments.length - 1; s += 4) {
+          const seg = this.dogSegments[s]
+          const segDir = Vector2.normalize({ x: tc.x - seg.x, y: tc.y - seg.y })
+          this.projectiles.push({
+            x: seg.x,
+            y: seg.y,
+            width: 12,
+            height: 12,
+            speed: this.isEnraged ? 320 : 275,
+            direction: segDir,
+            damage: Math.round(fireballDmg * 0.85),
+            color: s % 8 === 3 ? wormPrimary : wormSecondary,
+            lifetime: 0,
+            maxLifetime: 3.6
+          })
+        }
+      } else {
+        // Head Fireball Fan + Splitting Center Star
+        const baseAngle = Math.atan2(direction.y, direction.x)
+        const offsets = this.isEnraged
+          ? [-0.54, -0.36, -0.18, 0, 0.18, 0.36, 0.54]
+          : [-0.38, -0.19, 0, 0.19, 0.38]
+        for (let idx = 0; idx < offsets.length; idx++) {
+          const a = baseAngle + offsets[idx]
+          const isCenterStar = offsets[idx] === 0
+          const isOuter = idx === 0 || idx === offsets.length - 1
+          this.projectiles.push({
+            x: startPos.x,
+            y: startPos.y,
+            width: isCenterStar ? 18 : 13,
+            height: isCenterStar ? 18 : 13,
+            speed: isCenterStar ? 260 : isOuter ? 290 : 365,
+            direction: { x: Math.cos(a), y: Math.sin(a) },
+            damage: fireballDmg,
+            color: isOuter || isCenterStar ? wormSecondary : wormPrimary,
+            lifetime: 0,
+            maxLifetime: 3.9,
+            homingTurnRate: isOuter ? 1.55 : undefined,
+            homingRemaining: isOuter ? 1.7 : undefined,
+            isCosmicStar: isCenterStar,
+            splitAfter: isCenterStar ? 0.68 : undefined,
+            splitCount: isCenterStar ? (this.isEnraged ? 6 : 4) : undefined,
+            splitSpeed: 255,
+            splitColors: wormPair
+          })
+        }
+      }
+      return
+    }
 
     if (this.isBoss) {
       this.attackPatternIndex++
@@ -998,9 +1287,30 @@ export class Enemy {
     const id = `boss_atk_${Date.now()}_${this.specialAttackCounter}`
     const tierBoost = Math.max(0, this.bossTier - 1)
 
+    const wormPrimary = this.isAstralScourge ? '#34D399' : '#22D3EE'
+    const wormSecondary = this.isAstralScourge ? '#FACC15' : '#E879F9'
+
     let kind: BossAttackKind
     if (forcedKind) {
       kind = forcedKind
+    } else if (this.isWormBoss) {
+      const wormCycle: BossAttackKind[] =
+        this.isEnraged || this.bossPhase >= 2
+          ? [
+              'cosmic_laser_walls',
+              'cosmic_portal_lunge',
+              'cosmic_orb_barrage',
+              'cosmic_laser_walls',
+              'rotating_cross_lasers',
+              'cosmic_portal_lunge'
+            ]
+          : [
+              'cosmic_laser_walls',
+              'cosmic_portal_lunge',
+              'cosmic_orb_barrage',
+              'rotating_cross_lasers'
+            ]
+      kind = wormCycle[(this.specialAttackCounter - 1) % wormCycle.length]
     } else if (this.isStationaryBoss) {
       if (this.bossPhase >= 3) {
         // Phase 3 (<=33% HP): Unleashes Singularity Grid + Rotating Cross Lasers + Void Meteor Salvo + core attacks
@@ -1042,7 +1352,137 @@ export class Enemy {
 
     let telegraph: BossTelegraphAttack
 
-    if (kind === 'rotating_cross_lasers') {
+    if (kind === 'cosmic_laser_walls') {
+      // Worm Boss signature Laser Wall Web (orthogonal in P1, diagonal/diamond in P2+/enraged)
+      const isDiag = (this.isEnraged || this.bossPhase >= 2) && this.specialAttackCounter % 2 === 0
+      const halfSpan = 820
+      const lineWidth = this.isEnraged || this.bossPhase >= 3 ? 30 : 26
+      const spacing = this.isEnraged || this.bossPhase >= 3 ? 175 : 200
+      const cx = Math.max(240, Math.min(1760, targetCenter.x))
+      const cy = Math.max(240, Math.min(1760, targetCenter.y))
+      const gridLines: CosmicLaserWallLine[] = []
+      const offsets = [-1.5, -0.5, 0.5, 1.5]
+
+      if (isDiag) {
+        const invSqrt2 = Math.SQRT1_2
+        for (const mult of offsets) {
+          const d = mult * spacing
+          const p1x = cx - d * invSqrt2
+          const p1y = cy + d * invSqrt2
+          gridLines.push({
+            x1: p1x - halfSpan * invSqrt2,
+            y1: p1y - halfSpan * invSqrt2,
+            x2: p1x + halfSpan * invSqrt2,
+            y2: p1y + halfSpan * invSqrt2,
+            width: lineWidth,
+            color: wormPrimary
+          })
+          const p2x = cx + d * invSqrt2
+          const p2y = cy + d * invSqrt2
+          gridLines.push({
+            x1: p2x - halfSpan * invSqrt2,
+            y1: p2y + halfSpan * invSqrt2,
+            x2: p2x + halfSpan * invSqrt2,
+            y2: p2y - halfSpan * invSqrt2,
+            width: lineWidth,
+            color: wormSecondary
+          })
+        }
+      } else {
+        for (const mult of offsets) {
+          const offsetPx = mult * spacing
+          gridLines.push({
+            x1: cx + offsetPx,
+            y1: cy - halfSpan,
+            x2: cx + offsetPx,
+            y2: cy + halfSpan,
+            width: lineWidth,
+            color: wormPrimary
+          })
+          gridLines.push({
+            x1: cx - halfSpan,
+            y1: cy + offsetPx,
+            x2: cx + halfSpan,
+            y2: cy + offsetPx,
+            width: lineWidth,
+            color: wormSecondary
+          })
+        }
+      }
+
+      telegraph = {
+        id,
+        kind: 'cosmic_laser_walls',
+        x: cx,
+        y: cy,
+        radius: lineWidth / 2,
+        gridLines,
+        isDiagonalGrid: isDiag,
+        hitCooldown: 0,
+        chargeTimer: 0,
+        chargeDuration: this.isEnraged ? 1.1 : 1.28,
+        activeTimer: 0,
+        activeDuration: 0.48,
+        damage: Math.round((this.isEnraged ? 40 : 34) * Math.max(1, this.damageScale * 0.72)),
+        accentPrimary: wormPrimary,
+        accentSecondary: wormSecondary,
+        warningLabel: this.isAstralScourge
+          ? '⚠ ASTRAL LASER WALLS — WEAVE GAPS!'
+          : '⚠ COSMIC LASER WALLS — WEAVE GAPS!',
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'cosmic_portal_lunge') {
+      const angleToPlayer = ((this.specialAttackCounter * 1.9 + 0.6) % (Math.PI * 2))
+      const portalDist = 310
+      const portalX = Math.max(110, Math.min(1890, targetCenter.x + Math.cos(angleToPlayer) * portalDist))
+      const portalY = Math.max(110, Math.min(1890, targetCenter.y + Math.sin(angleToPlayer) * portalDist))
+      const lungeAngle = Math.atan2(targetCenter.y - portalY, targetCenter.x - portalX)
+      const lungeLen = 780
+      telegraph = {
+        id,
+        kind: 'cosmic_portal_lunge',
+        x: portalX,
+        y: portalY,
+        portalX,
+        portalY,
+        endX: portalX + Math.cos(lungeAngle) * lungeLen,
+        endY: portalY + Math.sin(lungeAngle) * lungeLen,
+        angle: lungeAngle,
+        radius: 42,
+        length: lungeLen,
+        chargeTimer: 0,
+        chargeDuration: this.isEnraged ? 0.92 : 1.12,
+        activeTimer: 0,
+        activeDuration: 0.55,
+        damage: Math.round((this.isEnraged ? 44 : 36) * Math.max(1, this.damageScale * 0.75)),
+        accentPrimary: wormPrimary,
+        accentSecondary: wormSecondary,
+        warningLabel: this.isAstralScourge ? '⚠ STARLIGHT RIFT LUNGE INCOMING!' : '⚠ RIFT LUNGE INCOMING!',
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'cosmic_orb_barrage') {
+      telegraph = {
+        id,
+        kind: 'cosmic_orb_barrage',
+        x: bossCenter.x,
+        y: bossCenter.y,
+        radius: 130,
+        pulseTimer: 0.12,
+        pulseCount: 0,
+        chargeTimer: 0,
+        chargeDuration: this.isEnraged ? 0.75 : 0.92,
+        activeTimer: 0,
+        activeDuration: 2.85,
+        damage: Math.round((this.isEnraged ? 24 : 18) * Math.max(1, this.damageScale * 0.7)),
+        accentPrimary: wormPrimary,
+        accentSecondary: wormSecondary,
+        warningLabel: this.isAstralScourge ? '⚠ ASTRAL STAR BARRAGE!' : '⚠ NEBULA STAR BARRAGE!',
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'rotating_cross_lasers') {
       // Phase 2+ New Attack: 4 sweeping X-beams anchored on boss with wide dodgeable radial gaps
       const initialAngle = Math.PI / 4 + (this.specialAttackCounter % 2) * 0.35
       const spinDir = this.specialAttackCounter % 2 === 0 ? 1 : -1
@@ -1117,10 +1557,12 @@ export class Enemy {
         hasDamagedPlayer: false
       }
     } else if (kind === 'singularity_grid') {
-      // Phase 3 New Attack: 2 vertical + 2 horizontal full-arena laser strips forming 9 safe cells + nova burst
+      // Phase 3 / DoG Cosmic Laser Wall Matrix: 2 vertical + 2 horizontal full-arena laser strips forming 9 safe cells
+      const defaultLeft = Math.max(24, Math.min(2000 - 1280 - 24, targetCenter.x - 640))
+      const defaultTop = Math.max(24, Math.min(2000 - 720 - 24, targetCenter.y - 360))
       const bounds: BossArenaBounds = this.arenaBounds ?? {
-        left: Math.max(0, bossCenter.x - 640),
-        top: Math.max(0, bossCenter.y - 210),
+        left: defaultLeft,
+        top: defaultTop,
         width: 1280,
         height: 720
       }
@@ -1480,15 +1922,20 @@ export class Enemy {
           }
         }
       } else if (
-        (t.kind === 'closing_side_lasers' || t.kind === 'singularity_grid') &&
+        (t.kind === 'closing_side_lasers' ||
+          t.kind === 'singularity_grid' ||
+          t.kind === 'cosmic_laser_walls') &&
         t.hasTriggered &&
         t.hasDamagedPlayer
       ) {
         t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
-        if (t.hitCooldown >= 0.52) {
+        if (t.hitCooldown >= 0.45) {
           t.hitCooldown = 0
           t.hasDamagedPlayer = false
         }
+      } else if (t.kind === 'cosmic_orb_barrage' && !t.hasTriggered) {
+        t.x = bossCenter.x
+        t.y = bossCenter.y
       }
 
       if (!t.hasTriggered) {
@@ -1497,7 +1944,36 @@ export class Enemy {
           t.chargeTimer = t.chargeDuration
           t.hasTriggered = true
           t.activeTimer = 0
-          if (t.kind === 'void_meteor_salvo' || t.kind === 'singularity_grid') {
+          if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
+            // Warp worm head cleanly into the dimensional rift and unleash blazing jaw lunge
+            this.x = t.portalX - this.width / 2
+            this.y = t.portalY - this.height / 2
+            const ang = t.angle ?? 0
+            this.facingAngle = ang
+            this.dogDashDir = { x: Math.cos(ang), y: Math.sin(ang) }
+            this.dogDashTimer = 0.85
+            this.dogDashCooldown = this.isEnraged ? 2.8 : 3.6
+            this.updateDogSegments(14, { x: t.portalX, y: t.portalY })
+            // Emit rift scatter stars on emergence
+            const burstCount = this.isEnraged ? 10 : 6
+            const pCol1 = t.accentPrimary || (this.isAstralScourge ? '#34D399' : '#22D3EE')
+            const pCol2 = t.accentSecondary || (this.isAstralScourge ? '#FACC15' : '#E879F9')
+            for (let b = 0; b < burstCount; b++) {
+              const ba = ang + ((b / burstCount) - 0.5) * Math.PI * 1.4
+              this.projectiles.push({
+                x: t.portalX,
+                y: t.portalY,
+                width: 14,
+                height: 14,
+                speed: 250,
+                direction: { x: Math.cos(ba), y: Math.sin(ba) },
+                damage: Math.round(t.damage * 0.58),
+                color: b % 2 === 0 ? pCol1 : pCol2,
+                lifetime: 0,
+                maxLifetime: 3.6
+              })
+            }
+          } else if (t.kind === 'void_meteor_salvo' || t.kind === 'singularity_grid') {
             const burstCount = t.kind === 'singularity_grid' ? 12 : 8
             const burstDmg = Math.round(16 * Math.max(1, this.damageScale))
             for (let b = 0; b < burstCount; b++) {
@@ -1520,7 +1996,43 @@ export class Enemy {
       } else {
         t.activeTimer += deltaTime
 
-        if (t.kind === 'tracking_strikes' && t.trackingBlasts) {
+        if (t.kind === 'cosmic_orb_barrage') {
+          t.x = bossCenter.x
+          t.y = bossCenter.y
+          t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
+          const interval = this.isEnraged ? 0.24 : 0.3
+          const oCol1 = t.accentPrimary || (this.isAstralScourge ? '#34D399' : '#22D3EE')
+          const oCol2 = t.accentSecondary || (this.isAstralScourge ? '#FACC15' : '#E879F9')
+          while (t.pulseTimer >= interval) {
+            t.pulseTimer -= interval
+            t.pulseCount = (t.pulseCount ?? 0) + 1
+            const pIdx = t.pulseCount
+            const dir = pIdx % 2 === 0 ? 1 : -1
+            const baseRot = pIdx * 0.34 * dir
+            const spokes = this.isEnraged ? 10 : 8
+            for (let k = 0; k < spokes; k++) {
+              const ang = baseRot + (k / spokes) * Math.PI * 2
+              const spawnSplitStar = k % 4 === 0
+              this.projectiles.push({
+                x: bossCenter.x,
+                y: bossCenter.y,
+                width: spawnSplitStar ? 17 : 12,
+                height: spawnSplitStar ? 17 : 12,
+                speed: spawnSplitStar ? 225 : 265,
+                direction: { x: Math.cos(ang), y: Math.sin(ang) },
+                damage: t.damage,
+                color: k % 2 === 0 ? oCol1 : oCol2,
+                lifetime: 0,
+                maxLifetime: 4.5,
+                isCosmicStar: spawnSplitStar,
+                splitAfter: spawnSplitStar ? 0.78 : undefined,
+                splitCount: spawnSplitStar ? (this.isEnraged ? 6 : 4) : undefined,
+                splitSpeed: 245,
+                splitColors: [oCol1, oCol2]
+              })
+            }
+          }
+        } else if (t.kind === 'tracking_strikes' && t.trackingBlasts) {
           t.spawnTimer = (t.spawnTimer ?? 0) + deltaTime
           const maxSpawns = 5
           if ((t.spawnsDone ?? 1) < maxSpawns && t.spawnTimer >= 0.5 && targetCenter) {
@@ -1597,7 +2109,7 @@ export class Enemy {
   }
 
   /**
-   * Update all projectiles (including optional homing seekers that curve toward player)
+   * Update all projectiles (including homing seekers & Calamity splitting Nebula Stars)
    */
   private updateProjectiles(deltaTime: number): void {
     const targetCenter = this.target && this.target.isAlive ? this.target.getCenter() : null
@@ -1620,7 +2132,37 @@ export class Enemy {
       proj.x += proj.direction.x * proj.speed * deltaTime
       proj.y += proj.direction.y * proj.speed * deltaTime
       proj.lifetime += deltaTime
-      
+
+      // Calamity Nebula Star mid-flight radial split
+      if (
+        proj.splitAfter &&
+        !proj.splitDone &&
+        proj.lifetime >= proj.splitAfter
+      ) {
+        proj.splitDone = true
+        const count = Math.max(4, proj.splitCount ?? 4)
+        const childSpeed = proj.splitSpeed ?? 245
+        const baseAngle = Math.atan2(proj.direction.y, proj.direction.x)
+        const splitPalette = proj.splitColors ?? ['#22D3EE', '#E879F9']
+        for (let s = 0; s < count; s++) {
+          const sa = baseAngle + (s / count) * Math.PI * 2
+          this.projectiles.push({
+            x: proj.x,
+            y: proj.y,
+            width: 11,
+            height: 11,
+            speed: childSpeed,
+            direction: { x: Math.cos(sa), y: Math.sin(sa) },
+            damage: Math.max(8, Math.round(proj.damage * 0.75)),
+            color: s % 2 === 0 ? splitPalette[0] : splitPalette[1],
+            lifetime: 0,
+            maxLifetime: 2.6
+          })
+        }
+        this.projectiles.splice(i, 1)
+        continue
+      }
+
       // Remove expired projectiles
       if (proj.lifetime >= proj.maxLifetime) {
         this.projectiles.splice(i, 1)
@@ -1707,7 +2249,7 @@ export class Enemy {
     this.color = '#FFFFFF'
     this.hitFlashTimer = 0.08
 
-    // Wave 15 Final Boss 3-Phase Progression (Phase 2 @ 66% HP, Phase 3 @ 33% HP)
+    // Area Final Boss 3-Phase Progression (Phase 2 @ 66% HP, Phase 3 @ 33% HP)
     if (this.isFinalBoss) {
       const phase2Threshold = Math.floor(this.maxHealth * 0.66)
       const phase3Threshold = Math.floor(this.maxHealth * 0.33)
@@ -1717,12 +2259,15 @@ export class Enemy {
         this.bossPhase = 2
         this.phaseTransitionTimer = 0.85
         this.pendingPhaseAnnouncement = 2
+        if (this.isWormBoss) {
+          this.speed = this.baseSpeed * 1.15
+        }
         this.shootCooldownMax = Math.max(0.85, this.shootCooldownMax * 0.86)
         this.specialCooldownMax = Math.max(1.85, this.specialCooldownMax * 0.86)
         this.shootCooldown = Math.min(this.shootCooldown, 0.25)
         this.specialCooldown = 0.15
         if (this.target && this.target.isAlive) {
-          this.spawnTelegraphedAttack('rotating_cross_lasers')
+          this.spawnTelegraphedAttack(this.isWormBoss ? 'cosmic_laser_walls' : 'rotating_cross_lasers')
         }
         return false
       }
@@ -1733,12 +2278,15 @@ export class Enemy {
         this.isEnraged = true
         this.phaseTransitionTimer = 0.95
         this.pendingPhaseAnnouncement = 3
+        if (this.isWormBoss) {
+          this.speed = this.baseSpeed * 1.28
+        }
         this.shootCooldownMax = Math.max(0.68, this.shootCooldownMax * 0.82)
         this.specialCooldownMax = Math.max(1.55, this.specialCooldownMax * 0.82)
         this.shootCooldown = Math.min(this.shootCooldown, 0.2)
         this.specialCooldown = 0.15
         if (this.target && this.target.isAlive) {
-          this.spawnTelegraphedAttack('singularity_grid')
+          this.spawnTelegraphedAttack(this.isWormBoss ? 'cosmic_laser_walls' : 'singularity_grid')
         }
         return false
       }
@@ -1754,8 +2302,30 @@ export class Enemy {
       return true
     }
 
+    // Devourer of Gods (and non-final Dev-spawned Astral Scourge) Phase 2 awakening at <= 60% HP
+    if ((this.isDevourerOfGods || (!this.isFinalBoss && this.isAstralScourge)) && !this.isEnraged && this.health <= this.maxHealth * 0.6) {
+      this.isEnraged = true
+      this.bossPhase = 2
+      this.pendingPhaseAnnouncement = 2
+      this.phaseTransitionTimer = 0.75
+      this.speed = this.baseSpeed * 1.26
+      this.shootCooldownMax = Math.max(0.7, this.shootCooldownMax * 0.78)
+      this.specialCooldownMax = Math.max(1.8, this.specialCooldownMax * 0.78)
+      this.shootCooldown = Math.min(this.shootCooldown, 0.25)
+      this.specialCooldown = 0.2
+      if (this.target && this.target.isAlive) {
+        this.spawnTelegraphedAttack('cosmic_laser_walls')
+      }
+    }
+
     // Standard Boss Phase 2 Enrage at <= 50% HP for armored/buffed non-final bosses
-    if (!this.isFinalBoss && this.enableEnrage && !this.isEnraged && this.health <= this.maxHealth * 0.5) {
+    if (
+      !this.isFinalBoss &&
+      !this.isWormBoss &&
+      this.enableEnrage &&
+      !this.isEnraged &&
+      this.health <= this.maxHealth * 0.5
+    ) {
       this.isEnraged = true
       this.bossPhase = 2
       this.pendingPhaseAnnouncement = 2
@@ -2323,6 +2893,139 @@ export class Enemy {
           ctx.fillText(`⚠ ROTATING X-BEAM SWEEP — DODGE THROUGH GAPS! (${rem}s)`, start.x, start.y + 68)
           ctx.restore()
         }
+      } else if (t.kind === 'cosmic_laser_walls' && t.gridLines) {
+        // Calamity DoG Cosmic Laser Wall sightlines -> blazing laser flash
+        const pulse = 0.72 + 0.28 * Math.sin(this.animTime * 24)
+        ctx.save()
+        for (const line of t.gridLines) {
+          const p1 = camera.worldToScreen(line.x1, line.y1)
+          const p2 = camera.worldToScreen(line.x2, line.y2)
+          const accent = line.color || '#22D3EE'
+          ctx.lineCap = 'round'
+          if (!t.hasTriggered) {
+            // Sharp Calamity laser wall telegraph sightline
+            ctx.strokeStyle = accent
+            ctx.globalAlpha = 0.22 + chargeProgress * 0.24
+            ctx.lineWidth = line.width
+            ctx.beginPath()
+            ctx.moveTo(p1.x, p1.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
+
+            ctx.globalAlpha = 0.72 * pulse + chargeProgress * 0.28
+            ctx.strokeStyle = accent
+            ctx.lineWidth = 2.4
+            ctx.setLineDash([14, 10])
+            ctx.beginPath()
+            ctx.moveTo(p1.x, p1.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
+            ctx.setLineDash([])
+          } else {
+            const alpha = Math.max(0, 1 - impactProgress * 0.75)
+            ctx.globalAlpha = alpha
+            ctx.strokeStyle = accent
+            ctx.lineWidth = line.width * 1.2
+            ctx.beginPath()
+            ctx.moveTo(p1.x, p1.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
+
+            ctx.strokeStyle = '#FFFFFF'
+            ctx.lineWidth = Math.max(4, line.width * 0.42)
+            ctx.beginPath()
+            ctx.moveTo(p1.x, p1.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
+          }
+        }
+        if (!t.hasTriggered) {
+          const centerSp = camera.worldToScreen(t.x, t.y)
+          const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
+          ctx.fillStyle = 'rgba(8, 12, 26, 0.88)'
+          ctx.fillRect(centerSp.x - 165, centerSp.y - 20, 330, 34)
+          ctx.strokeStyle = t.accentPrimary || '#22D3EE'
+          ctx.lineWidth = 2
+          ctx.strokeRect(centerSp.x - 165, centerSp.y - 20, 330, 34)
+          ctx.fillStyle = '#E0F2FE'
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(`${t.warningLabel || '⚠ COSMIC LASER WALLS — WEAVE GAPS!'} (${rem}s)`, centerSp.x, centerSp.y + 1)
+        }
+        ctx.restore()
+      } else if (t.kind === 'cosmic_portal_lunge') {
+        const pScr = camera.worldToScreen(t.portalX ?? t.x, t.portalY ?? t.y)
+        const eScr = camera.worldToScreen(t.endX ?? t.x, t.endY ?? t.y)
+        const ang = t.angle ?? 0
+        const primary = t.accentPrimary || '#22D3EE'
+        const secondary = t.accentSecondary || '#E879F9'
+        ctx.save()
+        // Portal Rift Circle
+        const portalAlpha = t.hasTriggered ? Math.max(0, 1 - impactProgress) : 0.45 + 0.55 * chargeProgress
+        ctx.globalAlpha = portalAlpha
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)'
+        ctx.beginPath()
+        ctx.arc(pScr.x, pScr.y, 44, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = secondary
+        ctx.lineWidth = 3.5
+        ctx.beginPath()
+        ctx.arc(pScr.x, pScr.y, 44, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.strokeStyle = primary
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.arc(pScr.x, pScr.y, 32, ang - 1.2, ang + 1.2)
+        ctx.stroke()
+
+        // Lunge Trajectory Corridor
+        if (!t.hasTriggered) {
+          const halfW = t.radius
+          ctx.translate(pScr.x, pScr.y)
+          ctx.rotate(ang)
+          ctx.fillStyle = this.isAstralScourge
+            ? `rgba(52, 211, 153, ${0.14 + chargeProgress * 0.2})`
+            : `rgba(232, 121, 249, ${0.14 + chargeProgress * 0.2})`
+          ctx.fillRect(0, -halfW, t.length ?? 780, halfW * 2)
+          ctx.strokeStyle = primary
+          ctx.lineWidth = 2.5
+          ctx.setLineDash([14, 8])
+          ctx.strokeRect(0, -halfW, t.length ?? 780, halfW * 2)
+          ctx.setLineDash([])
+
+          ctx.fillStyle = secondary
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'left'
+          ctx.fillText(t.warningLabel || '⚠ RIFT LUNGE INCOMING!', 52, -halfW - 8)
+        } else {
+          ctx.globalAlpha = Math.max(0, (1 - impactProgress) * 0.75)
+          ctx.strokeStyle = primary
+          ctx.lineWidth = 10
+          ctx.beginPath()
+          ctx.moveTo(pScr.x, pScr.y)
+          ctx.lineTo(eScr.x, eScr.y)
+          ctx.stroke()
+        }
+        ctx.restore()
+      } else if (t.kind === 'cosmic_orb_barrage') {
+        const bScr = camera.worldToScreen(t.x, t.y)
+        const primary = t.accentPrimary || '#22D3EE'
+        const secondary = t.accentSecondary || '#E879F9'
+        ctx.save()
+        if (!t.hasTriggered) {
+          ctx.strokeStyle = secondary
+          ctx.lineWidth = 3
+          ctx.setLineDash([10, 8])
+          ctx.beginPath()
+          ctx.arc(bScr.x, bScr.y, 64 + (1 - chargeProgress) * 44, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.fillStyle = primary
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(t.warningLabel || '⚠ NEBULA STAR BARRAGE!', bScr.x, bScr.y - 72)
+        }
+        ctx.restore()
       } else if (t.kind === 'singularity_grid' && t.gridRects) {
         const pulse = 0.72 + 0.28 * Math.sin(this.animTime * 22)
         ctx.save()
@@ -2465,6 +3168,106 @@ export class Enemy {
     if (this.isSpawning) {
       const spawnProgress = Math.min(1, this.spawnTime / this.spawnDelay)
       ctx.globalAlpha = 0.4 + 0.6 * spawnProgress
+    }
+
+    // Segmented Worm Bosses (Devourer of Gods / Astral Scourge) trailing body segments
+    if (this.isWormBoss && this.dogSegments.length > 0) {
+      const totalDelay = Math.max(
+        0.5,
+        this.spawnDelay || (this.isDevourerOfGods ? DEVOURER_CUTSCENE_DURATION_SECONDS : WAVE_15_CUTSCENE_DURATION_SECONDS)
+      )
+      const emergeProgress =
+        this.cutsceneDelayTimer > 0
+          ? Math.max(0, Math.min(1, 1 - this.cutsceneDelayTimer / totalDelay))
+          : 1
+      const emergeFraction =
+        this.cutsceneDelayTimer > 0 ? Math.max(0, Math.min(1, (emergeProgress - 0.18) / 0.68)) : 1
+      const visibleCount = Math.floor(this.dogSegments.length * emergeFraction)
+      for (let i = visibleCount - 1; i >= 0; i--) {
+        const seg = this.dogSegments[i]
+        const sp = camera.worldToScreen(seg.x, seg.y)
+        const taper = 1 - (i / this.dogSegments.length) * 0.56
+        const sr = Math.max(10, 27 * taper)
+        const isTail = i === this.dogSegments.length - 1
+
+        ctx.save()
+        ctx.translate(sp.x, sp.y)
+        ctx.rotate(seg.angle)
+
+        // Segment glow aura
+        ctx.fillStyle = this.isAstralScourge
+          ? this.isEnraged || this.bossPhase >= 3
+            ? 'rgba(250, 204, 21, 0.22)'
+            : 'rgba(52, 211, 153, 0.18)'
+          : this.isEnraged
+            ? 'rgba(244, 63, 94, 0.18)'
+            : 'rgba(34, 211, 238, 0.16)'
+        ctx.beginPath()
+        ctx.arc(0, 0, sr * 1.35, 0, Math.PI * 2)
+        ctx.fill()
+
+        const armorFill = this.isAstralScourge
+          ? this.bossPhase >= 3
+            ? '#451A03'
+            : '#064E3B'
+          : this.isEnraged
+            ? '#3B0764'
+            : '#1E1B4B'
+        const edgeA = this.isAstralScourge
+          ? '#34D399'
+          : this.isEnraged
+            ? '#F43F5E'
+            : '#22D3EE'
+        const edgeB = this.isAstralScourge ? '#FACC15' : '#E879F9'
+        const spineColor = this.isAstralScourge
+          ? this.bossPhase >= 3
+            ? '#FACC15'
+            : i % 2 === 0
+              ? '#34D399'
+              : '#FEF08A'
+          : this.isEnraged
+            ? '#F43F5E'
+            : i % 2 === 0
+              ? '#22D3EE'
+              : '#F0ABFC'
+
+        if (isTail) {
+          // Bladed stinger tail
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : armorFill
+          ctx.strokeStyle = this.isAstralScourge ? '#FACC15' : edgeA
+          ctx.lineWidth = 2.4
+          ctx.beginPath()
+          ctx.moveTo(sr * 1.1, 0)
+          ctx.lineTo(-sr * 0.4, -sr * 0.9)
+          ctx.lineTo(-sr * 1.65, 0)
+          ctx.lineTo(-sr * 0.4, sr * 0.9)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+        } else {
+          // Armored plates + side dorsal fins
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : armorFill
+          ctx.strokeStyle = i % 2 === 0 ? edgeA : edgeB
+          ctx.lineWidth = 2.4
+          ctx.beginPath()
+          ctx.moveTo(sr * 0.92, 0)
+          ctx.lineTo(sr * 0.25, -sr * 0.95)
+          ctx.lineTo(-sr * 0.85, -sr * 0.62)
+          ctx.lineTo(-sr * 0.55, 0)
+          ctx.lineTo(-sr * 0.85, sr * 0.62)
+          ctx.lineTo(sr * 0.25, sr * 0.95)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Glowing inner spine core
+          ctx.fillStyle = spineColor
+          ctx.beginPath()
+          ctx.ellipse(0, 0, sr * 0.42, sr * 0.22, 0, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        ctx.restore()
+      }
     }
 
     // Ground shadow
@@ -2875,6 +3678,97 @@ export class Enemy {
           break
         }
 
+        if (this.isWormBoss) {
+          // Segmented Worm Boss Head (Devourer of Gods cyan/violet vs Astral Scourge emerald/solar-gold)
+          const jawSnap = Math.abs(Math.sin(this.animTime * 9)) * 0.22
+          const headGlow = this.isAstralScourge
+            ? this.bossPhase >= 3
+              ? 'rgba(250, 204, 21, 0.78)'
+              : 'rgba(52, 211, 153, 0.75)'
+            : this.isEnraged
+              ? 'rgba(244, 63, 94, 0.75)'
+              : 'rgba(34, 211, 238, 0.72)'
+          const jawStroke = this.isAstralScourge
+            ? this.bossPhase >= 3
+              ? '#FACC15'
+              : '#34D399'
+            : this.isEnraged
+              ? '#F43F5E'
+              : '#22D3EE'
+          const headFill = this.isAstralScourge
+            ? this.bossPhase >= 3
+              ? '#451A03'
+              : '#064E3B'
+            : this.isEnraged
+              ? '#4C0519'
+              : '#1E1B4B'
+          const crestStroke = this.isAstralScourge ? '#FACC15' : '#E879F9'
+          const coreColor = this.isAstralScourge
+            ? this.bossPhase >= 3
+              ? '#FEF08A'
+              : '#34D399'
+            : this.isEnraged
+              ? '#F43F5E'
+              : '#22D3EE'
+
+          ctx.save()
+          ctx.strokeStyle = headGlow
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          ctx.arc(0, 0, r * (1.22 + Math.sin(this.animTime * 10) * 0.06), 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.restore()
+
+          // Twin curved pincer mandibles snapping at the front
+          for (const side of [-1, 1]) {
+            ctx.save()
+            ctx.rotate(side * jawSnap)
+            ctx.fillStyle = isFlashing ? '#FFFFFF' : '#0F172A'
+            ctx.strokeStyle = jawStroke
+            ctx.lineWidth = 2.6
+            ctx.beginPath()
+            ctx.moveTo(r * 0.55, side * r * 0.28)
+            ctx.lineTo(r * 1.38, side * r * 0.55)
+            ctx.lineTo(r * 1.12, side * r * 0.12)
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+            ctx.restore()
+          }
+
+          // Armored head carapace + sweeping side horns
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : headFill
+          ctx.strokeStyle = crestStroke
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          ctx.moveTo(r * 1.05, 0)
+          ctx.lineTo(r * 0.25, -r * 0.85)
+          ctx.lineTo(-r * 0.92, -r * 1.08)
+          ctx.lineTo(-r * 0.52, -r * 0.42)
+          ctx.lineTo(-r * 0.82, 0)
+          ctx.lineTo(-r * 0.52, r * 0.42)
+          ctx.lineTo(-r * 0.92, r * 1.08)
+          ctx.lineTo(r * 0.25, r * 0.85)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Glowing core slit & 4 piercing eyes
+          ctx.fillStyle = coreColor
+          ctx.beginPath()
+          ctx.ellipse(0, 0, r * 0.48, r * 0.2, 0, 0, Math.PI * 2)
+          ctx.fill()
+
+          ctx.fillStyle = this.isAstralScourge ? '#FEF9C3' : '#FFFFFF'
+          for (const side of [-1, 1]) {
+            ctx.beginPath()
+            ctx.arc(r * 0.42, side * r * 0.34, 3.6, 0, Math.PI * 2)
+            ctx.arc(r * 0.16, side * r * 0.48, 2.8, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          break
+        }
+
         // Aegis Commander Drone: octagonal dreadnought hull + 4 orbiting shield pylons + pulsing core
         if (this.isEnraged || this.bossPhase >= 2) {
           ctx.save()
@@ -3046,9 +3940,15 @@ export class Enemy {
       ctx.stroke()
     }
 
-    // Boss / Mini-Boss Nameplate
-    if (this.isBoss) {
-      ctx.fillStyle = '#FFD700'
+    // Boss / Mini-Boss Nameplate (suppressed briefly during initial boss cutscene emergence)
+    const showBossLabel =
+      !(this.isWormBoss || this.isFinalBoss) || this.cutsceneDelayTimer <= 1.4
+    if (this.isBoss && showBossLabel) {
+      ctx.fillStyle = this.isDevourerOfGods
+        ? '#22D3EE'
+        : this.isAstralScourge
+          ? '#34D399'
+          : '#FFD700'
       ctx.font = 'bold 11px monospace'
       ctx.textAlign = 'center'
       ctx.fillText(this.bossTitle || 'COMMANDER BOSS', cx, screenY - 14)
@@ -3061,28 +3961,58 @@ export class Enemy {
 
     // Health bar with dark backing
     const healthPercent = Math.max(0, Math.min(1, this.health / this.maxHealth))
-    if (healthPercent < 1 || this.isBoss || this.isMiniBoss) {
+    if (showBossLabel && (healthPercent < 1 || this.isBoss || this.isMiniBoss)) {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
       ctx.fillRect(screenX - 1, screenY - 9, this.width + 2, 6)
-      ctx.fillStyle = this.isBoss ? '#FFD700' : this.isMiniBoss ? '#F97316' : '#FF0055'
+      ctx.fillStyle = this.isDevourerOfGods
+        ? '#E879F9'
+        : this.isAstralScourge
+          ? '#FACC15'
+          : this.isBoss
+            ? '#FFD700'
+            : this.isMiniBoss
+              ? '#F97316'
+              : '#FF0055'
       ctx.fillRect(screenX, screenY - 8, this.width * healthPercent, 4)
     }
 
-    // Enemy Laser / Arcane Projectiles
+    // Enemy Laser / Arcane / Cosmic Nebula Star Projectiles
     for (const proj of this.projectiles) {
       const { x: projX, y: projY } = camera.worldToScreen(proj.x, proj.y)
-      const angle = Math.atan2(proj.direction.y, proj.direction.x)
+      const angle = proj.isCosmicStar
+        ? this.animTime * 6.5
+        : Math.atan2(proj.direction.y, proj.direction.x)
       ctx.save()
       ctx.translate(projX, projY)
       ctx.rotate(angle)
-      ctx.fillStyle = proj.color
-      ctx.beginPath()
-      ctx.ellipse(0, 0, Math.max(4, proj.width * 0.8), Math.max(2, proj.height * 0.38), 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = '#FFFFFF'
-      ctx.beginPath()
-      ctx.arc(2, 0, Math.max(1.5, proj.height * 0.2), 0, Math.PI * 2)
-      ctx.fill()
+      if (proj.isCosmicStar) {
+        const starR = Math.max(7, proj.width * 0.65)
+        ctx.fillStyle = proj.color
+        ctx.beginPath()
+        for (let k = 0; k < 8; k++) {
+          const ka = (k / 8) * Math.PI * 2
+          const kr = k % 2 === 0 ? starR : starR * 0.42
+          const sx = Math.cos(ka) * kr
+          const sy = Math.sin(ka) * kr
+          if (k === 0) ctx.moveTo(sx, sy)
+          else ctx.lineTo(sx, sy)
+        }
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#FFFFFF'
+        ctx.beginPath()
+        ctx.arc(0, 0, starR * 0.34, 0, Math.PI * 2)
+        ctx.fill()
+      } else {
+        ctx.fillStyle = proj.color
+        ctx.beginPath()
+        ctx.ellipse(0, 0, Math.max(4, proj.width * 0.8), Math.max(2, proj.height * 0.38), 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#FFFFFF'
+        ctx.beginPath()
+        ctx.arc(2, 0, Math.max(1.5, proj.height * 0.2), 0, Math.PI * 2)
+        ctx.fill()
+      }
       ctx.restore()
     }
 
@@ -3329,6 +4259,46 @@ export function checkBossTelegraphHit(
     return false
   }
 
+  if (telegraph.kind === 'cosmic_orb_barrage') {
+    return false // Projectiles & splitting nebula stars are checked via enemy.projectiles collisions
+  }
+
+  if (telegraph.kind === 'cosmic_laser_walls' && telegraph.gridLines) {
+    for (const line of telegraph.gridLines) {
+      const hitDist = line.width * 0.5 + targetCircle.radius * 0.65
+      const dx = line.x2 - line.x1
+      const dy = line.y2 - line.y1
+      const lenSq = dx * dx + dy * dy
+      if (lenSq <= 0.0001) continue
+      const t = Math.max(
+        0,
+        Math.min(1, ((targetCircle.x - line.x1) * dx + (targetCircle.y - line.y1) * dy) / lenSq)
+      )
+      const projX = line.x1 + t * dx
+      const projY = line.y1 + t * dy
+      if (Math.hypot(targetCircle.x - projX, targetCircle.y - projY) <= hitDist) {
+        return true
+      }
+    }
+    return false
+  }
+
+  if (telegraph.kind === 'cosmic_portal_lunge') {
+    if (telegraph.activeTimer > 0.18) return false
+    const x1 = telegraph.portalX ?? telegraph.x
+    const y1 = telegraph.portalY ?? telegraph.y
+    const x2 = telegraph.endX ?? x1 + Math.cos(telegraph.angle ?? 0) * (telegraph.length ?? 780)
+    const y2 = telegraph.endY ?? y1 + Math.sin(telegraph.angle ?? 0) * (telegraph.length ?? 780)
+    const dx = x2 - x1
+    const dy = y2 - y1
+    const lenSq = dx * dx + dy * dy
+    if (lenSq <= 0.0001) return false
+    const t = Math.max(0, Math.min(1, ((targetCircle.x - x1) * dx + (targetCircle.y - y1) * dy) / lenSq))
+    const projX = x1 + t * dx
+    const projY = y1 + t * dy
+    return Math.hypot(targetCircle.x - projX, targetCircle.y - projY) <= telegraph.radius + targetCircle.radius * 0.65
+  }
+
   if (telegraph.kind === 'singularity_grid' && telegraph.gridRects) {
     const effectiveR = targetCircle.radius * 0.65
     for (const r of telegraph.gridRects) {
@@ -3480,6 +4450,31 @@ export function resolveEnemyCollisions(
     e.x = Math.max(padding, Math.min(e.x, arenaSize - e.width - padding))
     e.y = Math.max(padding, Math.min(e.y, arenaSize - e.height - padding))
   }
+}
+
+/**
+ * Checks whether a target circle collides with any trailing body segment of the Devourer of Gods
+ */
+export function checkDevourerSegmentHit(
+  enemy: Enemy,
+  targetCircle: { x: number; y: number; radius: number }
+): boolean {
+  if (!enemy.isAlive || enemy.isSpawning || !enemy.isWormBoss || enemy.dogSegments.length === 0) {
+    return false
+  }
+  const total = enemy.dogSegments.length
+  for (let i = 0; i < total; i++) {
+    const seg = enemy.dogSegments[i]
+    const taper = 1 - (i / total) * 0.56
+    const segRadius = Math.max(9, 24 * taper)
+    const dx = targetCircle.x - seg.x
+    const dy = targetCircle.y - seg.y
+    const minDist = segRadius + targetCircle.radius * 0.72
+    if (dx * dx + dy * dy <= minDist * minDist) {
+      return true
+    }
+  }
+  return false
 }
 
 export default Enemy

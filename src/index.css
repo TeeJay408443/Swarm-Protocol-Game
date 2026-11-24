@@ -70,6 +70,12 @@
   .animate-fuse-fade-up {
     animation: fuse-fade-up 0.38s ease-out forwards;
   }
+  .animate-boss-warning-flash {
+    animation: boss-warning-flash 0.42s ease-in-out infinite alternate;
+  }
+  .animate-boss-warning-sweep {
+    animation: boss-warning-sweep 1.2s linear infinite;
+  }
 }
 
 body {
@@ -211,6 +217,26 @@ body {
   }
 }
 
+@keyframes boss-warning-flash {
+  0% {
+    opacity: 0.58;
+    filter: brightness(0.9);
+  }
+  100% {
+    opacity: 1;
+    filter: brightness(1.22);
+  }
+}
+
+@keyframes boss-warning-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-float-bubble,
   .animate-float-bubble-slow,
@@ -223,7 +249,9 @@ body {
   .animate-fuse-result-reveal,
   .animate-fuse-star-slam,
   .animate-fuse-star-halo,
-  .animate-fuse-fade-up {
+  .animate-fuse-fade-up,
+  .animate-boss-warning-flash,
+  .animate-boss-warning-sweep {
     animation: none !important;
     transition: none !important;
   }

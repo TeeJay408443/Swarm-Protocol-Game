@@ -24,17 +24,31 @@ import {
 import {
   AREA_TWO_BOSSES,
   AREA_TWO_ENEMIES,
+  computeBossCutsceneShake,
+  computeDevourerCutsceneCameraFrame,
+  computeDevourerCutsceneShake,
+  DEVOURER_CUTSCENE_DURATION_SECONDS,
+  DEVOURER_CUTSCENE_THEME,
+  DEV_SPAWNABLE_ENEMIES,
   GAME_AREAS,
   getAreaBossTemplateForWave,
   getAreaById,
   getAreaEnemies,
   getAreaMiniBossCap,
   getAreaOneBossBuff,
+  getAreaTwoBossBuff,
+  getDevSpawnableEnemyById,
   getWave15BossCombatProfile,
+  getWave15CutsceneTheme,
   getWave15FinalBossHp,
   isAreaUnlocked,
+  isSecretDevOnlyBossId,
+  SECRET_DEVOURER_OF_GODS_CUTSCENE_LINES,
+  SECRET_DEVOURER_OF_GODS_ID,
+  SECRET_DEVOURER_OF_GODS_TEMPLATE,
   selectAreaEnemyTemplateForWave,
   shouldSpawnRegularEnemiesInWave,
+  WAVE_15_CUTSCENE_DURATION_SECONDS,
   WAVE_15_FINAL_BOSS_BASE_HP
 } from '../src/config/arenas'
 import {
@@ -100,6 +114,7 @@ import {
   BossArenaBounds,
   ClosingSideLaserMode,
   checkBossTelegraphHit,
+  checkDevourerSegmentHit,
   checkEnemyAoeHit,
   Enemy,
   getRotatingCrossLaserSegments,
@@ -119,6 +134,14 @@ import {
 } from '../src/services/auth'
 import { getLocalPlayerTelemetry, submitScore } from '../src/services/scores'
 import { computePostGameMetrics, formatSurvivalClock } from '../src/config/postGameSummary'
+import AudioService, {
+  buildYouTubeEmbedUrl,
+  DEVOURER_BEAT_DROP_SECONDS,
+  DEVOURER_YOUTUBE_URL,
+  DEVOURER_YOUTUBE_VIDEO_ID,
+  MUSIC_TRACK_METADATA,
+  parseYouTubeVideoId
+} from '../src/services/AudioService'
 import { isConfiguredSupabase } from '../src/services/supabase'
 import {
   DEV_AUTHORIZED_EMAIL,
@@ -1325,16 +1348,27 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getAreaBossTemplateForWave('astral_citadel', 25).id, 'boss_a2_05')
     assert.equal(getAreaBossTemplateForWave('carbon_sector', 15).id, 'ene_04')
 
-    // 2. Wave 15 Final Boss HP is ~150k in Area 1 and scaled ~187.5k in Area 2
+    // 2. Wave 15 Final Boss HP is ~150k in Area 1 and scaled higher in harder Area 2 (+55% threat)
+    const area2Meta = getAreaById('astral_citadel')
+    assert.ok(area2Meta.enemyHpMultiplier >= 1.5)
+    assert.ok(area2Meta.enemyDamageMultiplier >= 1.2)
+    assert.ok(area2Meta.enemySpawnRateMultiplier >= 1.15)
     assert.equal(WAVE_15_FINAL_BOSS_BASE_HP, 150000)
     assert.equal(getWave15FinalBossHp('carbon_sector'), 150000)
-    assert.equal(getWave15FinalBossHp('astral_citadel'), 187500)
+    assert.equal(getWave15FinalBossHp('astral_citadel'), 232500)
 
-    // 3. Wave 15 disables regular enemy spawns while normal waves & Endless Mode (16+) allow regular spawns
+    const a2W5Buff = getAreaTwoBossBuff(5)
+    const a2W10Buff = getAreaTwoBossBuff(10)
+    assert.ok(a2W5Buff.hpMultiplier >= 3.0 && a2W5Buff.damageReduction >= 0.2)
+    assert.ok(a2W10Buff.hpMultiplier > a2W5Buff.hpMultiplier && a2W10Buff.enableEnrage)
+
+    // 3. Wave 15 and active Devourer of Gods disable regular enemy spawns; normal waves & Endless Mode allow regular spawns
     assert.equal(shouldSpawnRegularEnemiesInWave(14, false), true)
     assert.equal(shouldSpawnRegularEnemiesInWave(15, false), false)
     assert.equal(shouldSpawnRegularEnemiesInWave(16, true), true)
     assert.equal(shouldSpawnRegularEnemiesInWave(20, true), true)
+    assert.equal(shouldSpawnRegularEnemiesInWave(5, false, true), false)
+    assert.equal(shouldSpawnRegularEnemiesInWave(16, true, true), false)
 
     // 4. Verify Area 2 bosses instantiate with boss flags, balanced contact damage, and AoE/telegraph attacks
     const hero = heroes.find((h) => h.id === 'hero_01')!
@@ -2729,7 +2763,433 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(zeroMetrics.levelReached, 1)
     assert.equal(zeroMetrics.sortedUpgrades.length, 0)
   })
+
+  it('restricts Secret Devourer of Gods strictly to Dev Panel spawn_enemy, verifies exact cutscene lines, and simulates 22-segment Calamity boss', () => {
+    // 1. Strictly excluded from canonical seedData & all normal wave/boss spawners
+    assert.equal(enemies.length, 4)
+    assert.equal(enemies.some((e) => e.id === SECRET_DEVOURER_OF_GODS_ID), false)
+    assert.equal(AREA_TWO_ENEMIES.some((e) => e.id === SECRET_DEVOURER_OF_GODS_ID), false)
+    assert.equal(AREA_TWO_BOSSES.some((e) => e.id === SECRET_DEVOURER_OF_GODS_ID), false)
+    assert.equal(getAreaEnemies('carbon_sector').some((e) => e.id === SECRET_DEVOURER_OF_GODS_ID), false)
+    assert.equal(getAreaEnemies('astral_citadel').some((e) => e.id === SECRET_DEVOURER_OF_GODS_ID), false)
+
+    for (const w of [1, 5, 10, 15, 20, 25]) {
+      assert.notEqual(getAreaBossTemplateForWave('carbon_sector', w).id, SECRET_DEVOURER_OF_GODS_ID)
+      assert.notEqual(getAreaBossTemplateForWave('astral_citadel', w).id, SECRET_DEVOURER_OF_GODS_ID)
+      for (const roll of [0.05, 0.5, 0.85, 0.95]) {
+        assert.notEqual(
+          selectAreaEnemyTemplateForWave('carbon_sector', w, { roll }).template.id,
+          SECRET_DEVOURER_OF_GODS_ID
+        )
+        assert.notEqual(
+          selectAreaEnemyTemplateForWave('astral_citadel', w, {
+            roll,
+            canSpawnRanged: true,
+            canSpawnMiniBoss: true
+          }).template.id,
+          SECRET_DEVOURER_OF_GODS_ID
+        )
+      }
+    }
+
+    assert.equal(isSecretDevOnlyBossId(SECRET_DEVOURER_OF_GODS_ID), true)
+    assert.equal(isSecretDevOnlyBossId('ene_04'), false)
+
+    const dogEntry = getDevSpawnableEnemyById(SECRET_DEVOURER_OF_GODS_ID)
+    assert.ok(dogEntry)
+    assert.equal(dogEntry.isBoss, true)
+    assert.equal(dogEntry.isSecretDevOnly, true)
+    assert.equal(dogEntry.group, 'Secret Boss')
+    assert.ok(DEV_SPAWNABLE_ENEMIES.length >= 12)
+
+    // 2. Exact Calamity cutscene lines
+    assert.equal(SECRET_DEVOURER_OF_GODS_CUTSCENE_LINES.line1, 'YOU ARE NO GOD')
+    assert.equal(
+      SECRET_DEVOURER_OF_GODS_CUTSCENE_LINES.line2,
+      'BUT I SHALL FEAST UPON YOUR ESSENCE REGARDLESS'
+    )
+
+    // 3. Dev-only authorization gate for spawn_enemy
+    const blockedSpawn = dispatchDevAction('player@swarm.test', {
+      type: 'spawn_enemy',
+      enemyId: SECRET_DEVOURER_OF_GODS_ID,
+      count: 1
+    })
+    assert.equal(blockedSpawn.success, false)
+
+    const receivedActions: DevLiveAction[] = []
+    const unsubscribe = subscribeDevActions((act) => receivedActions.push(act))
+    const allowedSpawn = dispatchDevAction(DEV_AUTHORIZED_EMAIL, {
+      type: 'spawn_enemy',
+      enemyId: SECRET_DEVOURER_OF_GODS_ID,
+      count: 1
+    })
+    unsubscribe()
+    assert.equal(allowedSpawn.success, true)
+    assert.equal(receivedActions.length, 1)
+    assert.deepEqual(receivedActions[0], {
+      type: 'spawn_enemy',
+      enemyId: SECRET_DEVOURER_OF_GODS_ID,
+      count: 1
+    })
+
+    // 4. Devourer of Gods Enemy initialization, beat-drop synced emergence, 22 articulated segments & segment contact check
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 800, y: 800, hero })
+    const dog = new Enemy({
+      x: 762,
+      y: 520,
+      enemyData: SECRET_DEVOURER_OF_GODS_TEMPLATE,
+      target: player,
+      isBoss: true
+    })
+
+    assert.equal(dog.isBoss, true)
+    assert.equal(dog.isDevourerOfGods, true)
+    assert.equal(dog.bossTitle, 'DEVOURER OF GODS')
+    assert.equal(dog.dogSegments.length, 22)
+    assert.equal(dog.cutsceneDelayTimer, DEVOURER_CUTSCENE_DURATION_SECONDS)
+    assert.equal(dog.isSpawning, true)
+
+    // Still spawning midway through buildup cutscene before beat drop (6.0s < 11.6s)
+    for (let i = 0; i < 120; i++) {
+      dog.update(0.05, player)
+    }
+    assert.equal(dog.isSpawning, true)
+
+    // Finishes full 11.6s emergence cutscene cleanly right on beat drop
+    for (let i = 0; i < 120; i++) {
+      dog.update(0.05, player)
+    }
+    assert.equal(dog.isSpawning, false)
+    assert.equal(dog.cutsceneDelayTimer, 0)
+
+    // Advance combat frames so head and segments slither toward player
+    const segBefore = { ...dog.dogSegments[4] }
+    for (let i = 0; i < 15; i++) {
+      dog.update(0.05, player)
+    }
+    const segAfter = dog.dogSegments[4]
+    assert.ok(
+      Math.hypot(segAfter.x - segBefore.x, segAfter.y - segBefore.y) > 1,
+      'Devourer of Gods body segments should follow articulated kinematics'
+    )
+
+    // Verify segment hit detection intersects on segment and misses far away
+    const targetSeg = dog.dogSegments[6]
+    assert.equal(
+      checkDevourerSegmentHit(dog, { x: targetSeg.x, y: targetSeg.y, radius: 18 }),
+      true
+    )
+    assert.equal(
+      checkDevourerSegmentHit(dog, { x: targetSeg.x + 900, y: targetSeg.y + 900, radius: 18 }),
+      false
+    )
+
+    // Regular & endless wave enemy spawning halts whenever Devourer of Gods is active
+    assert.equal(shouldSpawnRegularEnemiesInWave(6, false, true), false)
+    assert.equal(shouldSpawnRegularEnemiesInWave(20, true, true), false)
+  })
+
+  it('executes Calamity Devourer of Gods cosmic laser walls, portal lunge, splitting nebula stars, Phase 2 Universal Collapse, and cutscene camera zoom', () => {
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const playerCenter = player.getCenter()
+    const dog = new Enemy({
+      x: 862,
+      y: 520,
+      enemyData: SECRET_DEVOURER_OF_GODS_TEMPLATE,
+      target: player,
+      isBoss: true
+    })
+
+    // 1. Cutscene zoom-in curve starts at player (zoom 1.0), zooms onto boss (>1.65x), and eases back out at beat drop
+    const startCam = computeDevourerCutsceneCameraFrame({
+      elapsed: 0,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS,
+      playerCenter,
+      bossFocus: dog.getCenter()
+    })
+    assert.equal(startCam.zoom, 1)
+    assert.equal(startCam.focusX, playerCenter.x)
+    assert.equal(startCam.focusY, playerCenter.y)
+
+    const midCam = computeDevourerCutsceneCameraFrame({
+      elapsed: DEVOURER_CUTSCENE_DURATION_SECONDS * 0.5,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS,
+      playerCenter,
+      bossFocus: dog.getCenter()
+    })
+    assert.ok(midCam.zoom >= 1.75, `Expected cutscene peak zoom >= 1.75, got ${midCam.zoom}`)
+    assert.ok(
+      Math.hypot(midCam.focusX - dog.getCenter().x, midCam.focusY - dog.getCenter().y) < 1,
+      'Mid-cutscene camera should focus directly on the Devourer of Gods'
+    )
+
+    const endCam = computeDevourerCutsceneCameraFrame({
+      elapsed: DEVOURER_CUTSCENE_DURATION_SECONDS,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS,
+      playerCenter,
+      bossFocus: dog.getCenter()
+    })
+    assert.equal(endCam.zoom, 1)
+    assert.ok(Math.hypot(endCam.focusX - playerCenter.x, endCam.focusY - playerCenter.y) < 0.01)
+
+    // Cutscene screen-shake & impact flash curve peaks across rift tear, emergence, crescendo & beat-drop aftershock
+    const tearShake = computeDevourerCutsceneShake({
+      elapsed: 0.05,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS
+    })
+    assert.ok(tearShake.intensity >= 7, 'Initial rift tear should shake screen noticeably')
+    const line2Shake = computeDevourerCutsceneShake({
+      elapsed: 3.45,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS
+    })
+    assert.ok(line2Shake.intensity >= 9 && line2Shake.flashAlpha > 0.15)
+    const preDropShake = computeDevourerCutsceneShake({
+      elapsed: DEVOURER_CUTSCENE_DURATION_SECONDS - 0.1,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS
+    })
+    assert.ok(preDropShake.intensity >= 14, 'Pre-drop buildup should ramp high shake intensity')
+    const postDropShake = computeDevourerCutsceneShake({
+      elapsed: DEVOURER_CUTSCENE_DURATION_SECONDS + 0.05,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS
+    })
+    assert.ok(postDropShake.intensity >= 17 && postDropShake.flashAlpha >= 0.45)
+    const settledShake = computeDevourerCutsceneShake({
+      elapsed: DEVOURER_CUTSCENE_DURATION_SECONDS + 1.1,
+      duration: DEVOURER_CUTSCENE_DURATION_SECONDS
+    })
+    assert.equal(settledShake.intensity, 0)
+    assert.equal(settledShake.flashAlpha, 0)
+
+    // Finish emergence cutscene
+    dog.cutsceneDelayTimer = 0
+    dog.isSpawning = false
+
+    // 2. Cosmic Laser Walls (P1 orthogonal web): intersects beam line, leaves grid cell center safe
+    dog.spawnTelegraphedAttack('cosmic_laser_walls')
+    const wallTel = dog.telegraphs[dog.telegraphs.length - 1]
+    assert.equal(wallTel.kind, 'cosmic_laser_walls')
+    assert.ok(wallTel.gridLines && wallTel.gridLines.length === 8)
+    wallTel.hasTriggered = true
+
+    const firstLaser = wallTel.gridLines[0]
+    assert.equal(
+      checkBossTelegraphHit(wallTel, { x: firstLaser.x1, y: wallTel.y, radius: 14 }),
+      true
+    )
+    assert.equal(
+      checkBossTelegraphHit(wallTel, { x: wallTel.x, y: wallTel.y, radius: 14 }),
+      false
+    )
+
+    // 3. Cosmic Portal Rift Ambush & Jaw Lunge teleports boss head to portal and triggers dash lunge
+    dog.telegraphs = []
+    dog.spawnTelegraphedAttack('cosmic_portal_lunge')
+    const portalTel = dog.telegraphs[dog.telegraphs.length - 1]
+    assert.equal(portalTel.kind, 'cosmic_portal_lunge')
+    assert.ok(portalTel.portalX !== undefined && portalTel.portalY !== undefined)
+
+    for (let s = 0; s < 30; s++) {
+      dog.update(0.05, player)
+      if (portalTel.hasTriggered) break
+    }
+    assert.equal(portalTel.hasTriggered, true)
+    assert.ok(dog.dogDashTimer > 0, 'Portal ambush should initiate a high-speed jaw lunge dash')
+    assert.equal(
+      checkBossTelegraphHit(portalTel, {
+        x: (portalTel.x + (portalTel.endX ?? portalTel.x)) / 2,
+        y: (portalTel.y + (portalTel.endY ?? portalTel.y)) / 2,
+        radius: 16
+      }),
+      true
+    )
+
+    // 4. Splitting Nebula Stars & Cosmic Orb Barrage spawn splitting stars mid-flight
+    dog.telegraphs = []
+    dog.projectiles = []
+    dog.spawnTelegraphedAttack('cosmic_orb_barrage')
+    const orbTel = dog.telegraphs[dog.telegraphs.length - 1]
+    assert.equal(orbTel.kind, 'cosmic_orb_barrage')
+    for (let s = 0; s < 40; s++) {
+      dog.update(0.05, player)
+      if (dog.projectiles.some((p) => p.isCosmicStar)) break
+    }
+    const splitStar = dog.projectiles.find((p) => p.isCosmicStar && !p.splitDone)
+    assert.ok(splitStar, 'Cosmic orb barrage should fire splitting Nebula Stars')
+    const countBeforeSplit = dog.projectiles.length
+    for (let s = 0; s < 20; s++) {
+      dog.update(0.05, player)
+    }
+    assert.ok(
+      dog.projectiles.length > countBeforeSplit,
+      'Splitting Nebula Star should fragment radially after its splitAfter delay'
+    )
+
+    // 5. Phase 2 "Universal Collapse" triggers at <= 60% HP with diagonal diamond laser web + enrage
+    dog.telegraphs = []
+    const dropToPhase2 = Math.floor(dog.maxHealth * 0.85)
+    dog.takeDamage(dropToPhase2)
+    assert.equal(dog.isEnraged, true)
+    assert.equal(dog.pendingPhaseAnnouncement, 2)
+    assert.ok(
+      dog.telegraphs.some((t) => t.kind === 'cosmic_laser_walls'),
+      'Phase 2 awakening should unleash an immediate Cosmic Laser Wall pattern'
+    )
+
+    // 6. Universal Collapse YouTube-exclusive music & beat-drop sync verification
+    assert.equal(DEVOURER_BEAT_DROP_SECONDS, 11.6)
+    assert.equal(DEVOURER_CUTSCENE_DURATION_SECONDS, DEVOURER_BEAT_DROP_SECONDS)
+    assert.equal(
+      DEVOURER_YOUTUBE_URL,
+      'https://www.youtube.com/watch?v=EaB1utQkmT8&list=RDEaB1utQkmT8&start_radio=1'
+    )
+    assert.equal(DEVOURER_YOUTUBE_VIDEO_ID, 'EaB1utQkmT8')
+    assert.equal(parseYouTubeVideoId(DEVOURER_YOUTUBE_URL), 'EaB1utQkmT8')
+    assert.equal(parseYouTubeVideoId('https://youtu.be/EaB1utQkmT8'), 'EaB1utQkmT8')
+    assert.equal(parseYouTubeVideoId('not-a-valid-video'), null)
+    const embedUrl = buildYouTubeEmbedUrl(DEVOURER_YOUTUBE_VIDEO_ID, {
+      autoplay: true,
+      loop: true,
+      enableJsApi: true
+    })
+    assert.ok(embedUrl.startsWith('https://www.youtube.com/embed/EaB1utQkmT8?'))
+    assert.ok(embedUrl.includes('autoplay=1'))
+    assert.ok(embedUrl.includes('loop=1'))
+    assert.ok(embedUrl.includes('playlist=EaB1utQkmT8'))
+    assert.ok(embedUrl.includes('enablejsapi=1'))
+
+    const audio = new AudioService({
+      defaultSettings: { masterVolume: 80, musicVolume: 65, sfxVolume: 75, isMuted: false }
+    })
+    assert.equal(audio.getMusicTypes().includes('universal_collapse'), true)
+    assert.equal(MUSIC_TRACK_METADATA.universal_collapse.title, 'Universal Collapse')
+    assert.equal(MUSIC_TRACK_METADATA.universal_collapse.bpm, 148)
+    assert.equal(MUSIC_TRACK_METADATA.universal_collapse.stepCount, 128)
+    assert.equal(MUSIC_TRACK_METADATA.universal_collapse.youtubeVideoId, 'EaB1utQkmT8')
+    assert.equal(MUSIC_TRACK_METADATA.universal_collapse.youtubeUrl, DEVOURER_YOUTUBE_URL)
+    assert.equal(MUSIC_TRACK_METADATA.universal_collapse.beatDropSeconds, DEVOURER_BEAT_DROP_SECONDS)
+    assert.equal(audio.getEffectiveMusicVolumePercent(), 52)
+
+    audio.playMusic('universal_collapse')
+    assert.equal(audio.getCurrentMusicTrack(), 'universal_collapse')
+    assert.equal(audio.isMusicPlaying(), true)
+    assert.equal(audio.isExternalYouTubeActive(), true)
+
+    audio.pauseMusic()
+    assert.equal(audio.isMusicPlaying(), false)
+    assert.equal(audio.getCurrentMusicTrack(), 'universal_collapse')
+
+    audio.resumeMusic()
+    assert.equal(audio.isMusicPlaying(), true)
+
+    audio.toggleMute()
+    assert.equal(audio.isMusicPlaying(), false)
+    assert.equal(audio.getEffectiveMusicVolumePercent(), 0)
+    audio.toggleMute()
+    assert.equal(audio.isMusicPlaying(), true)
+    assert.equal(audio.getEffectiveMusicVolumePercent(), 52)
+
+    audio.stopMusic()
+    assert.equal(audio.getCurrentMusicTrack(), null)
+    assert.equal(audio.isMusicPlaying(), false)
+    assert.equal(audio.isExternalYouTubeActive(), false)
+    audio.destroy()
+  })
+
+  it('configures Wave 15 Area 1 and Area 2 Final Boss entrance cutscenes with warning banners, area fire particles, shake curves, camera zoom, and emergence timing', () => {
+    assert.equal(WAVE_15_CUTSCENE_DURATION_SECONDS, 4.6)
+
+    const a1Theme = getWave15CutsceneTheme('carbon_sector')
+    const a2Theme = getWave15CutsceneTheme('astral_citadel')
+    assert.equal(a1Theme.kind, 'w15_area1')
+    assert.equal(a1Theme.presentation, 'warning')
+    assert.equal(a1Theme.particleStyle, 'carbon_inferno')
+    assert.equal(a1Theme.speaker, 'Omega Overlord')
+    assert.equal(a1Theme.warningTitle, 'BOSS WARNING // OMEGA OVERLORD')
+    assert.ok(a1Theme.warningSubtitle.includes('CARBON SECTOR'))
+    assert.ok(a1Theme.warningCriticalText.length > 0)
+
+    assert.equal(a2Theme.kind, 'w15_area2')
+    assert.equal(a2Theme.presentation, 'warning')
+    assert.equal(a2Theme.particleStyle, 'astral_solar_fire')
+    assert.equal(a2Theme.speaker, 'Solar Archon Seraph')
+    assert.equal(a2Theme.warningTitle, 'BOSS WARNING // SOLAR ARCHON SERAPH')
+    assert.ok(a2Theme.warningSubtitle.includes('ASTRAL CITADEL'))
+    assert.ok(a2Theme.warningCriticalText.length > 0)
+
+    assert.equal(DEVOURER_CUTSCENE_THEME.presentation, 'dialogue')
+    assert.equal(DEVOURER_CUTSCENE_THEME.particleStyle, 'cosmic_rift')
+    assert.equal(DEVOURER_CUTSCENE_THEME.line1, SECRET_DEVOURER_OF_GODS_CUTSCENE_LINES.line1)
+    assert.equal(DEVOURER_CUTSCENE_THEME.line2, SECRET_DEVOURER_OF_GODS_CUTSCENE_LINES.line2)
+
+    // Screen-shake & flash curve over Wave 15 4.6s duration (line 2 at 1.6s)
+    const tear = computeBossCutsceneShake({
+      elapsed: 0.05,
+      duration: WAVE_15_CUTSCENE_DURATION_SECONDS,
+      line2Time: 1.6
+    })
+    assert.ok(tear.intensity >= 7)
+    const line2 = computeBossCutsceneShake({
+      elapsed: 1.65,
+      duration: WAVE_15_CUTSCENE_DURATION_SECONDS,
+      line2Time: 1.6
+    })
+    assert.ok(line2.intensity >= 9 && line2.flashAlpha > 0.15)
+    const preDrop = computeBossCutsceneShake({
+      elapsed: WAVE_15_CUTSCENE_DURATION_SECONDS - 0.1,
+      duration: WAVE_15_CUTSCENE_DURATION_SECONDS,
+      line2Time: 1.6
+    })
+    assert.ok(preDrop.intensity >= 14)
+    const postDrop = computeBossCutsceneShake({
+      elapsed: WAVE_15_CUTSCENE_DURATION_SECONDS + 0.05,
+      duration: WAVE_15_CUTSCENE_DURATION_SECONDS,
+      line2Time: 1.6
+    })
+    assert.ok(postDrop.intensity >= 17 && postDrop.flashAlpha >= 0.45)
+    const settled = computeBossCutsceneShake({
+      elapsed: WAVE_15_CUTSCENE_DURATION_SECONDS + 1.1,
+      duration: WAVE_15_CUTSCENE_DURATION_SECONDS,
+      line2Time: 1.6
+    })
+    assert.equal(settled.intensity, 0)
+    assert.equal(settled.flashAlpha, 0)
+
+    // Wave 15 Final Boss entities hold emergence lock across 4.6s cutscene in both Area 1 and Area 2
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 860, hero })
+    for (const areaId of ['carbon_sector', 'astral_citadel'] as const) {
+      const w15 = new Enemy({
+        x: 900,
+        y: 360,
+        enemyData: getAreaBossTemplateForWave(areaId, 15),
+        target: player,
+        isBoss: true,
+        isStationaryBoss: true,
+        isFinalBoss: true,
+        anchorPos: { x: 900, y: 360 },
+        arenaBounds: { left: 260, top: 140, width: 1280, height: 720 }
+      })
+      assert.equal(w15.isSpawning, true)
+      assert.equal(w15.spawnDelay, WAVE_15_CUTSCENE_DURATION_SECONDS)
+      assert.equal(w15.cutsceneDelayTimer, WAVE_15_CUTSCENE_DURATION_SECONDS)
+
+      for (let i = 0; i < 40; i++) {
+        w15.update(0.05, player)
+      }
+      assert.equal(w15.isSpawning, true)
+
+      for (let i = 0; i < 55; i++) {
+        w15.update(0.05, player)
+      }
+      assert.equal(w15.isSpawning, false)
+      assert.equal(w15.cutsceneDelayTimer, 0)
+    }
+  })
 })
+
 
 
 

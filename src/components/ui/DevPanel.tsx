@@ -16,10 +16,16 @@ import {
   updateDevSettings,
   useDevSettings
 } from '../../services/devTools'
+import {
+  DEV_SPAWNABLE_ENEMIES,
+  getDevSpawnableEnemyById,
+  SECRET_DEVOURER_OF_GODS_ID
+} from '../../config/arenas'
 
 const DAMAGE_PRESETS = [1, 2, 5, 10, 50, 100, 1000]
 const HEALTH_MULT_PRESETS = [1, 2, 5, 10]
 const COIN_PRESETS = [1000, 10000, 100000]
+const SPAWN_COUNT_PRESETS = [1, 5, 10]
 
 export const DevPanel: React.FC = () => {
   const { user } = useSupabase()
@@ -32,6 +38,10 @@ export const DevPanel: React.FC = () => {
   const [damageInput, setDamageInput] = useState(String(settings.damageMultiplier))
   const [customHealthInput, setCustomHealthInput] = useState('1000')
   const [waveInput, setWaveInput] = useState('15')
+  const [selectedEnemyId, setSelectedEnemyId] = useState<string>(
+    DEV_SPAWNABLE_ENEMIES[0]?.id || 'ene_01'
+  )
+  const [spawnCount, setSpawnCount] = useState<number>(1)
 
   // Strict authorization gate: never render or expose Dev Panel to any other user/guest
   if (!user || !authorized || !isDevAuthorizedEmail(user.email)) {
@@ -81,6 +91,34 @@ export const DevPanel: React.FC = () => {
       const nextWave = Math.max(1, settings.startingWaveOverride + value)
       updateDevSettings(user.email, { startingWaveOverride: nextWave })
       toast.info(`Dev: Starting Wave set to ${nextWave}`)
+    }
+  }
+
+  const selectedSpawnOption = getDevSpawnableEnemyById(selectedEnemyId) || DEV_SPAWNABLE_ENEMIES[0]
+
+  const handleSpawnEnemy = (enemyId: string, requestedCount = 1) => {
+    if (!runStatus.isInRun) {
+      toast.warning('Start an Arena run first to spawn enemies.')
+      return
+    }
+    const target = getDevSpawnableEnemyById(enemyId)
+    if (!target) return
+    const safeCount = target.isBoss ? 1 : Math.max(1, Math.min(25, Math.floor(requestedCount)))
+    const res = dispatchDevAction(user.email, {
+      type: 'spawn_enemy',
+      enemyId: target.id,
+      count: safeCount
+    })
+    if (res.success) {
+      if (target.id === SECRET_DEVOURER_OF_GODS_ID) {
+        setIsOpen(false)
+      } else {
+        toast.success(
+          `Dev: Spawned ${safeCount > 1 ? `${safeCount}× ` : ''}${target.name}`
+        )
+      }
+    } else if (res.error) {
+      toast.error(res.error)
     }
   }
 
@@ -342,15 +380,15 @@ export const DevPanel: React.FC = () => {
               </div>
 
               <div className="flex flex-wrap gap-1.5">
-                {[5, 10, 14, 15, 16, 20].map((w) => (
+                {[5, 10, 15, 20, 21].map((w) => (
                   <button
                     key={w}
                     type="button"
                     onClick={() => handleWaveJump('set', w)}
                     className={`px-2 py-1 rounded-lg font-mono font-bold border transition-colors ${
-                      w === 15
+                      w === 15 || w === 20
                         ? 'bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border-amber-400/60'
-                        : w >= 16
+                        : w >= 21
                           ? 'bg-purple-500/25 hover:bg-purple-500/40 text-purple-200 border-purple-400/60'
                           : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                     }`}
@@ -378,6 +416,73 @@ export const DevPanel: React.FC = () => {
                   Skip to Wave
                 </button>
               </div>
+            </section>
+
+            {/* 5. Spawn Enemy & Secret Calamity Boss */}
+            <section className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-fuchsia-300 uppercase tracking-wider">
+                  5. Spawn Enemy
+                </span>
+                <span className="font-mono text-[11px] text-slate-400">
+                  {runStatus.isInRun ? 'Arena Ready' : 'Requires Active Run'}
+                </span>
+              </div>
+
+              <select
+                value={selectedEnemyId}
+                onChange={(e) => {
+                  const nextId = e.target.value
+                  setSelectedEnemyId(nextId)
+                  const nextOpt = getDevSpawnableEnemyById(nextId)
+                  if (nextOpt?.isBoss) setSpawnCount(1)
+                }}
+                aria-label="Select enemy to spawn"
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs focus:outline-none focus:border-fuchsia-400"
+              >
+                {(['Area 1', 'Area 2', 'Bosses', 'Secret Boss'] as const).map((group) => (
+                  <optgroup key={group} label={group}>
+                    {DEV_SPAWNABLE_ENEMIES.filter((item) => item.group === group).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} ({item.category})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+
+              <div className="flex items-center gap-1.5">
+                {!selectedSpawnOption.isBoss &&
+                  SPAWN_COUNT_PRESETS.map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setSpawnCount(cnt)}
+                      className={`px-2 py-1.5 rounded-lg font-mono font-bold border transition-colors ${
+                        spawnCount === cnt
+                          ? 'bg-fuchsia-500 text-slate-950 border-fuchsia-300'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                      }`}
+                    >
+                      {cnt}x
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  onClick={() => handleSpawnEnemy(selectedEnemyId, spawnCount)}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 font-extrabold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Spawn {selectedSpawnOption.isBoss ? 'Boss' : `${spawnCount}x Enemy`}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleSpawnEnemy(SECRET_DEVOURER_OF_GODS_ID, 1)}
+                className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-cyan-950 via-indigo-950 to-fuchsia-950 hover:from-cyan-900 hover:to-fuchsia-900 border border-cyan-400/70 text-cyan-200 font-bold tracking-wide transition-colors cursor-pointer whitespace-nowrap"
+              >
+                Summon Devourer of Gods (Secret Boss)
+              </button>
             </section>
 
             {/* Footer Reset */}

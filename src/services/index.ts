@@ -56,13 +56,25 @@ export type {
 // Audio Service
 export {
   AudioService,
+  buildYouTubeEmbedUrl,
+  DEVOURER_BEAT_DROP_SECONDS,
+  DEVOURER_YOUTUBE_URL,
+  DEVOURER_YOUTUBE_VIDEO_ID,
+  MUSIC_TRACK_METADATA,
   getAudioService,
   initializeAudio,
+  parseYouTubeVideoId,
   playSound,
   playMusic,
   stopMusic
 } from './AudioService'
-export type { AudioSettings, SoundType, AudioServiceConfig } from './AudioService'
+export type {
+  AudioSettings,
+  MusicTrackMetadata,
+  MusicTrackName,
+  SoundType,
+  AudioServiceConfig
+} from './AudioService'
 
 // Hero Mastery Service
 export {

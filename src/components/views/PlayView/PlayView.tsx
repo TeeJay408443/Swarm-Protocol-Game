@@ -251,7 +251,7 @@ export function PlayView() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs text-gray-400">
-                    Area {area.order} · {unlocked ? area.difficultyLabel : `Locked · Beat Wave 15 (${highestWave}/15)`}
+                    Area {area.order} · {unlocked ? `${area.difficultyLabel} · ${area.maxWave} Waves` : `Locked · Beat Wave 15 (${highestWave}/15)`}
                   </div>
                   <div className="font-bold text-white font-display truncate">
                     {area.name} <span className="text-sm font-normal text-gray-400">({area.subtitle})</span>
@@ -638,7 +638,7 @@ export function PlayView() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-gray-800 rounded-xl p-4">
               <h3 className="font-semibold text-cyan-accent mb-1">Wave Cadence</h3>
-              <p className="text-sm text-gray-300">30s active swarm + 3s breather. Beat Wave 15 Final Boss to unlock Area 2.</p>
+              <p className="text-sm text-gray-300">30s active swarm + 3s breather. Area 1 runs 15 waves; Area 2 spans 20 waves ending in Astral Scourge.</p>
             </div>
             <div className="bg-gray-800 rounded-xl p-4">
               <h3 className="font-semibold text-cyan-accent mb-1">Scoring Formula</h3>

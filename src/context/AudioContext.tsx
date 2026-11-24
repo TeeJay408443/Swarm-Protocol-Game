@@ -4,22 +4,34 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react'
-import { AudioService, AudioSettings, getAudioService, initializeAudio } from '../services/AudioService'
+import {
+  AudioService,
+  AudioSettings,
+  getAudioService,
+  initializeAudio,
+  type MusicTrackName
+} from '../services/AudioService'
 
 export interface AudioContextType {
   audioService: AudioService | null
   settings: AudioSettings
   isReady: boolean
+  currentMusicTrack: MusicTrackName | null
+  isMusicPaused: boolean
+  youtubePlaybackStarted: boolean
+  youtubeCurrentTime: number | null
   updateSettings: (settings: Partial<AudioSettings>) => void
   setMasterVolume: (volume: number) => void
   setMusicVolume: (volume: number) => void
   setSfxVolume: (volume: number) => void
   toggleMute: () => void
   playSound: (soundType: string) => void
-  playMusic: (name: 'main' | 'gameplay' | 'boss') => void
+  playMusic: (name: MusicTrackName) => void
   stopMusic: () => void
   pauseMusic: () => void
   resumeMusic: () => void
+  setExternalYouTubeActive: (active: boolean) => void
+  reportYouTubePlayback: (playing: boolean, currentTimeSeconds: number | null) => void
   stopAll: () => void
   resetSettings: () => void
 }
@@ -42,6 +54,10 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({
   const { soundPath, musicPath, autoInit = true } = config
   const [audioService, setAudioService] = useState<AudioService | null>(null)
   const [isReady, setIsReady] = useState(false)
+  const [currentMusicTrack, setCurrentMusicTrack] = useState<MusicTrackName | null>(null)
+  const [isMusicPaused, setIsMusicPaused] = useState(false)
+  const [youtubePlaybackStarted, setYoutubePlaybackStarted] = useState(false)
+  const [youtubeCurrentTime, setYoutubeCurrentTime] = useState<number | null>(null)
   const [settings, setSettings] = useState<AudioSettings>({
     masterVolume: 70,
     musicVolume: 50,
@@ -110,31 +126,66 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({
     }
   }, [audioService, isReady])
 
-  const playMusic = useCallback((name: 'main' | 'gameplay' | 'boss') => {
+  const playMusic = useCallback((name: MusicTrackName) => {
+    setCurrentMusicTrack(name)
+    setIsMusicPaused(false)
+    setYoutubePlaybackStarted(false)
+    setYoutubeCurrentTime(null)
     if (audioService && isReady) {
       audioService.playMusic(name)
     }
   }, [audioService, isReady])
 
   const stopMusic = useCallback(() => {
+    setCurrentMusicTrack(null)
+    setIsMusicPaused(false)
+    setYoutubePlaybackStarted(false)
+    setYoutubeCurrentTime(null)
     if (audioService) {
       audioService.stopMusic()
     }
   }, [audioService])
 
   const pauseMusic = useCallback(() => {
+    setIsMusicPaused(true)
     if (audioService) {
       audioService.pauseMusic()
     }
   }, [audioService])
 
   const resumeMusic = useCallback(() => {
+    setIsMusicPaused(false)
     if (audioService) {
       audioService.resumeMusic()
     }
   }, [audioService])
 
+  const setExternalYouTubeActive = useCallback((active: boolean) => {
+    if (audioService) {
+      audioService.setExternalYouTubeActive(active)
+    }
+  }, [audioService])
+
+  const reportYouTubePlayback = useCallback(
+    (playing: boolean, currentTimeSeconds: number | null) => {
+      if (playing) {
+        setYoutubePlaybackStarted(true)
+      }
+      if (currentTimeSeconds !== null && Number.isFinite(currentTimeSeconds)) {
+        setYoutubeCurrentTime(currentTimeSeconds)
+      } else if (!playing && currentTimeSeconds === null) {
+        setYoutubePlaybackStarted(false)
+        setYoutubeCurrentTime(null)
+      }
+    },
+    []
+  )
+
   const stopAll = useCallback(() => {
+    setCurrentMusicTrack(null)
+    setIsMusicPaused(false)
+    setYoutubePlaybackStarted(false)
+    setYoutubeCurrentTime(null)
     if (audioService) {
       audioService.stopAll()
     }
@@ -151,6 +202,10 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({
     audioService,
     settings,
     isReady,
+    currentMusicTrack,
+    isMusicPaused,
+    youtubePlaybackStarted,
+    youtubeCurrentTime,
     updateSettings,
     setMasterVolume,
     setMusicVolume,
@@ -161,6 +216,8 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({
     stopMusic,
     pauseMusic,
     resumeMusic,
+    setExternalYouTubeActive,
+    reportYouTubePlayback,
     stopAll,
     resetSettings
   }

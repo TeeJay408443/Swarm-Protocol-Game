@@ -70,6 +70,7 @@ import {
   shouldSpawnRegularEnemiesInWave,
   WAVE_15_CUTSCENE_DURATION_SECONDS
 } from '../../../config/arenas'
+import { PLAYABLE_BOSS_DROP_SETS } from '../../../config/bossCrafting'
 import {
   computeDifficultyCoinPayout,
   DifficultyId,
@@ -122,6 +123,7 @@ import {
 } from '../../../services/scores'
 import {
   computeEquippedAccessoryBonuses,
+  awardBossDropsForEnemy,
   creditShopCoins,
   getShopAccountState,
   shopWeaponsAsUpgrades,
@@ -2766,6 +2768,19 @@ const GameContainer: React.FC<GameContainerProps> = ({
         enemiesDefeatedRef.current += 1
         if (enemy.isBoss) {
           bossesDefeatedRef.current += 1
+        }
+        if (enemy.isBoss || enemy.isMiniBoss) {
+          const loot = awardBossDropsForEnemy(
+            user?.id || 'guest_user',
+            enemy.enemyId,
+            enemy.isFinalBoss
+          )
+          if (loot.success) {
+            const bossSet = PLAYABLE_BOSS_DROP_SETS.find((boss) =>
+              boss.materials.some((material) => material.id === loot.materials?.[0])
+            )
+            toast.success(`${bossSet?.name || 'Boss'} defeated — 3 crafting materials added to your Armory.`)
+          }
         }
         const baseXpGain = enemy.isBoss ? LEVEL_UP_CONFIG.XP_PER_BOSS_KILL : LEVEL_UP_CONFIG.XP_PER_ENEMY_KILL
         const totalXpMult =

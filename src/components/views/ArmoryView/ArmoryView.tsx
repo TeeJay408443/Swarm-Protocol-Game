@@ -15,6 +15,7 @@ import { ALL_HEROES, getUnlockableHeroSpec } from '../../../config/unlockableHer
 import { AREA_TWO_UPGRADES, isAreaTwoUpgrade, isAreaTwoUpgradesUnlocked } from '../../../config/areaUpgrades'
 import { CRIT_CONFIG, getWeaponCritProfile, UNIVERSAL_CRIT_UPGRADES } from '../../../config/critSystem'
 import { getLocalPlayerTelemetry } from '../../../services/scores'
+import { BOSS_CRAFTING_RECIPES, PLAYABLE_BOSS_DROP_SETS } from '../../../config/bossCrafting'
 import { GAME_CONFIG, getUpgradeOverdriveHint } from '../../../config/gameConstants'
 import {
   getHeroAbility,
@@ -28,9 +29,12 @@ import { isHeroUnlocked, useHeroUnlocks } from '../../../services/heroUnlocks'
 import {
   type ArmorySortOption,
   formatAccessoryStatSummary,
+  craftBossRecipe,
   FUSION_COPIES_REQUIRED,
   type GearStackEntry,
   getHighestOwnedStar,
+  getShopItemById,
+  getTotalStackCount,
   getItemSalvageValue,
   getStackCount,
   getStarScaledWeaponStats,
@@ -49,7 +53,7 @@ import {
   type FusionRepeatAction
 } from './FusionAnimationOverlay'
 
-type ArmoryTab = 'inventory' | 'forge' | 'loadouts' | 'builder'
+type ArmoryTab = 'inventory' | 'forge' | 'crafting' | 'loadouts' | 'builder'
 type InventoryFilter = 'all' | 'weapon' | 'accessory' | 'fusable'
 
 const ARMORY_SORT_OPTIONS: ReadonlyArray<{ value: ArmorySortOption; label: string }> = [
@@ -179,6 +183,10 @@ export function ArmoryView() {
     }
     if (tabParam === 'forge') {
       setActiveTab('forge')
+      return
+    }
+    if (tabParam === 'crafting') {
+      setActiveTab('crafting')
       return
     }
     if (tabParam === 'loadouts') {
@@ -427,6 +435,15 @@ export function ArmoryView() {
   const handleOpenInForge = (itemId: string, stars: number) => {
     setForgeSelection({ itemId, stars })
     setActiveTab('forge')
+  }
+
+  const handleCraftRecipe = (recipeId: string) => {
+    const result = craftBossRecipe(effectiveUserId, recipeId)
+    if (!result.success) {
+      if (result.error) toast.warning(result.error)
+      return
+    }
+    toast.success(`Crafted ${result.item?.name || 'new gear'} and added it to your inventory.`)
   }
 
   const handleFuseStack = (itemId: string, sourceStars: number) => {
@@ -749,6 +766,15 @@ export function ArmoryView() {
             Fusion Forge ({fusableStacks.length} Ready)
           </Button>
           <Button
+            variant={activeTab === 'crafting' ? 'primary' : 'secondary'}
+            onClick={() => {
+              setActiveTab('crafting')
+              resetBuilder()
+            }}
+          >
+            Crafting ({BOSS_CRAFTING_RECIPES.length} Recipes)
+          </Button>
+          <Button
             variant={activeTab === 'loadouts' ? 'primary' : 'secondary'}
             onClick={() => {
               setActiveTab('loadouts')
@@ -947,6 +973,117 @@ export function ArmoryView() {
                 </div>
               </div>
             )}
+          </section>
+        )}
+
+        {/* BOSS CRAFTING TAB */}
+        {!loading && activeTab === 'crafting' && (
+          <section className="space-y-5">
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+              <h2 className="text-2xl font-bold text-cyan-accent">Boss Drop Crafting</h2>
+              <p className="text-sm text-gray-400 mt-1">
+                Defeat bosses in either arena to collect their three materials. Each recipe consumes
+                one of each material and adds usable gear to your inventory.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {BOSS_CRAFTING_RECIPES.map((recipe) => {
+                const boss = PLAYABLE_BOSS_DROP_SETS.find((entry) => entry.id === recipe.bossId)
+                const item = getShopItemById(recipe.itemId)
+                if (!boss || !item) return null
+                const canCraft = recipe.materials.every(
+                  ({ materialId, quantity }) =>
+                    (shopState.bossMaterials[materialId] || 0) >= quantity
+                )
+                const ownedCount = getTotalStackCount(shopState, item.id)
+
+                return (
+                  <article
+                    key={recipe.id}
+                    className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-wider text-gray-500">{boss.name}</p>
+                        <h3 className="text-lg font-bold text-white">{item.name}</h3>
+                        <p className="text-sm text-gray-400 mt-1">{item.function_desc}</p>
+                      </div>
+                      <span
+                        className="shrink-0 rounded border px-2 py-1 text-xs font-semibold"
+                        style={{ color: item.accentColor, borderColor: `${item.accentColor}88` }}
+                      >
+                        {item.kind === 'weapon' ? item.tierLabel : item.slotLabel}
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg bg-gray-950/70 border border-gray-800 p-4">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-14 h-14 rounded-md bg-gray-900 border flex items-center justify-center shrink-0"
+                          style={{ borderColor: `${item.accentColor}88` }}
+                        >
+                          <ItemSpriteIcon
+                            itemId={item.id}
+                            size={48}
+                            glowColor={item.accentColor}
+                            altLabel={item.name}
+                          />
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase text-gray-500">Result</p>
+                          {item.kind === 'weapon' ? (
+                            <p className="text-sm text-white">
+                              {item.damage} damage · {item.cooldown_s}s cooldown · {item.special}
+                            </p>
+                          ) : (
+                            <p className="text-sm text-white">
+                              {formatAccessoryStatSummary(item)}
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-400 mt-1">Owned: ×{ownedCount}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-2">
+                        Required Materials
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {recipe.materials.map(({ materialId, quantity }) => {
+                          const material = boss.materials.find((entry) => entry.id === materialId)
+                          const owned = shopState.bossMaterials[materialId] || 0
+                          return (
+                            <div
+                              key={materialId}
+                              className="rounded border bg-gray-950/60 p-3"
+                              style={{ borderColor: `${material?.accentColor || '#64748B'}66` }}
+                            >
+                              <p className="text-sm font-semibold text-white">
+                                {material?.name || materialId}
+                              </p>
+                              <p className="text-xs text-gray-400 mt-1">
+                                Need {quantity} · Owned {owned}
+                              </p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      disabled={!canCraft}
+                      onClick={() => handleCraftRecipe(recipe.id)}
+                    >
+                      {canCraft ? `Craft ${item.name}` : 'Missing Boss Materials'}
+                    </Button>
+                  </article>
+                )
+              })}
+            </div>
           </section>
         )}
 

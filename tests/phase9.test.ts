@@ -59,6 +59,11 @@ import {
   WAVE_15_FINAL_BOSS_BASE_HP
 } from '../src/config/arenas'
 import {
+  BOSS_CRAFTING_RECIPES,
+  getBossDropSetId,
+  PLAYABLE_BOSS_DROP_SETS
+} from '../src/config/bossCrafting'
+import {
   computeHeroBurnPerTick,
   getArcSlashConfig,
   getChronoCloneConfig,
@@ -171,6 +176,8 @@ import {
 } from '../src/services/devTools'
 import {
   computeEquippedAccessoryBonuses,
+  awardBossDropsForEnemy,
+  craftBossRecipe,
   creditShopCoins,
   equipShopWeapon,
   formatRotationCountdown,
@@ -197,6 +204,8 @@ import {
   salvageShopItem,
   SHOP_ACCESSORIES,
   SHOP_CATALOG,
+  CRAFTED_ACCESSORIES,
+  CRAFTED_WEAPONS,
   SHOP_ROTATION_INTERVAL_MS,
   SHOP_WEAPONS,
   shopWeaponsAsUpgrades,
@@ -693,11 +702,11 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
   it('credits Battle Coins from combat, blocks direct weapon buys, sells accessories, and equips crate gear in Armory', async () => {
     const shopTestUser = `shop_user_${Date.now()}`
 
-    // Canonical seed upgrade count is 21 (including Inferno Fireball) while shop exposes 19 crate weapons + 16 accessories
+    // Canonical seed upgrade count is 21; crafted weapons are combat-usable but stay outside Shop/Crate catalogs.
     assert.equal(upgrades.length, 21)
     assert.equal(SHOP_WEAPONS.length, 19)
     assert.equal(SHOP_ACCESSORIES.length, 16)
-    assert.equal(shopWeaponsAsUpgrades().length, 19)
+    assert.equal(shopWeaponsAsUpgrades().length, SHOP_WEAPONS.length + CRAFTED_WEAPONS.length)
 
     // Higher Shop pricing & Celestial Seeker Swarm Epic rarity verified
     assert.ok((getShopItemById('wpn_plasma_lance')?.price ?? 0) >= 200)
@@ -3617,11 +3626,120 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
   })
 })
 
+describe('Boss drop crafting', () => {
+  it('defines exactly three distinct themed drops and a recipe for every playable boss', () => {
+    const areaOneMiniBossIds = enemies
+      .filter((enemy) => enemy.category === 'Mini-Boss')
+      .map((enemy) => enemy.id)
+    const areaTwoMiniBossIds = AREA_TWO_ENEMIES
+      .filter((enemy) => enemy.category === 'Mini-Boss')
+      .map((enemy) => enemy.id)
+    const playableBossIds = [
+      ...areaOneMiniBossIds,
+      ...areaTwoMiniBossIds,
+      ...AREA_TWO_BOSSES.map((boss) => boss.id)
+    ]
 
+    for (const enemyId of playableBossIds) {
+      assert.ok(getBossDropSetId(enemyId), `${enemyId} must resolve to a drop set`)
+    }
+    assert.equal(getBossDropSetId('ene_04', true), 'omega_overlord')
+    assert.equal(getBossDropSetId(SECRET_DEVOURER_OF_GODS_ID), null)
+    assert.equal(PLAYABLE_BOSS_DROP_SETS.length, 7)
+    assert.equal(BOSS_CRAFTING_RECIPES.length, PLAYABLE_BOSS_DROP_SETS.length)
 
+    const materialIds = PLAYABLE_BOSS_DROP_SETS.flatMap((boss) => boss.materials.map((m) => m.id))
+    assert.equal(materialIds.length, 21)
+    assert.equal(new Set(materialIds).size, materialIds.length)
+    for (const boss of PLAYABLE_BOSS_DROP_SETS) {
+      assert.equal(boss.materials.length, 3)
+      assert.equal(new Set(boss.materials.map((material) => material.name)).size, 3)
+      const recipe = BOSS_CRAFTING_RECIPES.find((entry) => entry.bossId === boss.id)
+      assert.ok(recipe, `${boss.name} must have a recipe`)
+      assert.deepEqual(
+        recipe?.materials.map((material) => material.materialId).sort(),
+        boss.materials.map((material) => material.id).sort()
+      )
+      assert.ok(getShopItemById(recipe!.itemId), `${boss.name} recipe must produce gear`)
+    }
 
+    assert.equal(SHOP_CATALOG.length, SHOP_WEAPONS.length + SHOP_ACCESSORIES.length)
+    for (const item of [...CRAFTED_WEAPONS, ...CRAFTED_ACCESSORIES]) {
+      assert.equal(SHOP_CATALOG.some((shopItem) => shopItem.id === item.id), false)
+    }
+    for (const weapon of CRAFTED_WEAPONS) {
+      assert.ok(weapon.id.startsWith('wpn_'))
+      assert.equal(isVisiblePlayerWeaponId(weapon.id), true)
+    }
+    for (const accessory of CRAFTED_ACCESSORIES) {
+      assert.ok(accessory.id.startsWith('acc_'))
+      assert.equal(getShopAccessoryById(accessory.id)?.id, accessory.id)
+    }
+  })
 
+  it('awards each boss set on defeat and persists all three material counts by account', () => {
+    const userId = 'boss_crafting_reward_persistence_test'
+    const combatIdentities: Array<{ enemyId: string; finalBoss?: boolean; setId: string }> = [
+      { enemyId: 'ene_04', setId: 'aegis_commander' },
+      { enemyId: 'ene_04', finalBoss: true, setId: 'omega_overlord' },
+      { enemyId: 'ene_a2_05', setId: 'astral_bastion_warden' },
+      { enemyId: 'boss_a2_05', setId: 'emerald_prism_monarch' },
+      { enemyId: 'boss_a2_10', setId: 'astral_vortex_colossus' },
+      { enemyId: 'boss_a2_15', setId: 'solar_archon_seraph' },
+      { enemyId: 'boss_a2_20', setId: 'astral_scourge' }
+    ]
 
+    for (const identity of combatIdentities) {
+      assert.equal(getBossDropSetId(identity.enemyId, identity.finalBoss), identity.setId)
+      const result = awardBossDropsForEnemy(userId, identity.enemyId, identity.finalBoss)
+      assert.equal(result.success, true)
+      assert.equal(result.materials?.length, 3)
+    }
 
+    const persisted = getShopAccountState(userId)
+    for (const boss of PLAYABLE_BOSS_DROP_SETS) {
+      for (const material of boss.materials) {
+        assert.equal(persisted.bossMaterials[material.id], 1, `${material.name} should be saved`)
+      }
+    }
+
+    const secretBossResult = awardBossDropsForEnemy(userId, SECRET_DEVOURER_OF_GODS_ID)
+    assert.equal(secretBossResult.success, false)
+    assert.equal(
+      Object.keys(getShopAccountState(userId).bossMaterials).length,
+      21,
+      'secret boss must not add materials'
+    )
+  })
+
+  it('rejects missing materials and consumes recipe materials when adding crafted gear', () => {
+    const userId = 'boss_crafting_recipe_validation_test'
+    const boss = PLAYABLE_BOSS_DROP_SETS.find((entry) => entry.id === 'aegis_commander')!
+    const recipe = BOSS_CRAFTING_RECIPES.find((entry) => entry.bossId === boss.id)!
+
+    const unavailable = craftBossRecipe(userId, recipe.id)
+    assert.equal(unavailable.success, false)
+    assert.equal(getTotalStackCount(getShopAccountState(userId), recipe.itemId), 0)
+
+    const award = awardBossDropsForEnemy(userId, 'ene_04')
+    assert.equal(award.success, true)
+    const crafted = craftBossRecipe(userId, recipe.id)
+    assert.equal(crafted.success, true)
+    assert.equal(crafted.item?.id, recipe.itemId)
+    assert.equal(getTotalStackCount(getShopAccountState(userId), recipe.itemId), 1)
+    assert.ok(
+      getInventoryStacks(getShopAccountState(userId)).some((entry) => entry.itemId === recipe.itemId),
+      'crafted gear must appear in inventory'
+    )
+    assert.equal(equipShopWeapon(userId, recipe.itemId).success, true)
+    for (const material of boss.materials) {
+      assert.equal(getShopAccountState(userId).bossMaterials[material.id] || 0, 0)
+    }
+
+    const secondCraft = craftBossRecipe(userId, recipe.id)
+    assert.equal(secondCraft.success, false, 'spent materials cannot be reused')
+    assert.equal(getTotalStackCount(getShopAccountState(userId), recipe.itemId), 1)
+  })
+})
 
 

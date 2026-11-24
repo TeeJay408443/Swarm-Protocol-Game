@@ -7,6 +7,11 @@
 import { useEffect, useState } from 'react'
 import { getLocalPlayerTelemetry } from './scores'
 import type { UpgradesRow } from '../types/database'
+import {
+  BOSS_CRAFTING_RECIPES,
+  getBossDropSetId,
+  PLAYABLE_BOSS_DROP_SETS
+} from '../config/bossCrafting'
 
 export type ShopItemCategory = 'weapon' | 'accessory'
 
@@ -112,6 +117,7 @@ export interface ShopAccountState {
   cratesOpened: number
   ownedIds: string[]
   gearStacks: Record<string, number[]>
+  bossMaterials: Record<string, number>
   equippedWeaponId: string | null
   equippedWeaponStars: number
   equippedAccessoryIds: string[]
@@ -725,6 +731,118 @@ export const SHOP_ACCESSORIES: ShopAccessoryItem[] = [
   }
 ]
 
+/**
+ * Crafted gear is available only through boss recipes. Keep it out of
+ * SHOP_CATALOG so it never enters direct-buy rotations or crate pools.
+ */
+export const CRAFTED_WEAPONS: ShopWeaponItem[] = [
+  {
+    id: 'wpn_crafted_aegis_commander',
+    kind: 'weapon',
+    name: 'Aegis Redline Carbine',
+    category: 'Projectile',
+    rarity: 'epic',
+    tierLabel: 'Aegis Forged',
+    price: 0,
+    salvageValue: 360,
+    damage: 44,
+    cooldown_s: 0.62,
+    special: 'Aegis command burst',
+    function_desc: 'A rapid-fire carbine built around the Aegis drone’s command core.',
+    accentColor: '#F87171'
+  },
+  {
+    id: 'wpn_crafted_emerald_prism_monarch',
+    kind: 'weapon',
+    name: 'Monarch Prism Glaive',
+    category: 'Beam Weapon',
+    rarity: 'legendary',
+    tierLabel: 'Monarch Forged',
+    price: 0,
+    salvageValue: 530,
+    damage: 62,
+    cooldown_s: 0.9,
+    special: 'Emerald piercing prism',
+    function_desc: 'A refracting glaive that carries the Emerald Prism Monarch’s focused beam.',
+    accentColor: '#10B981'
+  },
+  {
+    id: 'wpn_crafted_astral_vortex_colossus',
+    kind: 'weapon',
+    name: 'Vortex Singularity Driver',
+    category: 'Heavy AoE',
+    rarity: 'legendary',
+    tierLabel: 'Colossus Forged',
+    price: 0,
+    salvageValue: 620,
+    damage: 78,
+    cooldown_s: 1.45,
+    special: 'Gravity-pulse impact',
+    function_desc: 'A heavy driver that releases a compact gravity pulse on impact.',
+    accentColor: '#38BDF8'
+  },
+  {
+    id: 'wpn_crafted_astral_scourge',
+    kind: 'weapon',
+    name: 'Astral Riftspike',
+    category: 'Heavy AoE',
+    rarity: 'mythic',
+    tierLabel: 'Scourge Forged',
+    price: 0,
+    salvageValue: 900,
+    damage: 104,
+    cooldown_s: 1.35,
+    special: 'Rift-charged starburst',
+    function_desc: 'A mythic lance forged from the Astral Scourge’s starheart and riftborne hide.',
+    accentColor: '#34D399'
+  }
+]
+
+export const CRAFTED_ACCESSORIES: ShopAccessoryItem[] = [
+  {
+    id: 'acc_crafted_omega_overlord',
+    kind: 'accessory',
+    name: 'Omega Overlord Reactor',
+    slotLabel: 'Overlord Core',
+    rarity: 'mythic',
+    price: 0,
+    salvageValue: 820,
+    statSummary: '+75 Max HP • +24% Damage • +12% Fire Rate',
+    function_desc: 'A battle reactor rebuilt from Omega Overlord’s final-phase armor.',
+    accentColor: '#FF2E63',
+    bonuses: { bonusHp: 75, damageMultiplier: 0.24, cooldownReduction: 0.12 }
+  },
+  {
+    id: 'acc_crafted_astral_bastion_warden',
+    kind: 'accessory',
+    name: 'Bastion Mortar Guard',
+    slotLabel: 'Warden Plating',
+    rarity: 'epic',
+    price: 0,
+    salvageValue: 420,
+    statSummary: '+55 Max HP • -10% Damage Taken',
+    function_desc: 'Armor reinforced with a Warden mortar lens and Citadel anchor stone.',
+    accentColor: '#F59E0B',
+    bonuses: { bonusHp: 55, damageReduction: 0.1 }
+  },
+  {
+    id: 'acc_crafted_solar_archon_seraph',
+    kind: 'accessory',
+    name: 'Seraph Sunlattice',
+    slotLabel: 'Solar Sigil',
+    rarity: 'legendary',
+    price: 0,
+    salvageValue: 680,
+    statSummary: '+18% Damage • +12% Crit Chance • +8% Move Speed',
+    function_desc: 'A solar lattice that focuses the Seraph’s radiant power into each strike.',
+    accentColor: '#FACC15',
+    bonuses: { damageMultiplier: 0.18, critChance: 0.12, speedMultiplier: 0.08 }
+  }
+]
+
+const CRAFTED_GEAR: ShopCatalogItem[] = [...CRAFTED_WEAPONS, ...CRAFTED_ACCESSORIES]
+const CRAFTED_GEAR_BY_ID = new Map(CRAFTED_GEAR.map((item) => [item.id, item]))
+
 export const SUPPLY_CRATES: SupplyCrateTier[] = [
   {
     id: 'crate_salvage',
@@ -802,15 +920,15 @@ export const SUPPLY_CRATES: SupplyCrateTier[] = [
 export const SHOP_CATALOG: ShopCatalogItem[] = [...SHOP_WEAPONS, ...SHOP_ACCESSORIES]
 
 export function getShopItemById(itemId: string): ShopCatalogItem | undefined {
-  return SHOP_CATALOG.find((item) => item.id === itemId)
+  return SHOP_CATALOG.find((item) => item.id === itemId) || CRAFTED_GEAR_BY_ID.get(itemId)
 }
 
 export function getShopWeaponById(weaponId: string): ShopWeaponItem | undefined {
-  return SHOP_WEAPONS.find((w) => w.id === weaponId)
+  return SHOP_WEAPONS.find((w) => w.id === weaponId) || CRAFTED_WEAPONS.find((w) => w.id === weaponId)
 }
 
 export function getShopAccessoryById(accessoryId: string): ShopAccessoryItem | undefined {
-  return SHOP_ACCESSORIES.find((a) => a.id === accessoryId)
+  return SHOP_ACCESSORIES.find((a) => a.id === accessoryId) || CRAFTED_ACCESSORIES.find((a) => a.id === accessoryId)
 }
 
 export function getSupplyCrateById(crateId: string): SupplyCrateTier | undefined {
@@ -910,7 +1028,9 @@ export function shopWeaponToUpgradeRow(item: ShopWeaponItem, stars: number = 0):
 }
 
 export function shopWeaponsAsUpgrades(starOverrides?: Record<string, number>): UpgradesRow[] {
-  return SHOP_WEAPONS.map((w) => shopWeaponToUpgradeRow(w, starOverrides?.[w.id] ?? 0))
+  return [...SHOP_WEAPONS, ...CRAFTED_WEAPONS].map((w) =>
+    shopWeaponToUpgradeRow(w, starOverrides?.[w.id] ?? 0)
+  )
 }
 
 export function computeEquippedAccessoryBonuses(
@@ -1258,12 +1378,23 @@ function normalizeAccountState(raw: ShopAccountState, effectiveUserId: string): 
     }
   }
 
+  const bossMaterials: Record<string, number> = {}
+  if (raw.bossMaterials && typeof raw.bossMaterials === 'object') {
+    for (const [materialId, value] of Object.entries(raw.bossMaterials)) {
+      const count = Number(value)
+      if (Number.isFinite(count) && count > 0) {
+        bossMaterials[materialId] = Math.floor(count)
+      }
+    }
+  }
+
   return {
     ...raw,
     userId: effectiveUserId,
     cratesOpened: raw.cratesOpened || 0,
     ownedIds,
     gearStacks: normalizedStacks,
+    bossMaterials,
     equippedWeaponId,
     equippedWeaponStars,
     equippedAccessoryIds,
@@ -1291,6 +1422,7 @@ export function getShopAccountState(userId?: string | null): ShopAccountState {
     cratesOpened: 0,
     ownedIds: [],
     gearStacks: {},
+    bossMaterials: {},
     equippedWeaponId: null,
     equippedWeaponStars: 0,
     equippedAccessoryIds: [],
@@ -1299,6 +1431,114 @@ export function getShopAccountState(userId?: string | null): ShopAccountState {
   }
   writeShopState(seeded)
   return seeded
+}
+
+export interface BossLootResult {
+  success: boolean
+  state: ShopAccountState
+  materials?: string[]
+  item?: ShopCatalogItem
+  error?: string
+}
+
+/**
+ * Grant the three materials tied to a defeated playable boss.
+ */
+export function awardBossDrops(
+  userId: string | null | undefined,
+  bossSetId: string
+): BossLootResult {
+  const current = getShopAccountState(userId)
+  const bossSet = PLAYABLE_BOSS_DROP_SETS.find((boss) => boss.id === bossSetId)
+  if (!bossSet) {
+    return { success: false, state: current, error: 'Boss drop set not found.' }
+  }
+
+  const bossMaterials = { ...current.bossMaterials }
+  for (const material of bossSet.materials) {
+    bossMaterials[material.id] = (bossMaterials[material.id] || 0) + 1
+  }
+  const next: ShopAccountState = {
+    ...current,
+    bossMaterials,
+    updatedAt: new Date().toISOString()
+  }
+  writeShopState(next)
+  return { success: true, state: next, materials: bossSet.materials.map((material) => material.id) }
+}
+
+/**
+ * Resolve the defeated enemy identity and grant its set, if it is a playable
+ * boss or mini-boss. The developer-only secret boss intentionally has no set.
+ */
+export function awardBossDropsForEnemy(
+  userId: string | null | undefined,
+  enemyId: string,
+  isFinalBoss = false
+): BossLootResult {
+  const bossSetId = getBossDropSetId(enemyId, isFinalBoss)
+  if (!bossSetId) {
+    return {
+      success: false,
+      state: getShopAccountState(userId),
+      error: 'This enemy has no playable boss drop set.'
+    }
+  }
+  return awardBossDrops(userId, bossSetId)
+}
+
+/**
+ * Atomically consume a recipe's boss materials and add its resulting gear.
+ */
+export function craftBossRecipe(
+  userId: string | null | undefined,
+  recipeId: string
+): BossLootResult {
+  const current = getShopAccountState(userId)
+  const recipe = BOSS_CRAFTING_RECIPES.find((entry) => entry.id === recipeId)
+  if (!recipe) {
+    return { success: false, state: current, error: 'Crafting recipe not found.' }
+  }
+  const item = getShopItemById(recipe.itemId)
+  if (!item || !CRAFTED_GEAR_BY_ID.has(item.id)) {
+    return { success: false, state: current, error: 'Crafting result is unavailable.' }
+  }
+
+  const missing = recipe.materials.find(
+    ({ materialId, quantity }) => (current.bossMaterials[materialId] || 0) < quantity
+  )
+  if (missing) {
+    const materialName =
+      PLAYABLE_BOSS_DROP_SETS.flatMap((boss) => boss.materials).find(
+        (material) => material.id === missing.materialId
+      )?.name || 'required material'
+    return {
+      success: false,
+      state: current,
+      item,
+      error: `Not enough ${materialName}.`
+    }
+  }
+
+  const bossMaterials = { ...current.bossMaterials }
+  for (const { materialId, quantity } of recipe.materials) {
+    const remaining = bossMaterials[materialId] - quantity
+    if (remaining > 0) bossMaterials[materialId] = remaining
+    else delete bossMaterials[materialId]
+  }
+  const gearStacks = addItemStackToRecord(current.gearStacks, item.id, 0, 1)
+  const next = normalizeAccountState(
+    {
+      ...current,
+      bossMaterials,
+      gearStacks,
+      ownedIds: deriveOwnedIdsFromStacks(gearStacks),
+      updatedAt: new Date().toISOString()
+    },
+    current.userId
+  )
+  writeShopState(next)
+  return { success: true, state: next, materials: recipe.materials.map((entry) => entry.materialId), item }
 }
 
 /**

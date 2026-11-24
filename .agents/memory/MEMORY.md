@@ -1,1 +1,2 @@
 - [Manager callbacks](manager-callbacks.md) — keep callback storage fields distinct from public registration method names to prevent runtime method shadowing.
+- [Area 2 boss roster](area-2-boss-roster.md) — Area 2 intentionally has four dedicated bosses, including the Wave 20 Astral Scourge.

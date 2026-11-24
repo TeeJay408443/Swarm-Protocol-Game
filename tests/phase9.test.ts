@@ -1327,9 +1327,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       'ene_a2_05'
     )
 
-    // 5. Codex enemy database lists Area 1 (4), Area 2 enemies (5), and Area 2 bosses (3) = 12 entries
+    // 5. Codex enemy database lists Area 1 (4), Area 2 enemies (5), and Area 2 bosses (4) = 13 entries
     const codexEnemies = await getEnemies()
-    assert.ok(codexEnemies.length >= 12)
+    assert.ok(codexEnemies.length >= 13)
     for (const a2 of AREA_TWO_ENEMIES) {
       assert.ok(codexEnemies.some((e) => e.id === a2.id))
     }
@@ -1339,12 +1339,12 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
   })
 
   it('spawns dedicated Area 2 bosses every 5 waves, disables regular spawns on ~150k HP Wave 15 bosses, and enables Endless Mode in Area 2', () => {
-    // 1. Area 2 defines 3 distinct bosses every 5 waves + Endless alternating bosses
-    assert.equal(AREA_TWO_BOSSES.length, 3)
+    // 1. Area 2 defines 4 distinct bosses, including the Wave 20 final boss
+    assert.equal(AREA_TWO_BOSSES.length, 4)
     assert.equal(getAreaBossTemplateForWave('astral_citadel', 5).id, 'boss_a2_05')
     assert.equal(getAreaBossTemplateForWave('astral_citadel', 10).id, 'boss_a2_10')
     assert.equal(getAreaBossTemplateForWave('astral_citadel', 15).id, 'boss_a2_15')
-    assert.equal(getAreaBossTemplateForWave('astral_citadel', 20).id, 'boss_a2_10')
+    assert.equal(getAreaBossTemplateForWave('astral_citadel', 20).id, 'boss_a2_20')
     assert.equal(getAreaBossTemplateForWave('astral_citadel', 25).id, 'boss_a2_05')
     assert.equal(getAreaBossTemplateForWave('carbon_sector', 15).id, 'ene_04')
 

@@ -957,13 +957,13 @@ export class Enemy {
       let headingDifference = desiredHeading - this.astralRamHeading
       while (headingDifference > Math.PI) headingDifference -= Math.PI * 2
       while (headingDifference < -Math.PI) headingDifference += Math.PI * 2
-      const maxTurn = 0.9 * deltaTime
+      const maxTurn = 1.6 * deltaTime
       this.astralRamHeading +=
         Math.abs(headingDifference) <= maxTurn
           ? headingDifference
           : Math.sign(headingDifference) * maxTurn
 
-      const maxRamSpeed = this.speed * 3.8
+      const maxRamSpeed = this.speed * 2.6
       this.astralRamSpeed = Math.min(
         maxRamSpeed,
         this.astralRamSpeed + this.speed * 2.8 * deltaTime

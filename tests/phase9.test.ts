@@ -2613,15 +2613,23 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     movementState.dogDashCooldown = 100
 
     const playerCenter = player.getCenter()
+    let maximumOvershoot = 0
     for (let step = 0; step < 26; step++) {
       scourge.update(0.05, player)
+      maximumOvershoot = Math.max(
+        maximumOvershoot,
+        scourge.getCenter().x - playerCenter.x
+      )
     }
 
     assert.ok(
-      scourge.getCenter().x > playerCenter.x + 100,
-      'The ram should carry the boss past the player instead of stopping on contact'
+      maximumOvershoot > 0 && maximumOvershoot < 300,
+      `The ram should overshoot briefly, but stay controlled (observed ${Math.round(maximumOvershoot)} units)`
     )
-    assert.ok(scourge.velocity.x > 0, 'The boss should retain its forward momentum after crossing')
+    assert.ok(
+      scourge.getCenter().x > playerCenter.x || scourge.velocity.x > 0,
+      'The boss should retain forward momentum as it passes the player'
+    )
     assert.ok(movementState.astralRamSpeed > 0, 'Normal pursuit should accelerate into the ram')
     assert.equal(
       movementState.dogDashCooldown,

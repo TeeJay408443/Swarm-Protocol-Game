@@ -161,6 +161,7 @@ export interface BossTelegraphAttack {
   safeRect?: { x: number; y: number; width: number; height: number }
   gridRects?: Array<{ x: number; y: number; width: number; height: number }>
   gridLines?: CosmicLaserWallLine[]
+  gridOffsets?: number[]
   isDiagonalGrid?: boolean
   beamCount?: number
   beamSegments?: Array<[number, number]>
@@ -171,6 +172,9 @@ export interface BossTelegraphAttack {
   pulseTimer?: number
   pulseCount?: number
   hitCooldown?: number
+  laserDuration?: number
+  escapeDuration?: number
+  isEscaping?: boolean
   chargeTimer: number
   chargeDuration: number
   activeTimer: number
@@ -891,6 +895,33 @@ export class Enemy {
 
     const targetCenter = this.target.getCenter()
     const currentCenter = this.getCenter()
+    if (attack.hasTriggered && attack.activeTimer >= (attack.laserDuration ?? attack.activeDuration)) {
+      if (!attack.isEscaping) {
+        attack.isEscaping = true
+        this.dogDashCooldown = Math.max(this.dogDashCooldown, attack.escapeDuration ?? 1.35)
+      }
+      const away = Vector2.normalize({
+        x: currentCenter.x - targetCenter.x,
+        y: currentCenter.y - targetCenter.y
+      })
+      const safeDelta = Math.max(deltaTime, 0.001)
+      const speed = Math.max(560, this.speed * 3.5)
+      const minX = this.arenaBounds ? this.arenaBounds.left + 64 : 80
+      const maxX = this.arenaBounds ? this.arenaBounds.left + this.arenaBounds.width - 64 : 1920
+      const minY = this.arenaBounds ? this.arenaBounds.top + 140 : 80
+      const maxY = this.arenaBounds ? this.arenaBounds.top + this.arenaBounds.height - 64 : 1920
+      const nextCenter = {
+        x: Math.max(minX, Math.min(maxX, currentCenter.x + away.x * speed * safeDelta)),
+        y: Math.max(minY, Math.min(maxY, currentCenter.y + away.y * speed * safeDelta))
+      }
+      this.velocity = {
+        x: (nextCenter.x - currentCenter.x) / safeDelta,
+        y: (nextCenter.y - currentCenter.y) / safeDelta
+      }
+      this.direction = Vector2.normalize(this.velocity)
+      return true
+    }
+
     const nextAngle =
       (attack.orbitAngle ?? Math.atan2(currentCenter.y - targetCenter.y, currentCenter.x - targetCenter.x)) +
       (attack.turnRate ?? 3) * deltaTime
@@ -971,9 +1002,13 @@ export class Enemy {
     this.pendingAstralPhaseTwoCutscene = true
     this.pendingPhaseAnnouncement = null
     this.speed = this.baseSpeed * 1.26
-    this.shootCooldownMax = Math.max(0.7, this.shootCooldownMax * 0.78)
+    this.shootCooldownMax = this.isAstralScourge
+      ? 3.2
+      : Math.max(0.7, this.shootCooldownMax * 0.78)
     this.specialCooldownMax = Math.max(1.8, this.specialCooldownMax * 0.78)
-    this.shootCooldown = Math.min(this.shootCooldown, 0.25)
+    this.shootCooldown = this.isAstralScourge
+      ? this.shootCooldownMax
+      : Math.min(this.shootCooldown, 0.25)
     this.specialCooldown = 0.2
     this.telegraphs = []
     this.projectiles = []
@@ -1110,6 +1145,27 @@ export class Enemy {
       const wormSecondary = this.isAstralScourge ? '#FACC15' : '#E879F9'
       const wormPair: [string, string] = [wormPrimary, wormSecondary]
       const fireballDmg = Math.round((this.isEnraged ? 26 : 20) * Math.max(1, this.damageScale))
+      if (this.isAstralScourge && this.bossPhase >= 2) {
+        if (this.telegraphs.some((attack) => attack.kind === 'astral_orbital_grid')) return
+        const baseAngle = Math.atan2(direction.y, direction.x)
+        for (const offset of [-0.16, 0, 0.16]) {
+          const angle = baseAngle + offset
+          this.projectiles.push({
+            x: startPos.x,
+            y: startPos.y,
+            width: 12,
+            height: 12,
+            speed: 300,
+            direction: { x: Math.cos(angle), y: Math.sin(angle) },
+            damage: Math.round(fireballDmg * 0.7),
+            color: offset === 0 ? wormSecondary : wormPrimary,
+            lifetime: 0,
+            maxLifetime: 3.2
+          })
+        }
+        return
+      }
+
       const mode = this.attackPatternIndex % 3
       if (mode === 1) {
         // Calamity Starburst Ring + Splitting Astral/Nebula Stars
@@ -1434,7 +1490,7 @@ export class Enemy {
               'cosmic_laser_walls',
               'cosmic_portal_lunge',
               'astral_orbital_grid',
-              'cosmic_orb_barrage'
+              'cosmic_laser_walls'
             ]
           : ['cosmic_laser_walls', 'cosmic_portal_lunge', 'cosmic_orb_barrage']
         : this.isEnraged || this.bossPhase >= 2
@@ -1497,6 +1553,14 @@ export class Enemy {
     if (kind === 'astral_orbital_grid') {
       const randomAngle = Math.random() * Math.PI
       const aimedAngle = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
+      const lineCount = 3 + Math.floor(Math.random() * 2)
+      const lineSpacing = 105 + Math.random() * 75
+      const gridOffsets = Array.from(
+        { length: lineCount },
+        (_, index) => (index - (lineCount - 1) / 2) * lineSpacing
+      )
+      const laserDuration = 1.8
+      const escapeDuration = 1.35
       telegraph = {
         id,
         kind,
@@ -1507,10 +1571,13 @@ export class Enemy {
         orbitAngle: Math.atan2(bossCenter.y - targetCenter.y, bossCenter.x - targetCenter.x),
         orbitRadius: ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS,
         radius: 5,
-        gridLines: getAstralOrbitalGridLines(targetCenter, randomAngle, aimedAngle),
-        chargeDuration: 2.15,
+        gridOffsets,
+        gridLines: getAstralOrbitalGridLines(targetCenter, randomAngle, aimedAngle, gridOffsets),
+        chargeDuration: 3.6,
         chargeTimer: 0,
-        activeDuration: 0.76,
+        laserDuration,
+        escapeDuration,
+        activeDuration: laserDuration + escapeDuration,
         activeTimer: 0,
         damage: Math.round((26 + tierBoost * 5) * this.damageScale),
         hasTriggered: false,
@@ -2046,7 +2113,12 @@ export class Enemy {
           t.x = targetCenter.x
           t.y = targetCenter.y
           const aimedAngle = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
-          t.gridLines = getAstralOrbitalGridLines(targetCenter, t.angle ?? 0, aimedAngle)
+          t.gridLines = getAstralOrbitalGridLines(
+            targetCenter,
+            t.angle ?? 0,
+            aimedAngle,
+            t.gridOffsets
+          )
         }
         if (t.hasTriggered && t.hasDamagedPlayer) {
           t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
@@ -2135,7 +2207,7 @@ export class Enemy {
             this.dogDashCooldown = this.isEnraged ? 2.8 : 3.6
             this.updateDogSegments(14, { x: t.portalX, y: t.portalY })
             // Emit rift scatter stars on emergence
-            const burstCount = this.isEnraged ? 10 : 6
+            const burstCount = this.isAstralScourge ? 3 : this.isEnraged ? 10 : 6
             const pCol1 = t.accentPrimary || (this.isAstralScourge ? '#34D399' : '#22D3EE')
             const pCol2 = t.accentSecondary || (this.isAstralScourge ? '#FACC15' : '#E879F9')
             for (let b = 0; b < burstCount; b++) {
@@ -3091,7 +3163,11 @@ export class Enemy {
           ctx.fillText(`⚠ ROTATING X-BEAM SWEEP — DODGE THROUGH GAPS! (${rem}s)`, start.x, start.y + 68)
           ctx.restore()
         }
-      } else if (t.kind === 'astral_orbital_grid' && t.gridLines) {
+      } else if (
+        t.kind === 'astral_orbital_grid' &&
+        t.gridLines &&
+        !(t.hasTriggered && t.activeTimer >= (t.laserDuration ?? t.activeDuration))
+      ) {
         const pulse = 0.68 + 0.32 * Math.sin(this.animTime * 25)
         ctx.save()
         ctx.lineCap = 'round'
@@ -4457,10 +4533,10 @@ export function getRotatingCrossLaserSegments(
 export function getAstralOrbitalGridLines(
   center: { x: number; y: number },
   randomAngle: number,
-  playerAngle: number
+  playerAngle: number,
+  offsets: number[] = [-120, 0, 120]
 ): CosmicLaserWallLine[] {
   const halfLength = 1100
-  const offsets = [-120, 0, 120]
   const lineFamilies: Array<{ angle: number; aimMode: 'random' | 'player'; color: string }> = [
     { angle: randomAngle, aimMode: 'random', color: '#34D399' },
     { angle: playerAngle, aimMode: 'player', color: '#FACC15' }
@@ -4499,6 +4575,13 @@ export function checkBossTelegraphHit(
 ): boolean {
   if (telegraph.kind === 'bullet_hell') {
     return false // Projectiles are checked via enemy.projectiles collisions
+  }
+  if (
+    telegraph.kind === 'astral_orbital_grid' &&
+    telegraph.hasTriggered &&
+    telegraph.activeTimer >= (telegraph.laserDuration ?? telegraph.activeDuration)
+  ) {
+    return false // The boss is retreating; the laser grid is no longer active.
   }
 
   if (telegraph.kind === 'closing_side_lasers') {

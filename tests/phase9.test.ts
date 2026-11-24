@@ -2551,18 +2551,26 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const grid = scourge.spawnTelegraphedAttack('astral_orbital_grid')
     assert.ok(grid)
     assert.equal(grid?.kind, 'astral_orbital_grid')
-    assert.equal(grid?.gridLines?.length, 6)
-    assert.equal(grid?.gridLines?.filter((line) => line.aimMode === 'random').length, 3)
-    assert.equal(grid?.gridLines?.filter((line) => line.aimMode === 'player').length, 3)
+    assert.ok(grid?.gridLines?.length === 6 || grid?.gridLines?.length === 8)
+    assert.ok((grid?.gridLines?.filter((line) => line.aimMode === 'random').length ?? 0) >= 3)
+    assert.ok((grid?.gridLines?.filter((line) => line.aimMode === 'player').length ?? 0) >= 3)
     assert.ok(grid?.gridLines?.every((line) => line.width <= 6))
+    assert.ok(grid?.gridOffsets?.length === 3 || grid?.gridOffsets?.length === 4)
     assert.equal(grid?.orbitRadius, ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS)
+    assert.equal(grid?.chargeDuration, 3.6)
+    assert.equal(grid?.laserDuration, 1.8)
+    assert.equal(grid?.escapeDuration, 1.35)
+    assert.ok(Math.abs((grid?.activeDuration ?? 0) - 3.15) < 0.001)
     assert.equal(
       checkBossTelegraphHit(grid!, { x: grid!.x, y: grid!.y, radius: 10 }),
       true
     )
 
     const startingOrbitAngle = grid!.orbitAngle
+    scourge.projectiles = []
+    scourge.shootCooldown = 0
     scourge.update(0.1, player)
+    assert.equal(scourge.projectiles.length, 0)
     assert.notEqual(grid!.orbitAngle, startingOrbitAngle)
     assert.ok(
       Math.abs(
@@ -2571,9 +2579,32 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       ) < 2
     )
 
+    grid!.hasTriggered = true
+    grid!.activeTimer = grid!.laserDuration!
+    const distanceBeforeEscape = Math.hypot(
+      scourge.getCenter().x - player.getCenter().x,
+      scourge.getCenter().y - player.getCenter().y
+    )
+    assert.equal(checkBossTelegraphHit(grid!, { x: grid!.x, y: grid!.y, radius: 10 }), false)
+    scourge.update(0.1, player)
+    assert.equal(grid!.isEscaping, true)
+    const distanceAfterEscape = Math.hypot(
+      scourge.getCenter().x - player.getCenter().x,
+      scourge.getCenter().y - player.getCenter().y
+    )
+    assert.ok(distanceAfterEscape > distanceBeforeEscape + 40)
+
     assert.equal(scourge.spawnTelegraphedAttack('rotating_cross_lasers')?.kind, 'astral_orbital_grid')
     const nextAttacks = Array.from({ length: 5 }, () => scourge.spawnTelegraphedAttack())
     assert.ok(nextAttacks.every((attack) => attack?.kind !== 'rotating_cross_lasers'))
+    assert.ok(nextAttacks.every((attack) => attack?.kind !== 'cosmic_orb_barrage'))
+
+    scourge.telegraphs = []
+    scourge.projectiles = []
+    scourge.shootCooldown = 0
+    scourge.specialCooldown = 100
+    scourge.update(0.01, player)
+    assert.equal(scourge.projectiles.length, 3)
 
     const lines = getAstralOrbitalGridLines({ x: 0, y: 0 }, Math.PI / 4, Math.PI / 2)
     assert.equal(lines.length, 6)

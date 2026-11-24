@@ -666,7 +666,7 @@ export function computeDevourerCutsceneCameraFrame(params: {
 
 export const WAVE_15_CUTSCENE_DURATION_SECONDS = 4.6
 
-export type BossCutsceneKind = 'dog' | 'w15_area1' | 'w15_area2' | 'w20_area2'
+export type BossCutsceneKind = 'dog' | 'w15_omega' | 'w15_seraph' | 'w20_area2'
 
 export type BossCutscenePresentation = 'dialogue' | 'warning'
 
@@ -674,6 +674,8 @@ export type BossCutsceneParticleStyle = 'cosmic_rift' | 'carbon_inferno' | 'astr
 
 export interface BossCutsceneTheme {
   kind: BossCutsceneKind
+  durationSeconds?: number
+  revealDelaySeconds?: number
   presentation: BossCutscenePresentation
   particleStyle: BossCutsceneParticleStyle
   speaker: string
@@ -725,7 +727,9 @@ export const DEVOURER_CUTSCENE_THEME: BossCutsceneTheme = {
 export function getWave15CutsceneTheme(areaId: ArenaId): BossCutsceneTheme {
   if (areaId === 'astral_citadel') {
     return {
-      kind: 'w15_area2',
+      kind: 'w15_seraph',
+      durationSeconds: 6.2,
+      revealDelaySeconds: 2.2,
       presentation: 'warning',
       particleStyle: 'astral_solar_fire',
       speaker: 'Solar Archon Seraph',
@@ -751,7 +755,9 @@ export function getWave15CutsceneTheme(areaId: ArenaId): BossCutsceneTheme {
   }
 
   return {
-    kind: 'w15_area1',
+    kind: 'w15_omega',
+    durationSeconds: 5.4,
+    revealDelaySeconds: 1.8,
     presentation: 'warning',
     particleStyle: 'carbon_inferno',
     speaker: 'Omega Overlord',

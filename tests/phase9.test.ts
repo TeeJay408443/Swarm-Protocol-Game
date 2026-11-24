@@ -128,6 +128,7 @@ import {
   getAstralOrbitalGridLines,
   getAstralScourgePhaseTwoAttackKind,
   getAstralTargetedLaserLines,
+  getWave15BossAttackKind,
   getRotatingCrossLaserSegments,
   getClosingSideLaserRects,
   getClosingSideLaserTrackRects,
@@ -2469,6 +2470,43 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(p3Seekers.length, 6)
   })
 
+  it('separates Omega Overlord and Solar Archon Seraph attack phases', () => {
+    assert.equal(getWave15BossAttackKind('omega_overlord', 1, 0), 'closing_side_lasers')
+    assert.equal(getWave15BossAttackKind('solar_archon_seraph', 1, 0), 'pursuit_beam')
+    assert.equal(getWave15BossAttackKind('omega_overlord', 2, 0), 'rotating_cross_lasers')
+    assert.equal(getWave15BossAttackKind('solar_archon_seraph', 2, 0), 'pursuit_beam')
+    assert.equal(getWave15BossAttackKind('omega_overlord', 3, 0), 'singularity_grid')
+    assert.equal(getWave15BossAttackKind('solar_archon_seraph', 3, 0), 'cosmic_laser_walls')
+
+    const player = new Player({ x: 900, y: 860, hero: heroes[0] })
+    const seraph = new Enemy({
+      x: 900,
+      y: 360,
+      enemyData: getAreaBossTemplateForWave('astral_citadel', 15),
+      target: player,
+      isBoss: true,
+      isStationaryBoss: true,
+      isFinalBoss: true,
+      anchorPos: { x: 900, y: 360 },
+      arenaBounds: { left: 260, top: 140, width: 1280, height: 720 }
+    })
+    seraph.isSpawning = false
+    seraph.specialCooldown = 100
+    const opening = seraph.spawnTelegraphedAttack()
+    assert.equal(opening?.kind, 'pursuit_beam')
+    assert.equal(opening?.accentPrimary, '#FACC15')
+    assert.equal(opening?.warningLabel, 'SERAPH SUNLANCE — BREAK THE LOCK!')
+
+    seraph.telegraphs = []
+    seraph.bossPhase = 3
+    seraph.phaseThreeAttackIndex = 0
+    const crownLattice = seraph.spawnTelegraphedAttack()
+    assert.equal(crownLattice?.kind, 'cosmic_laser_walls')
+    assert.equal(crownLattice?.warningLabel, '⚠ SERAPH CROWN LATTICE — WEAVE GAPS!')
+    assert.ok(crownLattice?.gridLines?.some((line) => line.color === '#FACC15'))
+    assert.ok(crownLattice?.gridLines?.some((line) => line.color === '#34D399'))
+  })
+
   it('gives Astral Scourge a damaging tail and a delayed two-phase arena rush', () => {
     const scourge = new Enemy({
       x: 500,
@@ -2568,15 +2606,14 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       true
     )
 
-    const startingOrbitAngle = grid!.orbitAngle
     const fixedOrbitCenter = { x: grid!.orbitCenterX!, y: grid!.orbitCenterY! }
+    const fixedGridLines = grid!.gridLines!.map((line) => ({ ...line }))
     player.x += 45
     scourge.projectiles = []
     scourge.shootCooldown = 0
     scourge.slowMultiplier = 0.55
     scourge.update(0.1, player)
     assert.equal(scourge.projectiles.length, 0)
-    assert.notEqual(grid!.orbitAngle, startingOrbitAngle)
     assert.ok(
       Math.abs(
         Math.hypot(
@@ -2587,8 +2624,25 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     assert.equal(grid!.orbitCenterX, fixedOrbitCenter.x)
     assert.equal(grid!.orbitCenterY, fixedOrbitCenter.y)
+    assert.deepEqual(grid!.gridLines, fixedGridLines, 'The grid must not track player movement')
 
-    grid!.hasTriggered = true
+    grid!.chargeTimer = grid!.chargeDuration - 0.1
+    scourge.slowMultiplier = 0.55
+    scourge.update(0.1, player)
+    assert.equal(grid!.hasTriggered, true)
+    assert.equal(grid!.ringLocked, true)
+    assert.equal(grid!.ringLockedSegments?.length, ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT)
+    const lockedSegments = grid!.ringLockedSegments!.map((segment) => ({ ...segment }))
+    const lockedLines = grid!.gridLines!.map((line) => ({ ...line }))
+    const lockedHead = { x: grid!.ringLockedHeadX!, y: grid!.ringLockedHeadY! }
+
+    player.x += 110
+    scourge.slowMultiplier = 0.55
+    scourge.update(0.25, player)
+    assert.deepEqual(scourge.dogSegments, lockedSegments, 'Tail segments should remain frozen after the circle forms')
+    assert.deepEqual(scourge.getCenter(), lockedHead, 'The head should remain fixed during the grid firing window')
+    assert.deepEqual(grid!.gridLines, lockedLines, 'The grid should stay at its original world position')
+
     grid!.activeTimer = grid!.laserDuration!
     const distanceBeforeEscape = Math.hypot(
       scourge.getCenter().x - player.getCenter().x,
@@ -2654,9 +2708,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     ) - Math.atan2(lines[0].y2 - lines[0].y1, lines[0].x2 - lines[0].x1)) - Math.PI / 2) < 0.001)
 
     assert.equal(getAstralScourgePhaseTwoAttackKind(0), 'astral_orbital_grid')
-    assert.equal(getAstralScourgePhaseTwoAttackKind(0.25), 'astral_targeted_lasers')
-    assert.equal(getAstralScourgePhaseTwoAttackKind(0.5), 'cosmic_laser_walls')
-    assert.equal(getAstralScourgePhaseTwoAttackKind(0.75), 'cosmic_portal_lunge')
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0.39), 'astral_orbital_grid')
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0.4), 'astral_targeted_lasers')
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0.6), 'cosmic_laser_walls')
+    assert.equal(getAstralScourgePhaseTwoAttackKind(0.8), 'cosmic_portal_lunge')
     assert.equal(getAstralTargetedLaserLines({ x: 0, y: 0 }, { x: 100, y: 0 }).length, 3)
   })
 
@@ -3311,12 +3366,14 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     audio.destroy()
   })
 
-  it('configures Wave 15 Area 1 and Area 2 Final Boss entrance cutscenes with warning banners, area fire particles, shake curves, camera zoom, and emergence timing', () => {
+  it('gives both Wave 15 bosses distinct cinematic entrances and correctly timed emergence', () => {
     assert.equal(WAVE_15_CUTSCENE_DURATION_SECONDS, 4.6)
 
     const a1Theme = getWave15CutsceneTheme('carbon_sector')
     const a2Theme = getWave15CutsceneTheme('astral_citadel')
-    assert.equal(a1Theme.kind, 'w15_area1')
+    assert.equal(a1Theme.kind, 'w15_omega')
+    assert.equal(a1Theme.durationSeconds, 5.4)
+    assert.equal(a1Theme.revealDelaySeconds, 1.8)
     assert.equal(a1Theme.presentation, 'warning')
     assert.equal(a1Theme.particleStyle, 'carbon_inferno')
     assert.equal(a1Theme.speaker, 'Omega Overlord')
@@ -3324,7 +3381,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(a1Theme.warningSubtitle.includes('CARBON SECTOR'))
     assert.ok(a1Theme.warningCriticalText.length > 0)
 
-    assert.equal(a2Theme.kind, 'w15_area2')
+    assert.equal(a2Theme.kind, 'w15_seraph')
+    assert.equal(a2Theme.durationSeconds, 6.2)
+    assert.equal(a2Theme.revealDelaySeconds, 2.2)
     assert.equal(a2Theme.presentation, 'warning')
     assert.equal(a2Theme.particleStyle, 'astral_solar_fire')
     assert.equal(a2Theme.speaker, 'Solar Archon Seraph')
@@ -3370,10 +3429,11 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(settled.intensity, 0)
     assert.equal(settled.flashAlpha, 0)
 
-    // Wave 15 Final Boss entities hold emergence lock across 4.6s cutscene in both Area 1 and Area 2
+    // Wave 15 Final Boss entities hold emergence lock through their own scene durations
     const hero = heroes.find((h) => h.id === 'hero_01')!
     const player = new Player({ x: 900, y: 860, hero })
     for (const areaId of ['carbon_sector', 'astral_citadel'] as const) {
+      const theme = getWave15CutsceneTheme(areaId)
       const w15 = new Enemy({
         x: 900,
         y: 360,
@@ -3386,15 +3446,16 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
         arenaBounds: { left: 260, top: 140, width: 1280, height: 720 }
       })
       assert.equal(w15.isSpawning, true)
-      assert.equal(w15.spawnDelay, WAVE_15_CUTSCENE_DURATION_SECONDS)
-      assert.equal(w15.cutsceneDelayTimer, WAVE_15_CUTSCENE_DURATION_SECONDS)
+      assert.equal(w15.spawnDelay, theme.durationSeconds)
+      assert.equal(w15.cutsceneDelayTimer, theme.durationSeconds)
 
       for (let i = 0; i < 40; i++) {
         w15.update(0.05, player)
       }
       assert.equal(w15.isSpawning, true)
 
-      for (let i = 0; i < 55; i++) {
+      const remainingSteps = Math.ceil(((theme.durationSeconds ?? 0) - 2) / 0.05) + 2
+      for (let i = 0; i < remainingSteps; i++) {
         w15.update(0.05, player)
       }
       assert.equal(w15.isSpawning, false)

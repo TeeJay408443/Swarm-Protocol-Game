@@ -15,6 +15,7 @@ import {
   ASTRAL_SCOURGE_PHASE_TWO_RUSH_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT,
   DEVOURER_CUTSCENE_DURATION_SECONDS,
+  getWave15CutsceneTheme,
   WAVE_15_CUTSCENE_DURATION_SECONDS
 } from '../../config/arenas'
 import { EnemiesRow } from '../../types/database'
@@ -118,6 +119,8 @@ export type BossAttackKind =
   | 'astral_orbital_grid'
   | 'astral_targeted_lasers'
 
+export type Wave15BossIdentity = 'omega_overlord' | 'solar_archon_seraph'
+
 export interface CosmicLaserWallLine {
   x1: number
   y1: number
@@ -154,6 +157,12 @@ export interface BossTelegraphAttack {
   orbitRadius?: number
   orbitCenterX?: number
   orbitCenterY?: number
+  gridAnchorX?: number
+  gridAnchorY?: number
+  ringLocked?: boolean
+  ringLockedHeadX?: number
+  ringLockedHeadY?: number
+  ringLockedSegments?: Array<{ x: number; y: number; angle: number }>
   radius: number
   length?: number
   halfDirection?: HalfArenaDirection
@@ -567,17 +576,23 @@ export class Enemy {
       this.attackRange = 1600
       this.specialCooldown = 1.2
       this.specialCooldownMax = 3.4
-      if (this.isFinalBoss && !this.isDevourerOfGods) {
-        this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
-        this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
+      if (this.isFinalBoss && !this.isDevourerOfGods && !this.isAstralScourge) {
+        const cutsceneDuration =
+          getWave15CutsceneTheme(this.enemyId === 'boss_a2_15' ? 'astral_citadel' : 'carbon_sector')
+            .durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
+        this.spawnDelay = cutsceneDuration
+        this.cutsceneDelayTimer = cutsceneDuration
       }
       if (this.anchorPos) {
         this.x = this.anchorPos.x - this.width / 2
         this.y = this.anchorPos.y - this.height / 2
       }
-    } else if (this.isFinalBoss && !this.isDevourerOfGods) {
-      this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
-      this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
+    } else if (this.isFinalBoss && !this.isDevourerOfGods && !this.isAstralScourge) {
+      const cutsceneDuration =
+        getWave15CutsceneTheme(this.enemyId === 'boss_a2_15' ? 'astral_citadel' : 'carbon_sector')
+          .durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
+      this.spawnDelay = cutsceneDuration
+      this.cutsceneDelayTimer = cutsceneDuration
     }
 
     if (this.isAstralScourge && this.isFinalBoss) {
@@ -736,7 +751,26 @@ export class Enemy {
       this.y += this.velocity.y * this.slowMultiplier * deltaTime
     }
     if (this.isWormBoss) {
-      this.updateDogSegments(24)
+      const lockedAstralRing =
+        this.isAstralScourge && this.bossPhase >= 2
+          ? this.telegraphs.find(
+              (telegraph) =>
+                telegraph.kind === 'astral_orbital_grid' &&
+                telegraph.ringLocked &&
+                !telegraph.isEscaping
+            )
+          : undefined
+      if (lockedAstralRing?.ringLockedSegments) {
+        if (lockedAstralRing.ringLockedHeadX !== undefined) {
+          this.x = lockedAstralRing.ringLockedHeadX - this.width / 2
+        }
+        if (lockedAstralRing.ringLockedHeadY !== undefined) {
+          this.y = lockedAstralRing.ringLockedHeadY - this.height / 2
+        }
+        this.dogSegments = lockedAstralRing.ringLockedSegments.map((segment) => ({ ...segment }))
+      } else {
+        this.updateDogSegments(24)
+      }
     }
     this.slowMultiplier = 1.0
     
@@ -943,6 +977,10 @@ export class Enemy {
         )) +
       (attack.turnRate ?? 3) * deltaTime
     const orbitRadius = attack.orbitRadius ?? 360
+    if (attack.ringLocked && !attack.isEscaping) {
+      this.velocity = Vector2.zero()
+      return true
+    }
     const nextCenter = {
       x: (attack.orbitCenterX ?? targetCenter.x) + Math.cos(nextAngle) * orbitRadius,
       y: (attack.orbitCenterY ?? targetCenter.y) + Math.sin(nextAngle) * orbitRadius
@@ -1500,8 +1538,9 @@ export class Enemy {
     const id = `boss_atk_${Date.now()}_${this.specialAttackCounter}`
     const tierBoost = Math.max(0, this.bossTier - 1)
 
-    const wormPrimary = this.isAstralScourge ? '#34D399' : '#22D3EE'
-    const wormSecondary = this.isAstralScourge ? '#FACC15' : '#E879F9'
+    const isSolarArchon = this.enemyId === 'boss_a2_15'
+    const wormPrimary = this.isAstralScourge ? '#34D399' : isSolarArchon ? '#FACC15' : '#22D3EE'
+    const wormSecondary = this.isAstralScourge ? '#FACC15' : isSolarArchon ? '#34D399' : '#E879F9'
 
     let kind: BossAttackKind
     if (forcedKind) {
@@ -1532,6 +1571,17 @@ export class Enemy {
             ]
         kind = wormCycle[(this.specialAttackCounter - 1) % wormCycle.length]
       }
+    } else if (this.isStationaryBoss && this.isFinalBoss) {
+      const identity: Wave15BossIdentity = isSolarArchon
+        ? 'solar_archon_seraph'
+        : 'omega_overlord'
+      const cycleIndex =
+        this.bossPhase >= 3
+          ? this.phaseThreeAttackIndex++
+          : this.bossPhase === 2
+            ? this.phaseTwoAttackIndex++
+            : this.specialAttackCounter - 1
+      kind = getWave15BossAttackKind(identity, this.bossPhase, cycleIndex)
     } else if (this.isStationaryBoss) {
       if (this.bossPhase >= 3) {
         // Phase 3 (<=33% HP): Unleashes Singularity Grid + Rotating Cross Lasers + Void Meteor Salvo + core attacks
@@ -1588,6 +1638,8 @@ export class Enemy {
         kind,
         x: targetCenter.x,
         y: targetCenter.y,
+        gridAnchorX: targetCenter.x,
+        gridAnchorY: targetCenter.y,
         angle: randomAngle,
         turnRate: this.specialAttackCounter % 2 === 0 ? 3.1 : -3.1,
         orbitAngle: Math.atan2(bossCenter.y - targetCenter.y, bossCenter.x - targetCenter.x),
@@ -1708,7 +1760,9 @@ export class Enemy {
         accentSecondary: wormSecondary,
         warningLabel: this.isAstralScourge
           ? '⚠ ASTRAL LASER WALLS — WEAVE GAPS!'
-          : '⚠ COSMIC LASER WALLS — WEAVE GAPS!',
+          : isSolarArchon
+            ? '⚠ SERAPH CROWN LATTICE — WEAVE GAPS!'
+            : '⚠ COSMIC LASER WALLS — WEAVE GAPS!',
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -1871,6 +1925,11 @@ export class Enemy {
         activeTimer: 0,
         activeDuration: 0.65,
         damage: Math.round(36 * Math.max(1, this.damageScale * 0.72)),
+        accentPrimary: isSolarArchon ? '#FACC15' : '#F43F5E',
+        accentSecondary: isSolarArchon ? '#34D399' : '#FACC15',
+        warningLabel: isSolarArchon
+          ? 'SERAPH ECLIPSE GRID — FIND THE SAFE CELL!'
+          : 'OMEGA SINGULARITY GRID — FIND THE SAFE CELL!',
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -1979,6 +2038,9 @@ export class Enemy {
         activeTimer: 0,
         activeDuration: 0.72,
         damage: Math.round(28 * Math.max(1, this.damageScale * 0.72)),
+        accentPrimary: isSolarArchon ? '#FACC15' : '#FF0055',
+        accentSecondary: isSolarArchon ? '#34D399' : '#FACC15',
+        warningLabel: isSolarArchon ? 'SERAPH SUNLANCE — BREAK THE LOCK!' : undefined,
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -2177,11 +2239,6 @@ export class Enemy {
           }
         }
       } else if (t.kind === 'astral_orbital_grid') {
-        if (!t.hasTriggered && targetCenter) {
-          t.x = targetCenter.x
-          t.y = targetCenter.y
-          t.gridLines = getAstralOrbitalGridLines(targetCenter, t.angle ?? 0, t.gridOffsets)
-        }
         if (t.hasTriggered && t.hasDamagedPlayer) {
           t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
           if (t.hitCooldown >= 0.45) {
@@ -2256,6 +2313,15 @@ export class Enemy {
         t.chargeTimer += deltaTime
         if (t.chargeTimer >= t.chargeDuration) {
           t.chargeTimer = t.chargeDuration
+          if (t.kind === 'astral_orbital_grid' && this.isAstralScourge && this.bossPhase >= 2) {
+            const lockedHead = this.getCenter()
+            t.ringLocked = true
+            t.ringLockedHeadX = lockedHead.x
+            t.ringLockedHeadY = lockedHead.y
+            t.ringLockedSegments = this.dogSegments.map((segment) => ({ ...segment }))
+            t.x = t.gridAnchorX ?? t.x
+            t.y = t.gridAnchorY ?? t.y
+          }
           t.hasTriggered = true
           t.activeTimer = 0
           if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
@@ -2599,7 +2665,16 @@ export class Enemy {
         this.shootCooldown = Math.min(this.shootCooldown, 0.25)
         this.specialCooldown = 0.15
         if (this.target && this.target.isAlive) {
-          this.spawnTelegraphedAttack(this.isWormBoss ? 'cosmic_laser_walls' : 'rotating_cross_lasers')
+          const transitionAttack = this.isWormBoss
+            ? 'cosmic_laser_walls'
+            : this.isStationaryBoss
+              ? getWave15BossAttackKind(
+                  this.enemyId === 'boss_a2_15' ? 'solar_archon_seraph' : 'omega_overlord',
+                  2,
+                  0
+                )
+              : 'rotating_cross_lasers'
+          this.spawnTelegraphedAttack(transitionAttack)
         }
         return false
       }
@@ -2618,7 +2693,16 @@ export class Enemy {
         this.shootCooldown = Math.min(this.shootCooldown, 0.2)
         this.specialCooldown = 0.15
         if (this.target && this.target.isAlive) {
-          this.spawnTelegraphedAttack(this.isWormBoss ? 'cosmic_laser_walls' : 'singularity_grid')
+          const transitionAttack = this.isWormBoss
+            ? 'cosmic_laser_walls'
+            : this.isStationaryBoss
+              ? getWave15BossAttackKind(
+                  this.enemyId === 'boss_a2_15' ? 'solar_archon_seraph' : 'omega_overlord',
+                  3,
+                  0
+                )
+              : 'singularity_grid'
+          this.spawnTelegraphedAttack(transitionAttack)
         }
         return false
       }
@@ -3075,6 +3159,8 @@ export class Enemy {
         const angle = t.angle ?? 0
         const len = t.length ?? 660
         const halfW = Math.max(8, t.radius)
+        const beamPrimary = t.accentPrimary ?? '#FF0055'
+        const beamSecondary = t.accentSecondary ?? '#FACC15'
 
         ctx.save()
         ctx.translate(start.x, start.y)
@@ -3084,26 +3170,25 @@ export class Enemy {
           const isPursuitLocked =
             t.kind === 'pursuit_beam' && t.chargeDuration - t.chargeTimer <= 0.3
           const pulse = 0.7 + 0.3 * Math.sin(this.animTime * 22)
-          ctx.fillStyle = isPursuitLocked
-            ? 'rgba(255, 0, 85, 0.32)'
-            : `rgba(255, 0, 85, ${0.14 + chargeProgress * 0.14})`
+          ctx.fillStyle = beamPrimary
+          ctx.globalAlpha = isPursuitLocked ? 0.32 : 0.14 + chargeProgress * 0.14
           ctx.fillRect(0, -halfW, len, halfW * 2)
 
-          ctx.fillStyle = isPursuitLocked
-            ? 'rgba(255, 255, 255, 0.35)'
-            : `rgba(250, 204, 21, ${0.22 + chargeProgress * 0.25})`
+          ctx.fillStyle = isPursuitLocked ? '#FFFFFF' : beamSecondary
+          ctx.globalAlpha = isPursuitLocked ? 0.35 : 0.22 + chargeProgress * 0.25
           const innerH = Math.max(2, halfW * 2 * chargeProgress)
           ctx.fillRect(0, -innerH / 2, len, innerH)
 
-          ctx.strokeStyle = isPursuitLocked
-            ? '#FFFFFF'
-            : `rgba(255, 0, 85, ${0.65 * pulse})`
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = isPursuitLocked ? '#FFFFFF' : beamPrimary
           ctx.lineWidth = isPursuitLocked ? 3 : 2.5
+          if (!isPursuitLocked) ctx.globalAlpha = 0.65 * pulse
           if (!isPursuitLocked) ctx.setLineDash([12, 8])
           ctx.strokeRect(0, -halfW, len, halfW * 2)
           ctx.setLineDash([])
 
-          ctx.strokeStyle = isPursuitLocked ? '#00F0FF' : '#FACC15'
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = isPursuitLocked ? '#FFFFFF' : beamSecondary
           ctx.lineWidth = isPursuitLocked ? 2.5 : 1.5
           ctx.beginPath()
           ctx.moveTo(0, 0)
@@ -3114,11 +3199,12 @@ export class Enemy {
           ctx.font = 'bold 12px monospace'
           ctx.textAlign = 'center'
           ctx.fillText(
-            t.kind === 'pursuit_beam'
+            t.warningLabel ??
+            (t.kind === 'pursuit_beam'
               ? isPursuitLocked
                 ? '⚠ BEAM LOCKED - DODGE NOW!'
                 : '⚠ TRACKING LASER - LOCKING AIM...'
-              : '⚠ MEGA LASER - DODGE!',
+              : '⚠ MEGA LASER - DODGE!'),
             Math.min(280, len * 0.45),
             -halfW - 8
           )
@@ -3130,9 +3216,9 @@ export class Enemy {
                 : 0.95
               : Math.max(0, 1 - impactProgress)
           ctx.globalAlpha = alpha
-          ctx.fillStyle = '#FF0055'
+          ctx.fillStyle = beamPrimary
           ctx.fillRect(0, -halfW * 1.15, len, halfW * 2.3)
-          ctx.fillStyle = '#FACC15'
+          ctx.fillStyle = beamSecondary
           ctx.fillRect(0, -halfW * 0.72, len, halfW * 1.44)
           ctx.fillStyle = '#FFFFFF'
           ctx.fillRect(0, -halfW * 0.36, len, halfW * 0.72)
@@ -3501,13 +3587,17 @@ export class Enemy {
         ctx.restore()
       } else if (t.kind === 'singularity_grid' && t.gridRects) {
         const pulse = 0.72 + 0.28 * Math.sin(this.animTime * 22)
+        const gridPrimary = t.accentPrimary ?? '#F43F5E'
+        const gridSecondary = t.accentSecondary ?? '#FACC15'
         ctx.save()
         for (const gr of t.gridRects) {
           const sp = camera.worldToScreen(gr.x, gr.y)
           if (!t.hasTriggered) {
-            ctx.fillStyle = `rgba(244, 63, 94, ${0.15 + chargeProgress * 0.18})`
+            ctx.globalAlpha = 0.15 + chargeProgress * 0.18
+            ctx.fillStyle = gridPrimary
             ctx.fillRect(sp.x, sp.y, gr.width, gr.height)
-            ctx.strokeStyle = `rgba(250, 204, 21, ${0.8 * pulse})`
+            ctx.globalAlpha = 0.8 * pulse
+            ctx.strokeStyle = gridSecondary
             ctx.lineWidth = 2.5
             ctx.setLineDash([10, 8])
             ctx.strokeRect(sp.x + 1, sp.y + 1, gr.width - 2, gr.height - 2)
@@ -3515,7 +3605,7 @@ export class Enemy {
           } else {
             const alpha = Math.max(0, 1 - impactProgress * 0.85)
             ctx.globalAlpha = alpha
-            ctx.fillStyle = '#FF0055'
+            ctx.fillStyle = gridPrimary
             ctx.fillRect(sp.x, sp.y, gr.width, gr.height)
             ctx.fillStyle = 'rgba(255, 255, 255, 0.55)'
             if (gr.width < gr.height) {
@@ -3533,7 +3623,7 @@ export class Enemy {
           const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
           ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'
           ctx.fillRect(centerSp.x - 185, centerSp.y - 20, 370, 38)
-          ctx.strokeStyle = '#F43F5E'
+          ctx.strokeStyle = gridPrimary
           ctx.lineWidth = 2
           ctx.strokeRect(centerSp.x - 185, centerSp.y - 20, 370, 38)
           ctx.fillStyle = '#FEF08A'
@@ -4716,14 +4806,32 @@ export function getAstralTargetedLaserLines(
 }
 
 export function getAstralScourgePhaseTwoAttackKind(randomValue = Math.random()): BossAttackKind {
-  const attackKinds: BossAttackKind[] = [
-    'astral_orbital_grid',
-    'astral_targeted_lasers',
-    'cosmic_laser_walls',
-    'cosmic_portal_lunge'
-  ]
-  const safeValue = Math.max(0, Math.min(0.999999, randomValue))
-  return attackKinds[Math.floor(safeValue * attackKinds.length)]
+  const roll = Math.max(0, Math.min(0.999999, randomValue))
+  if (roll < 0.4) return 'astral_orbital_grid'
+  if (roll < 0.6) return 'astral_targeted_lasers'
+  if (roll < 0.8) return 'cosmic_laser_walls'
+  return 'cosmic_portal_lunge'
+}
+
+export function getWave15BossAttackKind(
+  identity: Wave15BossIdentity,
+  phase: number,
+  cycleIndex: number
+): BossAttackKind {
+  const omegaCycles: Record<number, BossAttackKind[]> = {
+    1: ['closing_side_lasers', 'tracking_strikes', 'bullet_hell'],
+    2: ['rotating_cross_lasers', 'void_meteor_salvo', 'closing_side_lasers', 'bullet_hell'],
+    3: ['singularity_grid', 'rotating_cross_lasers', 'void_meteor_salvo', 'bullet_hell']
+  }
+  const seraphCycles: Record<number, BossAttackKind[]> = {
+    1: ['pursuit_beam', 'tracking_strikes', 'cosmic_laser_walls'],
+    2: ['pursuit_beam', 'cosmic_laser_walls', 'void_meteor_salvo'],
+    3: ['cosmic_laser_walls', 'pursuit_beam', 'singularity_grid', 'void_meteor_salvo']
+  }
+  const safePhase = Math.max(1, Math.min(3, Math.floor(phase)))
+  const cycle = (identity === 'solar_archon_seraph' ? seraphCycles : omegaCycles)[safePhase]
+  const safeIndex = ((Math.floor(cycleIndex) % cycle.length) + cycle.length) % cycle.length
+  return cycle[safeIndex]
 }
 
 /**

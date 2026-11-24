@@ -675,6 +675,65 @@ function pushBossAreaInfernoBurst(
   }
 }
 
+function pushSeraphSolarBurst(
+  list: DogCutsceneParticle[],
+  originX: number,
+  originY: number,
+  intensity = 1
+): void {
+  const scale = Math.max(0.25, intensity)
+  const palette = ['#FACC15', '#34D399', '#FEF9C3']
+  const sparkCount = Math.round(34 * scale)
+  for (let i = 0; i < sparkCount; i++) {
+    const angle = Math.random() * Math.PI * 2
+    const speed = (110 + Math.random() * 260) * scale
+    list.push({
+      kind: 'spark',
+      x: originX + Math.cos(angle) * (8 + Math.random() * 22),
+      y: originY + Math.sin(angle) * (6 + Math.random() * 18),
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: 2.4 + Math.random() * 3.8,
+      timer: 0,
+      duration: 0.45 + Math.random() * 0.45,
+      color: palette[i % palette.length]
+    })
+  }
+  for (let i = 0; i < Math.max(1, Math.round(4 * scale)); i++) {
+    list.push(
+      createDogLightningArc(
+        originX,
+        originY,
+        (i / 4) * Math.PI * 2 + (Math.random() - 0.5) * 0.3,
+        (130 + Math.random() * 170) * scale,
+        i % 2 === 0 ? '#FACC15' : '#34D399'
+      )
+    )
+  }
+  list.push(
+    {
+      kind: 'shockwave',
+      x: originX,
+      y: originY,
+      maxRadius: 220 * scale,
+      lineWidth: 4,
+      timer: 0,
+      duration: 0.72,
+      color: '#FACC15'
+    },
+    {
+      kind: 'shockwave',
+      x: originX,
+      y: originY,
+      maxRadius: 150 * scale,
+      lineWidth: 2.5,
+      timer: 0,
+      duration: 0.58,
+      color: '#34D399'
+    }
+  )
+}
+
 function pushAstralPhaseTwoRiftBurst(
   list: DogCutsceneParticle[],
   originX: number,
@@ -1492,8 +1551,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
         if (!dogBossActiveRef.current) {
           const finalTheme = getAreaFinalBossCutsceneTheme(areaMeta.id)
-          const finalDur = WAVE_15_CUTSCENE_DURATION_SECONDS
-          const finalLine2Delay = 1.6
+          const finalDur = finalTheme.durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
+          const finalLine2Delay = finalTheme.revealDelaySeconds ?? 1.6
           const focusPos = anchorPos || enemy.getCenter()
           enemy.isSpawning = true
           enemy.spawnTime = 0
@@ -1526,16 +1585,20 @@ const GameContainer: React.FC<GameContainerProps> = ({
             finalDur + 1.8,
             [finalTheme.primaryColor, finalTheme.secondaryColor]
           )
-          pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, {
-            flames: 32,
-            embers: 28,
-            speedScale: 0.95,
-            palette: finalTheme.palette,
-            coreColor: finalTheme.coreColor,
-            shockwaves: [
-              { maxRadius: 230, color: finalTheme.primaryColor, lineWidth: 4.5, duration: 0.65 }
-            ]
-          })
+          if (finalTheme.kind === 'w15_seraph') {
+            pushSeraphSolarBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, 0.9)
+          } else {
+            pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, {
+              flames: 32,
+              embers: 28,
+              speedScale: 0.95,
+              palette: finalTheme.palette,
+              coreColor: finalTheme.coreColor,
+              shockwaves: [
+                { maxRadius: 230, color: finalTheme.primaryColor, lineWidth: 4.5, duration: 0.65 }
+              ]
+            })
+          }
           setDogCutsceneUi({
             active: true,
             showSecondLine: false,
@@ -4417,6 +4480,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
                     ]
                   }
                 )
+              } else if (activeCutscene.kind === 'w15_seraph') {
+                pushSeraphSolarBurst(
+                  dogCutsceneParticlesRef.current,
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  1.05
+                )
               } else if (theme.presentation === 'dialogue') {
                 pushAstralPhaseTwoRiftBurst(
                   dogCutsceneParticlesRef.current,
@@ -4499,6 +4569,31 @@ const GameContainer: React.FC<GameContainerProps> = ({
                       Math.random() * Math.PI * 2,
                       90 + Math.random() * (110 + buildupRatio * 110),
                       Math.random() < 0.5 ? theme.primaryColor : theme.coreColor
+                    )
+                  )
+                }
+              } else if (activeCutscene.kind === 'w15_seraph') {
+                const angle = Math.random() * Math.PI * 2
+                const speed = 90 + Math.random() * 170
+                dogCutsceneParticlesRef.current.push({
+                  kind: 'spark',
+                  x: burstOrigin.x,
+                  y: burstOrigin.y,
+                  vx: Math.cos(angle) * speed,
+                  vy: Math.sin(angle) * speed,
+                  size: 2.5 + Math.random() * 2.5,
+                  timer: 0,
+                  duration: 0.5 + Math.random() * 0.35,
+                  color: Math.random() < 0.5 ? theme.primaryColor : theme.secondaryColor
+                })
+                if (Math.random() < 0.08) {
+                  dogCutsceneParticlesRef.current.push(
+                    createDogLightningArc(
+                      burstOrigin.x,
+                      burstOrigin.y,
+                      Math.random() * Math.PI * 2,
+                      90 + Math.random() * 100,
+                      theme.primaryColor
                     )
                   )
                 }
@@ -4591,6 +4686,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
                         }
                       ]
                     }
+                  )
+                } else if (activeCutscene.kind === 'w15_seraph') {
+                  pushSeraphSolarBurst(
+                    dogCutsceneParticlesRef.current,
+                    activeCutscene.portalX,
+                    activeCutscene.portalY,
+                    0.55
                   )
                 } else if (theme.presentation === 'dialogue') {
                   pushAstralPhaseTwoRiftBurst(
@@ -7168,6 +7270,120 @@ const GameContainer: React.FC<GameContainerProps> = ({
             ctx.ellipse(pScr.x, pScr.y, riftRx * 0.78, riftRy * 0.78, 0, 0, Math.PI * 2)
             ctx.stroke()
             ctx.setLineDash([])
+          } else if (cs.kind === 'w15_omega') {
+            const coreR = 56 + openFrac * (74 + tFrac * 30)
+            const corePulse = 0.9 + Math.sin(cs.elapsed * 14) * 0.1
+            ctx.globalAlpha = 0.22 * openFrac * corePulse
+            ctx.fillStyle = cs.theme.primaryColor
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, coreR * 1.55, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.save()
+            ctx.translate(pScr.x, pScr.y)
+            ctx.rotate(-cs.elapsed * 0.42)
+            for (let ring = 0; ring < 3; ring++) {
+              const ringR = coreR * (0.72 + ring * 0.22)
+              ctx.globalAlpha = (0.72 - ring * 0.12) * openFrac
+              ctx.strokeStyle = ring % 2 === 0 ? cs.theme.primaryColor : cs.theme.secondaryColor
+              ctx.lineWidth = ring === 1 ? 3 : 2
+              ctx.setLineDash(ring === 1 ? [14, 9] : [])
+              ctx.beginPath()
+              ctx.arc(0, 0, ringR, ring * 0.7, Math.PI * 1.55 + ring * 0.7)
+              ctx.stroke()
+            }
+            ctx.setLineDash([])
+
+            ctx.rotate(cs.elapsed * 0.95)
+            ctx.globalAlpha = 0.88 * openFrac
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.78)'
+            ctx.strokeStyle = cs.theme.coreColor
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            for (let side = 0; side < 8; side++) {
+              const angle = (side / 8) * Math.PI * 2 - Math.PI / 8
+              const px = Math.cos(angle) * coreR * 0.48
+              const py = Math.sin(angle) * coreR * 0.48
+              if (side === 0) ctx.moveTo(px, py)
+              else ctx.lineTo(px, py)
+            }
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+            ctx.restore()
+
+            const core = ctx.createRadialGradient(pScr.x, pScr.y, 2, pScr.x, pScr.y, coreR * 0.34)
+            core.addColorStop(0, '#FFFFFF')
+            core.addColorStop(0.42, cs.theme.coreColor)
+            core.addColorStop(1, cs.theme.primaryColor)
+            ctx.globalAlpha = 0.9 * openFrac
+            ctx.fillStyle = core
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, coreR * 0.34, 0, Math.PI * 2)
+            ctx.fill()
+          } else if (cs.kind === 'w15_seraph') {
+            const sunR = 52 + openFrac * (76 + tFrac * 34)
+            const pulse = 0.88 + Math.sin(cs.elapsed * 11) * 0.12
+            ctx.globalAlpha = 0.18 * openFrac * pulse
+            ctx.fillStyle = cs.theme.primaryColor
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, sunR * 1.38, 0, Math.PI * 2)
+            ctx.fill()
+
+            ctx.save()
+            ctx.translate(pScr.x, pScr.y)
+            ctx.rotate(cs.elapsed * 0.18)
+            for (let ray = 0; ray < 16; ray++) {
+              const angle = (ray / 16) * Math.PI * 2
+              const inner = sunR * (ray % 2 === 0 ? 0.86 : 0.98)
+              const outer = sunR * (1.3 + (ray % 3) * 0.08)
+              ctx.globalAlpha = 0.42 * openFrac
+              ctx.strokeStyle = ray % 2 === 0 ? cs.theme.primaryColor : cs.theme.secondaryColor
+              ctx.lineWidth = ray % 4 === 0 ? 3 : 1.8
+              ctx.beginPath()
+              ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner)
+              ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer)
+              ctx.stroke()
+            }
+            ctx.restore()
+
+            ctx.globalAlpha = 0.85 * openFrac
+            ctx.strokeStyle = cs.theme.primaryColor
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, sunR, cs.elapsed * 0.22, cs.elapsed * 0.22 + Math.PI * 1.72)
+            ctx.stroke()
+            ctx.strokeStyle = cs.theme.secondaryColor
+            ctx.lineWidth = 2
+            ctx.setLineDash([8, 7])
+            ctx.lineDashOffset = -cs.elapsed * 68
+            ctx.beginPath()
+            ctx.arc(
+              pScr.x,
+              pScr.y,
+              sunR * 0.72,
+              -cs.elapsed * 0.18,
+              -cs.elapsed * 0.18 + Math.PI * 1.55
+            )
+            ctx.stroke()
+            ctx.setLineDash([])
+
+            const coreGradient = ctx.createRadialGradient(
+              pScr.x,
+              pScr.y,
+              3,
+              pScr.x,
+              pScr.y,
+              sunR * 0.58
+            )
+            coreGradient.addColorStop(0, '#FFFFFF')
+            coreGradient.addColorStop(0.36, cs.theme.coreColor)
+            coreGradient.addColorStop(1, `${cs.theme.primaryColor}00`)
+            ctx.globalAlpha = 0.82 * openFrac
+            ctx.fillStyle = coreGradient
+            ctx.beginPath()
+            ctx.arc(pScr.x, pScr.y, sunR * 0.58, 0, Math.PI * 2)
+            ctx.fill()
           } else {
             // Area-specific blazing inferno / solar pyre pedestal beneath Wave 15 Boss
             const blazeR = 64 + openFrac * (68 + tFrac * 34)

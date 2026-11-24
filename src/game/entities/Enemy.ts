@@ -113,6 +113,7 @@ export type BossAttackKind =
   | 'cosmic_laser_walls'
   | 'cosmic_portal_lunge'
   | 'cosmic_orb_barrage'
+  | 'astral_orbital_grid'
 
 export interface CosmicLaserWallLine {
   x1: number
@@ -121,6 +122,7 @@ export interface CosmicLaserWallLine {
   y2: number
   width: number
   color?: string
+  aimMode?: 'random' | 'player'
 }
 
 export interface TrackingBlastNode {
@@ -145,6 +147,8 @@ export interface BossTelegraphAttack {
   portalY?: number
   angle?: number
   turnRate?: number
+  orbitAngle?: number
+  orbitRadius?: number
   radius: number
   length?: number
   halfDirection?: HalfArenaDirection
@@ -681,7 +685,13 @@ export class Enemy {
         this.y = this.anchorPos.y - this.height / 2 + Math.sin(this.animTime * 2.2) * 3
       }
     } else if (this.isWormBoss) {
-      this.updateDevourerMovement(deltaTime)
+      const orbitalGrid =
+        this.isAstralScourge && this.bossPhase >= 2
+          ? this.telegraphs.find((telegraph) => telegraph.kind === 'astral_orbital_grid')
+          : undefined
+      if (!orbitalGrid || !this.updateAstralGridOrbit(orbitalGrid, deltaTime)) {
+        this.updateDevourerMovement(deltaTime)
+      }
     } else {
       switch (this.movementPattern) {
         case 'chase':
@@ -773,6 +783,7 @@ export class Enemy {
             t.kind === 'void_meteor_salvo' ||
             t.kind === 'singularity_grid' ||
             t.kind === 'cosmic_laser_walls' ||
+            t.kind === 'astral_orbital_grid' ||
             t.kind === 'cosmic_portal_lunge' ||
             t.kind === 'cosmic_orb_barrage'
         )
@@ -871,6 +882,29 @@ export class Enemy {
     const moveDir = Vector2.normalize(rawDir)
     this.velocity = Vector2.multiply(moveDir, this.speed)
     this.direction = moveDir
+  }
+
+  private updateAstralGridOrbit(attack: BossTelegraphAttack, deltaTime: number): boolean {
+    if (!this.target || !this.target.isAlive) return false
+
+    const targetCenter = this.target.getCenter()
+    const currentCenter = this.getCenter()
+    const nextAngle =
+      (attack.orbitAngle ?? Math.atan2(currentCenter.y - targetCenter.y, currentCenter.x - targetCenter.x)) +
+      (attack.turnRate ?? 3) * deltaTime
+    const orbitRadius = attack.orbitRadius ?? 360
+    const nextCenter = {
+      x: targetCenter.x + Math.cos(nextAngle) * orbitRadius,
+      y: targetCenter.y + Math.sin(nextAngle) * orbitRadius
+    }
+    const safeDelta = Math.max(deltaTime, 0.001)
+    attack.orbitAngle = nextAngle
+    this.velocity = {
+      x: (nextCenter.x - currentCenter.x) / safeDelta,
+      y: (nextCenter.y - currentCenter.y) / safeDelta
+    }
+    this.direction = Vector2.normalize(this.velocity)
+    return true
   }
 
   /**
@@ -1387,10 +1421,22 @@ export class Enemy {
 
     let kind: BossAttackKind
     if (forcedKind) {
-      kind = forcedKind
+      kind =
+        this.isAstralScourge && forcedKind === 'rotating_cross_lasers'
+          ? 'astral_orbital_grid'
+          : forcedKind
     } else if (this.isWormBoss) {
-      const wormCycle: BossAttackKind[] =
-        this.isEnraged || this.bossPhase >= 2
+      const wormCycle: BossAttackKind[] = this.isAstralScourge
+        ? this.bossPhase >= 2
+          ? [
+              'astral_orbital_grid',
+              'cosmic_laser_walls',
+              'cosmic_portal_lunge',
+              'astral_orbital_grid',
+              'cosmic_orb_barrage'
+            ]
+          : ['cosmic_laser_walls', 'cosmic_portal_lunge', 'cosmic_orb_barrage']
+        : this.isEnraged || this.bossPhase >= 2
           ? [
               'cosmic_laser_walls',
               'cosmic_portal_lunge',
@@ -1447,7 +1493,35 @@ export class Enemy {
 
     let telegraph: BossTelegraphAttack
 
-    if (kind === 'cosmic_laser_walls') {
+    if (kind === 'astral_orbital_grid') {
+      const orbitRadius = Math.max(
+        300,
+        Math.min(420, Vector2.distance(bossCenter, targetCenter))
+      )
+      const randomAngle = Math.random() * Math.PI
+      const aimedAngle = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
+      telegraph = {
+        id,
+        kind,
+        x: targetCenter.x,
+        y: targetCenter.y,
+        angle: randomAngle,
+        turnRate: this.specialAttackCounter % 2 === 0 ? 3.1 : -3.1,
+        orbitAngle: Math.atan2(bossCenter.y - targetCenter.y, bossCenter.x - targetCenter.x),
+        orbitRadius,
+        radius: 5,
+        gridLines: getAstralOrbitalGridLines(targetCenter, randomAngle, aimedAngle),
+        chargeDuration: 1.45,
+        chargeTimer: 0,
+        activeDuration: 0.76,
+        activeTimer: 0,
+        damage: Math.round((26 + tierBoost * 5) * this.damageScale),
+        hasTriggered: false,
+        hasDamagedPlayer: false,
+        hitCooldown: 0,
+        warningLabel: 'ASTRAL ORBITAL GRID — TRACK THE GAPS!'
+      }
+    } else if (kind === 'cosmic_laser_walls') {
       // Worm Boss signature Laser Wall Web (orthogonal in P1, diagonal/diamond in P2+/enraged)
       const isDiag = (this.isEnraged || this.bossPhase >= 2) && this.specialAttackCounter % 2 === 0
       const halfSpan = 820
@@ -1970,7 +2044,21 @@ export class Enemy {
     for (let i = this.telegraphs.length - 1; i >= 0; i--) {
       const t = this.telegraphs[i]
 
-      if (t.kind === 'rotating_cross_lasers') {
+      if (t.kind === 'astral_orbital_grid') {
+        if (!t.hasTriggered && targetCenter) {
+          t.x = targetCenter.x
+          t.y = targetCenter.y
+          const aimedAngle = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
+          t.gridLines = getAstralOrbitalGridLines(targetCenter, t.angle ?? 0, aimedAngle)
+        }
+        if (t.hasTriggered && t.hasDamagedPlayer) {
+          t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
+          if (t.hitCooldown >= 0.45) {
+            t.hitCooldown = 0
+            t.hasDamagedPlayer = false
+          }
+        }
+      } else if (t.kind === 'rotating_cross_lasers') {
         t.x = bossCenter.x
         t.y = bossCenter.y
         if (t.hasTriggered) {
@@ -3004,6 +3092,76 @@ export class Enemy {
           ctx.textAlign = 'center'
           const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
           ctx.fillText(`⚠ ROTATING X-BEAM SWEEP — DODGE THROUGH GAPS! (${rem}s)`, start.x, start.y + 68)
+          ctx.restore()
+        }
+      } else if (t.kind === 'astral_orbital_grid' && t.gridLines) {
+        const pulse = 0.68 + 0.32 * Math.sin(this.animTime * 25)
+        ctx.save()
+        ctx.lineCap = 'round'
+        for (const line of t.gridLines) {
+          const p1 = camera.worldToScreen(line.x1, line.y1)
+          const p2 = camera.worldToScreen(line.x2, line.y2)
+          const color = line.color ?? (line.aimMode === 'player' ? '#FACC15' : '#34D399')
+          ctx.beginPath()
+          ctx.moveTo(p1.x, p1.y)
+          ctx.lineTo(p2.x, p2.y)
+          if (!t.hasTriggered) {
+            ctx.globalAlpha = 0.45 + chargeProgress * 0.35
+            ctx.strokeStyle = color
+            ctx.lineWidth = Math.max(1.5, line.width * 0.42)
+            ctx.setLineDash(line.aimMode === 'player' ? [7, 8] : [15, 13])
+            ctx.stroke()
+            ctx.setLineDash([])
+            ctx.globalAlpha = 0.7 * pulse
+            ctx.lineWidth = 1.2
+            ctx.stroke()
+          } else {
+            const fadeOut =
+              impactProgress > 0.88 ? Math.max(0.2, 1 - (impactProgress - 0.88) / 0.12) : 1
+            ctx.globalAlpha = fadeOut * 0.44
+            ctx.strokeStyle = color
+            ctx.lineWidth = line.width * 1.8
+            ctx.shadowColor = color
+            ctx.shadowBlur = 14
+            ctx.stroke()
+            ctx.globalAlpha = fadeOut
+            ctx.lineWidth = Math.max(2, line.width * 0.52)
+            ctx.shadowBlur = 4
+            ctx.stroke()
+            ctx.globalAlpha = fadeOut * 0.94
+            ctx.strokeStyle = '#FFFFFF'
+            ctx.lineWidth = 1.1
+            ctx.shadowBlur = 0
+            ctx.stroke()
+          }
+        }
+
+        const marker = camera.worldToScreen(t.x, t.y)
+        ctx.globalAlpha = t.hasTriggered ? 0.82 : 0.45 + chargeProgress * 0.45
+        ctx.strokeStyle = '#F8FAFC'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([5, 4])
+        ctx.beginPath()
+        ctx.arc(marker.x, marker.y, 22 + 4 * pulse, 0, Math.PI * 2)
+        ctx.moveTo(marker.x - 31, marker.y)
+        ctx.lineTo(marker.x - 17, marker.y)
+        ctx.moveTo(marker.x + 17, marker.y)
+        ctx.lineTo(marker.x + 31, marker.y)
+        ctx.moveTo(marker.x, marker.y - 31)
+        ctx.lineTo(marker.x, marker.y - 17)
+        ctx.moveTo(marker.x, marker.y + 17)
+        ctx.lineTo(marker.x, marker.y + 31)
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.restore()
+
+        if (!t.hasTriggered) {
+          ctx.save()
+          ctx.fillStyle = '#FEF08A'
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'center'
+          const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
+          ctx.fillText(`${t.warningLabel ?? 'ASTRAL ORBITAL GRID'} (${rem}s)`, marker.x, marker.y + 60)
           ctx.restore()
         }
       } else if (t.kind === 'cosmic_laser_walls' && t.gridLines) {
@@ -4299,6 +4457,42 @@ export function getRotatingCrossLaserSegments(
   return result
 }
 
+export function getAstralOrbitalGridLines(
+  center: { x: number; y: number },
+  randomAngle: number,
+  playerAngle: number
+): CosmicLaserWallLine[] {
+  const halfLength = 1100
+  const offsets = [-120, 0, 120]
+  const lineFamilies: Array<{ angle: number; aimMode: 'random' | 'player'; color: string }> = [
+    { angle: randomAngle, aimMode: 'random', color: '#34D399' },
+    { angle: playerAngle, aimMode: 'player', color: '#FACC15' }
+  ]
+  const lines: CosmicLaserWallLine[] = []
+
+  for (const family of lineFamilies) {
+    const dirX = Math.cos(family.angle)
+    const dirY = Math.sin(family.angle)
+    const normalX = -dirY
+    const normalY = dirX
+    for (const offset of offsets) {
+      const cx = center.x + normalX * offset
+      const cy = center.y + normalY * offset
+      lines.push({
+        x1: cx - dirX * halfLength,
+        y1: cy - dirY * halfLength,
+        x2: cx + dirX * halfLength,
+        y2: cy + dirY * halfLength,
+        width: 6,
+        color: family.color,
+        aimMode: family.aimMode
+      })
+    }
+  }
+
+  return lines
+}
+
 /**
  * Checks whether a player circle is caught inside a triggered boss telegraphed attack
  */
@@ -4378,7 +4572,10 @@ export function checkBossTelegraphHit(
     return false // Projectiles & splitting nebula stars are checked via enemy.projectiles collisions
   }
 
-  if (telegraph.kind === 'cosmic_laser_walls' && telegraph.gridLines) {
+  if (
+    (telegraph.kind === 'cosmic_laser_walls' || telegraph.kind === 'astral_orbital_grid') &&
+    telegraph.gridLines
+  ) {
     for (const line of telegraph.gridLines) {
       const hitDist = line.width * 0.5 + targetCircle.radius * 0.65
       const dx = line.x2 - line.x1

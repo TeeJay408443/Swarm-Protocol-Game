@@ -425,6 +425,21 @@ type DogCutsceneParticle =
       color: string
       swayPhase: number
     }
+  | {
+      kind: 'orbit_star'
+      x: number
+      y: number
+      centerX: number
+      centerY: number
+      radius: number
+      angle: number
+      angularSpeed: number
+      radialSpeed: number
+      size: number
+      timer: number
+      duration: number
+      color: string
+    }
 
 interface DogGroundCrack {
   segments: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }>
@@ -658,6 +673,73 @@ function pushBossAreaInfernoBurst(
       })
     }
   }
+}
+
+function pushAstralPhaseTwoRiftBurst(
+  list: DogCutsceneParticle[],
+  originX: number,
+  originY: number,
+  intensity = 1
+): void {
+  const scale = Math.max(0.25, intensity)
+  const palette = ['#34D399', '#FACC15', '#A78BFA', '#E0F2FE']
+  const starCount = Math.round(26 * scale)
+
+  for (let i = 0; i < starCount; i++) {
+    pushAstralOrbitStar(list, originX, originY, scale, palette[i % palette.length], i % 2 === 0)
+  }
+
+  for (let i = 0; i < Math.max(1, Math.round(2 * scale)); i++) {
+    list.push({
+      kind: 'shockwave',
+      x: originX,
+      y: originY,
+      maxRadius: (190 + i * 110) * scale,
+      lineWidth: Math.max(2.5, 5 - i),
+      timer: 0,
+      duration: 0.45 + i * 0.12,
+      color: i % 2 === 0 ? '#34D399' : '#FACC15'
+    })
+  }
+
+  for (let i = 0; i < Math.round(6 * scale); i++) {
+    list.push(
+      createDogLightningArc(
+        originX,
+        originY,
+        (i / 6) * Math.PI * 2 + (Math.random() - 0.5) * 0.5,
+        (100 + Math.random() * 190) * scale,
+        i % 2 === 0 ? '#34D399' : '#FACC15'
+      )
+    )
+  }
+}
+
+function pushAstralOrbitStar(
+  list: DogCutsceneParticle[],
+  originX: number,
+  originY: number,
+  scale = 1,
+  color?: string,
+  clockwise = Math.random() < 0.5
+): void {
+  const angle = Math.random() * Math.PI * 2
+  const radius = 55 + Math.random() * 300 * scale
+  list.push({
+    kind: 'orbit_star',
+    x: originX + Math.cos(angle) * radius,
+    y: originY + Math.sin(angle) * radius * 0.76,
+    centerX: originX,
+    centerY: originY,
+    radius,
+    angle,
+    angularSpeed: (1.5 + Math.random() * 2.3) * (clockwise ? 1 : -1),
+    radialSpeed: (30 + Math.random() * 70) * scale,
+    size: (4 + Math.random() * 6) * scale,
+    timer: 0,
+    duration: 1.1 + Math.random() * 1.6,
+    color: color ?? ['#34D399', '#FACC15', '#A78BFA', '#E0F2FE'][Math.floor(Math.random() * 4)]
+  })
 }
 
 interface ChronoClone {
@@ -2371,22 +2453,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         duration + 1.6,
         [theme.primaryColor, theme.secondaryColor]
       )
-      pushBossAreaInfernoBurst(
-        dogCutsceneParticlesRef.current,
-        playerCenter.x,
-        playerCenter.y,
-        {
-          flames: 58,
-          embers: 50,
-          speedScale: 1.35,
-          palette: theme.palette,
-          coreColor: theme.coreColor,
-          shockwaves: [
-            { maxRadius: 420, color: theme.primaryColor, lineWidth: 6, duration: 0.8 },
-            { maxRadius: 300, color: theme.secondaryColor, lineWidth: 4.5, duration: 0.62 }
-          ]
-        }
-      )
+      pushAstralPhaseTwoRiftBurst(dogCutsceneParticlesRef.current, playerCenter.x, playerCenter.y, 1.1)
       explosionsRef.current.push({
         x: playerCenter.x,
         y: playerCenter.y,
@@ -4350,6 +4417,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
                     ]
                   }
                 )
+              } else if (theme.presentation === 'dialogue') {
+                pushAstralPhaseTwoRiftBurst(
+                  dogCutsceneParticlesRef.current,
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  1
+                )
               } else {
                 pushBossAreaInfernoBurst(
                   dogCutsceneParticlesRef.current,
@@ -4428,6 +4502,26 @@ const GameContainer: React.FC<GameContainerProps> = ({
                     )
                   )
                 }
+              } else if (theme.presentation === 'dialogue') {
+                if (Math.random() < 0.24) {
+                  pushAstralOrbitStar(
+                    dogCutsceneParticlesRef.current,
+                    burstOrigin.x,
+                    burstOrigin.y,
+                    0.65
+                  )
+                }
+                if (Math.random() < 0.035) {
+                  dogCutsceneParticlesRef.current.push(
+                    createDogLightningArc(
+                      burstOrigin.x,
+                      burstOrigin.y,
+                      Math.random() * Math.PI * 2,
+                      80 + Math.random() * 150,
+                      Math.random() < 0.5 ? theme.primaryColor : theme.secondaryColor
+                    )
+                  )
+                }
               } else {
                 // Area-themed roaring flame tongues & convective rising embers around Wave 15 Final Boss
                 const fAng = Math.random() * Math.PI * 2
@@ -4497,6 +4591,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
                         }
                       ]
                     }
+                  )
+                } else if (theme.presentation === 'dialogue') {
+                  pushAstralPhaseTwoRiftBurst(
+                    dogCutsceneParticlesRef.current,
+                    activeCutscene.portalX,
+                    activeCutscene.portalY,
+                    0.55
                   )
                 } else {
                   pushBossAreaInfernoBurst(
@@ -4581,6 +4682,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
                       { maxRadius: 260, color: '#FFFFFF', lineWidth: 4, duration: 0.42 }
                     ]
                   }
+                )
+              } else if (theme.presentation === 'dialogue') {
+                pushAstralPhaseTwoRiftBurst(
+                  dogCutsceneParticlesRef.current,
+                  activeCutscene.portalX,
+                  activeCutscene.portalY,
+                  1.5
                 )
               } else {
                 pushBossAreaInfernoBurst(
@@ -5733,6 +5841,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'void_meteor_salvo' ||
                   telegraph.kind === 'singularity_grid' ||
                   telegraph.kind === 'cosmic_laser_walls' ||
+                  telegraph.kind === 'astral_orbital_grid' ||
                   telegraph.kind === 'cosmic_portal_lunge' ||
                   telegraph.kind === 'cosmic_orb_barrage'
 
@@ -5766,7 +5875,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'mega_laser' ||
                   telegraph.kind === 'rotating_cross_lasers' ||
                   telegraph.kind === 'singularity_grid' ||
-                  telegraph.kind === 'cosmic_laser_walls'
+                  telegraph.kind === 'cosmic_laser_walls' ||
+                  telegraph.kind === 'astral_orbital_grid'
                 ) {
                   // Sweeping/active beams stay lethal across frames and only lock out after actually landing
                   if (!telegraph.hasDamagedPlayer && checkBossTelegraphHit(telegraph, playerCircle)) {
@@ -5991,6 +6101,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
               }
               pt.x += pt.vx * deltaTime
               pt.y += pt.vy * deltaTime
+            } else if (pt.kind === 'orbit_star') {
+              pt.angle += pt.angularSpeed * deltaTime
+              pt.radius = Math.max(12, pt.radius - pt.radialSpeed * deltaTime)
+              pt.x = pt.centerX + Math.cos(pt.angle) * pt.radius
+              pt.y = pt.centerY + Math.sin(pt.angle) * pt.radius * 0.76
             } else if (pt.kind === 'flame') {
               pt.vy -= pt.riseSpeed * deltaTime
               pt.vx *= Math.pow(0.32, deltaTime)
@@ -7379,6 +7494,33 @@ const GameContainer: React.FC<GameContainerProps> = ({
             ctx.fillStyle = '#FFFFFF'
             ctx.beginPath()
             ctx.arc(sp.x, sp.y, Math.max(1, pt.size * 0.65), 0, Math.PI * 2)
+            ctx.fill()
+          } else if (pt.kind === 'orbit_star') {
+            const sp = camera.worldToScreen(pt.x, pt.y)
+            const twinkle = 0.72 + Math.sin(pt.timer * 22 + pt.angle) * 0.28
+            const radius = pt.size * (0.7 + (1 - frac) * 0.45)
+            ctx.translate(sp.x, sp.y)
+            ctx.rotate(pt.angle * 1.4)
+            ctx.globalAlpha = alpha * twinkle
+            ctx.shadowColor = pt.color
+            ctx.shadowBlur = 12
+            ctx.fillStyle = pt.color
+            ctx.beginPath()
+            ctx.moveTo(0, -radius * 1.8)
+            ctx.lineTo(radius * 0.32, -radius * 0.32)
+            ctx.lineTo(radius * 1.8, 0)
+            ctx.lineTo(radius * 0.32, radius * 0.32)
+            ctx.lineTo(0, radius * 1.8)
+            ctx.lineTo(-radius * 0.32, radius * 0.32)
+            ctx.lineTo(-radius * 1.8, 0)
+            ctx.lineTo(-radius * 0.32, -radius * 0.32)
+            ctx.closePath()
+            ctx.fill()
+            ctx.shadowBlur = 0
+            ctx.fillStyle = '#FFFFFF'
+            ctx.globalAlpha = alpha * twinkle * 0.86
+            ctx.beginPath()
+            ctx.arc(0, 0, Math.max(1.2, radius * 0.25), 0, Math.PI * 2)
             ctx.fill()
           }
           ctx.restore()

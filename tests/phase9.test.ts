@@ -123,6 +123,7 @@ import {
   checkDevourerSegmentHit,
   checkEnemyAoeHit,
   Enemy,
+  getAstralOrbitalGridLines,
   getRotatingCrossLaserSegments,
   getClosingSideLaserRects,
   getClosingSideLaserTrackRects,
@@ -2524,6 +2525,51 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const phaseTwoTheme = getAstralScourgePhaseTwoCutsceneTheme()
     assert.equal(phaseTwoTheme.presentation, 'dialogue')
     assert.equal(phaseTwoTheme.line1, "IT'S NOT OVER YET")
+  })
+
+  it('gives Astral Scourge a thin orbital grid instead of rotating cross lasers in phase two', () => {
+    const scourge = new Enemy({
+      x: 500,
+      y: 500,
+      enemyData: AREA_TWO_BOSSES[3],
+      isBoss: true,
+      isFinalBoss: true
+    })
+    const player = new Player({ x: 700, y: 680, hero: heroes[0] })
+    scourge.isSpawning = false
+    scourge.bossPhase = 2
+    scourge.specialCooldown = 100
+    scourge.update(0.01, player)
+
+    const grid = scourge.spawnTelegraphedAttack('astral_orbital_grid')
+    assert.ok(grid)
+    assert.equal(grid?.kind, 'astral_orbital_grid')
+    assert.equal(grid?.gridLines?.length, 6)
+    assert.equal(grid?.gridLines?.filter((line) => line.aimMode === 'random').length, 3)
+    assert.equal(grid?.gridLines?.filter((line) => line.aimMode === 'player').length, 3)
+    assert.ok(grid?.gridLines?.every((line) => line.width <= 6))
+    assert.equal(
+      checkBossTelegraphHit(grid!, { x: grid!.x, y: grid!.y, radius: 10 }),
+      true
+    )
+
+    const startingOrbitAngle = grid!.orbitAngle
+    scourge.update(0.1, player)
+    assert.notEqual(grid!.orbitAngle, startingOrbitAngle)
+    assert.ok(
+      Math.abs(
+        Math.hypot(scourge.getCenter().x - player.getCenter().x, scourge.getCenter().y - player.getCenter().y) -
+          grid!.orbitRadius!
+      ) < 2
+    )
+
+    assert.equal(scourge.spawnTelegraphedAttack('rotating_cross_lasers')?.kind, 'astral_orbital_grid')
+    const nextAttacks = Array.from({ length: 5 }, () => scourge.spawnTelegraphedAttack())
+    assert.ok(nextAttacks.every((attack) => attack?.kind !== 'rotating_cross_lasers'))
+
+    const lines = getAstralOrbitalGridLines({ x: 0, y: 0 }, Math.PI / 4, Math.PI / 2)
+    assert.equal(lines.length, 6)
+    assert.ok(lines.every((line) => line.width < 10))
   })
 
   it('sets base crit chance to 1% and introduces unlockable Storm Assassin hero (hero_07)', async () => {

@@ -8,7 +8,10 @@ import { Camera } from '../engine/Camera'
 import { GAME_CONFIG } from '../../config/gameConstants'
 import {
   ASTRAL_SCOURGE_PHASE_ONE_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
+  ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_RUSH_SECONDS,
   DEVOURER_CUTSCENE_DURATION_SECONDS,
   WAVE_15_CUTSCENE_DURATION_SECONDS
 } from '../../config/arenas'
@@ -265,7 +268,14 @@ export class Enemy {
   /** Calamity-style Worm Boss (Devourer of Gods / Astral Scourge) multi-segment serpent state */
   isDevourerOfGods: boolean = false
   isAstralScourge: boolean = false
+  isAstralScourgeIntermission: boolean = false
+  pendingAstralScourgePhaseOneDeath: boolean = false
   pendingAstralPhaseTwoCutscene: boolean = false
+  astralPhaseTwoActivationTimer: number = 0
+  isAstralPhaseTwoRushing: boolean = false
+  private phaseTwoRushStart: { x: number; y: number } | null = null
+  private phaseTwoRushEnd: { x: number; y: number } | null = null
+  private phaseTwoRushElapsed: number = 0
   dogSegments: Array<{ x: number; y: number; angle: number }> = []
   cutsceneDelayTimer: number = 0
   private dogDashTimer: number = 0
@@ -574,13 +584,39 @@ export class Enemy {
     
     this.animTime += deltaTime
 
+    if (this.isAstralScourgeIntermission) {
+      this.astralPhaseTwoActivationTimer = Math.max(
+        0,
+        this.astralPhaseTwoActivationTimer - deltaTime
+      )
+      if (this.astralPhaseTwoActivationTimer <= 0) {
+        this.activateAstralScourgePhaseTwo()
+      }
+      return
+    }
+
     // Handle spawning (including Devourer of Gods cosmic rift emergence cutscene)
     if (this.cutsceneDelayTimer > 0) {
       this.cutsceneDelayTimer = Math.max(0, this.cutsceneDelayTimer - deltaTime)
     }
     if (this.isSpawning) {
       this.spawnTime += deltaTime
-      if (this.isWormBoss) {
+      if (this.isAstralPhaseTwoRushing && this.phaseTwoRushStart && this.phaseTwoRushEnd) {
+        this.phaseTwoRushElapsed += deltaTime
+        const progress = Math.min(1, this.phaseTwoRushElapsed / ASTRAL_SCOURGE_PHASE_TWO_RUSH_SECONDS)
+        const easedProgress = 1 - Math.pow(1 - progress, 3)
+        const dx = this.phaseTwoRushEnd.x - this.phaseTwoRushStart.x
+        const dy = this.phaseTwoRushEnd.y - this.phaseTwoRushStart.y
+        this.x = this.phaseTwoRushStart.x + dx * easedProgress - this.width / 2
+        this.y = this.phaseTwoRushStart.y + dy * easedProgress - this.height / 2
+        this.facingAngle = Math.atan2(dy, dx)
+        this.updateDogSegments(24)
+        if (progress >= 1) {
+          this.isAstralPhaseTwoRushing = false
+          this.phaseTwoRushStart = null
+          this.phaseTwoRushEnd = null
+        }
+      } else if (this.isWormBoss) {
         const defaultDelay = this.isDevourerOfGods
           ? DEVOURER_CUTSCENE_DURATION_SECONDS
           : WAVE_15_CUTSCENE_DURATION_SECONDS
@@ -856,6 +892,57 @@ export class Enemy {
       }
       leader = { x: seg.x, y: seg.y }
     }
+  }
+
+  beginAstralScourgePhaseTwoRush(
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ): void {
+    if (!this.isAstralScourge || this.bossPhase !== 2) return
+
+    this.phaseTwoRushStart = { ...start }
+    this.phaseTwoRushEnd = { ...end }
+    this.phaseTwoRushElapsed = 0
+    this.isAstralPhaseTwoRushing = true
+    this.spawnTime = 0
+    this.spawnDelay = ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS
+    this.cutsceneDelayTimer = this.spawnDelay
+    this.x = start.x - this.width / 2
+    this.y = start.y - this.height / 2
+
+    const headCenter = this.getCenter()
+    const phaseTwoSegmentCount = Math.round(this.dogSegments.length * 1.5)
+    this.dogSegments = Array.from({ length: phaseTwoSegmentCount }, (_, index) => ({
+      x: headCenter.x,
+      y: headCenter.y - (index + 1) * 2,
+      angle: Math.PI / 2
+    }))
+  }
+
+  private activateAstralScourgePhaseTwo(): void {
+    this.isAstralScourgeIntermission = false
+    this.astralPhaseTwoActivationTimer = 0
+    this.maxHealth = ASTRAL_SCOURGE_PHASE_TWO_HP
+    this.health = this.maxHealth
+    this.bossPhase = 2
+    this.isEnraged = true
+    this.isDying = false
+    this.deathTimer = 0
+    this.isSpawning = true
+    this.spawnTime = 0
+    this.spawnDelay = ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS
+    this.cutsceneDelayTimer = this.spawnDelay
+    this.phaseTransitionTimer = 0.85
+    this.pendingAstralPhaseTwoCutscene = true
+    this.pendingPhaseAnnouncement = null
+    this.speed = this.baseSpeed * 1.26
+    this.shootCooldownMax = Math.max(0.7, this.shootCooldownMax * 0.78)
+    this.specialCooldownMax = Math.max(1.8, this.specialCooldownMax * 0.78)
+    this.shootCooldown = Math.min(this.shootCooldown, 0.25)
+    this.specialCooldown = 0.2
+    this.telegraphs = []
+    this.projectiles = []
+    this.aoeProjectiles = []
   }
 
   /**
@@ -2259,24 +2346,16 @@ export class Enemy {
 
     // Astral Scourge enters Phase 2 only after Phase 1 is fully defeated.
     if (this.isAstralScourge && this.isFinalBoss && this.bossPhase === 1 && this.health <= 0) {
-      this.maxHealth = ASTRAL_SCOURGE_PHASE_TWO_HP
-      this.health = this.maxHealth
-      this.bossPhase = 2
-      this.isEnraged = true
+      this.health = 0
       this.isDying = false
       this.deathTimer = 0
       this.isSpawning = true
       this.spawnTime = 0
-      this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
-      this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
-      this.phaseTransitionTimer = 0.85
-      this.pendingAstralPhaseTwoCutscene = true
-      this.pendingPhaseAnnouncement = null
-      this.speed = this.baseSpeed * 1.26
-      this.shootCooldownMax = Math.max(0.7, this.shootCooldownMax * 0.78)
-      this.specialCooldownMax = Math.max(1.8, this.specialCooldownMax * 0.78)
-      this.shootCooldown = Math.min(this.shootCooldown, 0.25)
-      this.specialCooldown = 0.2
+      this.spawnDelay = ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS
+      this.cutsceneDelayTimer = this.spawnDelay
+      this.astralPhaseTwoActivationTimer = ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS
+      this.isAstralScourgeIntermission = true
+      this.pendingAstralScourgePhaseOneDeath = true
       this.telegraphs = []
       this.projectiles = []
       this.aoeProjectiles = []
@@ -3191,6 +3270,8 @@ export class Enemy {
    * Draw detailed enemy sprites on canvas
    */
   draw(ctx: CanvasRenderingContext2D, camera: Camera): void {
+    if (this.isAstralScourgeIntermission) return
+
     const { x: screenX, y: screenY } = camera.worldToScreen(this.x, this.y)
     const cx = screenX + this.width / 2
     const cy = screenY + this.height / 2

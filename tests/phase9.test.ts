@@ -25,6 +25,8 @@ import {
   AREA_TWO_BOSSES,
   AREA_TWO_ENEMIES,
   ASTRAL_SCOURGE_PHASE_ONE_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
+  ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_HP,
   computeBossCutsceneShake,
   computeDevourerCutsceneCameraFrame,
@@ -2460,7 +2462,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(p3Seekers.length, 6)
   })
 
-  it('gives Astral Scourge a damaging tail and a defeat-triggered two-phase fight', () => {
+  it('gives Astral Scourge a damaging tail and a delayed two-phase arena rush', () => {
     const scourge = new Enemy({
       x: 500,
       y: 500,
@@ -2482,11 +2484,37 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
 
     scourge.damageReduction = 0
     assert.equal(scourge.takeDamage(ASTRAL_SCOURGE_PHASE_ONE_HP), false)
+    assert.equal(scourge.bossPhase, 1)
+    assert.equal(scourge.health, 0)
+    assert.equal(scourge.isAstralScourgeIntermission, true)
+    assert.equal(
+      scourge.astralPhaseTwoActivationTimer,
+      ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS
+    )
+    assert.equal(scourge.pendingAstralScourgePhaseOneDeath, true)
+    assert.equal(scourge.pendingAstralPhaseTwoCutscene, false)
+    assert.equal(scourge.maxHealth, ASTRAL_SCOURGE_PHASE_ONE_HP)
+
+    scourge.update(ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS - 0.1)
+    assert.equal(scourge.isAstralScourgeIntermission, true)
+    assert.equal(scourge.bossPhase, 1)
+    assert.equal(scourge.maxHealth, ASTRAL_SCOURGE_PHASE_ONE_HP)
+
+    scourge.update(0.11)
+    assert.equal(scourge.isAstralScourgeIntermission, false)
     assert.equal(scourge.bossPhase, 2)
     assert.equal(scourge.maxHealth, ASTRAL_SCOURGE_PHASE_TWO_HP)
     assert.equal(scourge.health, ASTRAL_SCOURGE_PHASE_TWO_HP)
     assert.equal(scourge.isAlive, true)
     assert.equal(scourge.pendingAstralPhaseTwoCutscene, true)
+
+    scourge.beginAstralScourgePhaseTwoRush({ x: 300, y: -160 }, { x: 1200, y: 1500 })
+    assert.equal(scourge.dogSegments.length, 33)
+    assert.equal(scourge.isAstralPhaseTwoRushing, true)
+    scourge.update(ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS)
+    assert.equal(scourge.isAstralPhaseTwoRushing, false)
+    assert.ok(Math.abs(scourge.getCenter().x - 1200) < 1)
+    assert.ok(Math.abs(scourge.getCenter().y - 1500) < 1)
 
     scourge.isSpawning = false
     scourge.phaseTransitionTimer = 0

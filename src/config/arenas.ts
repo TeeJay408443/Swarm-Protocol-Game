@@ -148,6 +148,9 @@ export const AREA_TWO_ENEMIES: EnemiesRow[] = [
 export const ASTRAL_SCOURGE_BOSS_ID = 'boss_a2_20'
 export const ASTRAL_SCOURGE_PHASE_ONE_HP = 1_000_000
 export const ASTRAL_SCOURGE_PHASE_TWO_HP = 2_500_000
+export const ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS = 3
+export const ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS = 2.8
+export const ASTRAL_SCOURGE_PHASE_TWO_RUSH_SECONDS = 1.8
 
 /**
  * Dedicated Area 2 Bosses spawning every 5 waves (Wave 5, Wave 10, Wave 15, Wave 20 Final Boss, and Endless 25+)

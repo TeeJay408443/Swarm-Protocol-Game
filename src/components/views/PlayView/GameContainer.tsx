@@ -44,6 +44,7 @@ import {
   ArenaId,
   ASTRAL_SCOURGE_BOSS_ID,
   ASTRAL_SCOURGE_PHASE_ONE_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
   BossCutsceneKind,
   BossCutsceneTheme,
   computeBossCutsceneShake,
@@ -2327,6 +2328,82 @@ const GameContainer: React.FC<GameContainerProps> = ({
     let rafId = 0
     let lastTime = 0
 
+    const startAstralScourgePhaseTwoCutscene = (enemy: Enemy) => {
+      enemy.pendingAstralPhaseTwoCutscene = false
+      const theme = getAstralScourgePhaseTwoCutsceneTheme()
+      const duration = ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS
+      const player = playerRef.current
+      const playerCenter = player?.getCenter() || enemy.getCenter()
+      const startX = Math.max(140, Math.min(ARENA_SIZE - 140, playerCenter.x - 440))
+      const endX = Math.max(140, Math.min(ARENA_SIZE - 140, playerCenter.x + 440))
+      const endY = Math.max(180, Math.min(ARENA_SIZE - 140, playerCenter.y + 420))
+      enemy.beginAstralScourgePhaseTwoRush(
+        { x: startX, y: -160 },
+        { x: endX, y: endY }
+      )
+
+      if (player) {
+        player.isInvulnerable = true
+        player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, duration + 0.5)
+      }
+      dogCutsceneRef.current = {
+        active: true,
+        kind: theme.kind,
+        theme,
+        elapsed: 0,
+        wallElapsed: 0,
+        duration,
+        line2Delay: 0.8,
+        portalX: playerCenter.x,
+        portalY: playerCenter.y,
+        triggeredPhase2Sound: false,
+        lastOpacityStep: 100,
+        particleAccumulator: 0,
+        pulseStep: 0
+      }
+      dogPostDropRef.current = null
+      dogCutsceneParticlesRef.current = []
+      dogGroundCracksRef.current = createDogGroundCracks(
+        playerCenter.x,
+        playerCenter.y,
+        14,
+        390,
+        duration + 1.6,
+        [theme.primaryColor, theme.secondaryColor]
+      )
+      pushBossAreaInfernoBurst(
+        dogCutsceneParticlesRef.current,
+        playerCenter.x,
+        playerCenter.y,
+        {
+          flames: 58,
+          embers: 50,
+          speedScale: 1.35,
+          palette: theme.palette,
+          coreColor: theme.coreColor,
+          shockwaves: [
+            { maxRadius: 420, color: theme.primaryColor, lineWidth: 6, duration: 0.8 },
+            { maxRadius: 300, color: theme.secondaryColor, lineWidth: 4.5, duration: 0.62 }
+          ]
+        }
+      )
+      explosionsRef.current.push({
+        x: playerCenter.x,
+        y: playerCenter.y,
+        radius: 380,
+        timer: 0,
+        duration: 0.8,
+        color: 'rgba(52, 211, 153, 0.8)'
+      })
+      setDogCutsceneUi({
+        active: true,
+        showSecondLine: false,
+        opacity: 1,
+        theme
+      })
+      playSoundRef.current('wave')
+    }
+
     const damageEnemy = (
       enemy: Enemy,
       amount: number,
@@ -2369,67 +2446,25 @@ const GameContainer: React.FC<GameContainerProps> = ({
           : displayedDamage
       const wasSpawningBeforeHit = enemy.isSpawning
       const wasKilled = enemy.takeDamage(finalDamage)
-      if (enemy.pendingAstralPhaseTwoCutscene) {
-        enemy.pendingAstralPhaseTwoCutscene = false
-        const theme = getAstralScourgePhaseTwoCutsceneTheme()
-        const duration = WAVE_15_CUTSCENE_DURATION_SECONDS
+      if (enemy.pendingAstralScourgePhaseOneDeath) {
+        enemy.pendingAstralScourgePhaseOneDeath = false
         const focus = enemy.getCenter()
         const player = playerRef.current
         if (player) {
           player.isInvulnerable = true
-          player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, duration + 0.5)
+          player.invulnerabilityTimer = Math.max(
+            player.invulnerabilityTimer,
+            enemy.astralPhaseTwoActivationTimer + 0.4
+          )
         }
-        dogCutsceneRef.current = {
-          active: true,
-          kind: theme.kind,
-          theme,
-          elapsed: 0,
-          wallElapsed: 0,
-          duration,
-          line2Delay: 0.8,
-          portalX: focus.x,
-          portalY: focus.y,
-          triggeredPhase2Sound: false,
-          lastOpacityStep: 100,
-          particleAccumulator: 0,
-          pulseStep: 0
-        }
-        dogPostDropRef.current = null
-        dogCutsceneParticlesRef.current = []
-        dogGroundCracksRef.current = createDogGroundCracks(
-          focus.x,
-          focus.y,
-          14,
-          390,
-          duration + 1.6,
-          [theme.primaryColor, theme.secondaryColor]
-        )
-        pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focus.x, focus.y, {
-          flames: 58,
-          embers: 50,
-          speedScale: 1.35,
-          palette: theme.palette,
-          coreColor: theme.coreColor,
-          shockwaves: [
-            { maxRadius: 420, color: theme.primaryColor, lineWidth: 6, duration: 0.8 },
-            { maxRadius: 300, color: theme.secondaryColor, lineWidth: 4.5, duration: 0.62 }
-          ]
-        })
         explosionsRef.current.push({
           x: focus.x,
           y: focus.y,
-          radius: 380,
+          radius: 300,
           timer: 0,
-          duration: 0.8,
-          color: 'rgba(52, 211, 153, 0.8)'
+          duration: 0.75,
+          color: 'rgba(250, 204, 21, 0.82)'
         })
-        setDogCutsceneUi({
-          active: true,
-          showSecondLine: false,
-          opacity: 1,
-          theme
-        })
-        playSoundRef.current('wave')
       }
       if (!wasSpawningBeforeHit) {
         totalDamageDealtRef.current += effectiveHitDamage
@@ -5597,6 +5632,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
 
             enemy.update(deltaTime, player)
+            if (enemy.pendingAstralPhaseTwoCutscene) {
+              startAstralScourgePhaseTwoCutscene(enemy)
+            }
             if (enemy.isBoss && enemy.pendingPhaseAnnouncement !== null) {
               const phaseNum = enemy.pendingPhaseAnnouncement
               enemy.pendingPhaseAnnouncement = null
@@ -5984,7 +6022,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 ? Math.max(0, WAVE_CONFIG.BREATHER_DURATION_SECONDS - breatherElapsedRef.current)
                 : Math.max(0, WAVE_CONFIG.WAVE_DURATION_SECONDS - waveElapsedRef.current)
             )
-            const liveBoss = enemiesRef.current.find((e) => e.isBoss && e.isAlive)
+            const liveBoss = enemiesRef.current.find(
+              (e) => e.isBoss && e.isAlive && !e.isAstralScourgeIntermission
+            )
             if (liveBoss) {
               setActiveBossHud({
                 title: liveBoss.bossTitle,

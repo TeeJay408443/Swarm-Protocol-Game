@@ -9,7 +9,7 @@
 import { Howl, Howler } from 'howler'
 
 export type SoundType = 'shoot' | 'hit' | 'coin' | 'levelup' | 'gameover' | 'wave' | 'click' | 'error'
-export type MusicTrackName = 'main' | 'gameplay' | 'boss' | 'universal_collapse'
+export type MusicTrackName = 'main' | 'gameplay' | 'boss' | 'universal_collapse' | 'astral_scourge'
 
 export interface AudioSettings {
   masterVolume: number
@@ -28,6 +28,9 @@ export const DEVOURER_YOUTUBE_URL =
   'https://www.youtube.com/watch?v=EaB1utQkmT8&list=RDEaB1utQkmT8&start_radio=1'
 export const DEVOURER_YOUTUBE_VIDEO_ID = 'EaB1utQkmT8'
 export const DEVOURER_BEAT_DROP_SECONDS = 11.6
+export const ASTRAL_SCOURGE_YOUTUBE_URL =
+  'https://www.youtube.com/watch?v=W70Q1R-inLc&list=PLsuCmTriuYXdOYZVaKyex5lIy3lT9K_PW&index=18'
+export const ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID = 'W70Q1R-inLc'
 
 export function parseYouTubeVideoId(urlOrId: string): string | null {
   const trimmed = urlOrId.trim()
@@ -85,8 +88,8 @@ export function buildYouTubeEmbedUrl(
 export interface MusicTrackMetadata {
   id: MusicTrackName
   title: string
-  bpm: number
-  stepCount: number
+  bpm?: number
+  stepCount?: number
   youtubeVideoId?: string
   youtubeUrl?: string
   beatDropSeconds?: number
@@ -110,6 +113,12 @@ export const MUSIC_TRACK_METADATA: Record<MusicTrackName, MusicTrackMetadata> = 
     title: 'Overlord Engagement',
     bpm: 138,
     stepCount: 64
+  },
+  astral_scourge: {
+    id: 'astral_scourge',
+    title: 'Astral Scourge',
+    youtubeVideoId: ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID,
+    youtubeUrl: ASTRAL_SCOURGE_YOUTUBE_URL
   },
   universal_collapse: {
     id: 'universal_collapse',
@@ -319,7 +328,7 @@ export class AudioService {
     this.isMusicPaused = false
 
     if (MUSIC_TRACK_METADATA[name]?.youtubeVideoId) {
-      // Devourer of Gods plays strictly via hidden YouTube stream (no procedural music overlap)
+      // YouTube-backed boss themes play strictly via the hidden player.
       this.externalYouTubeActive = true
       this.syncMusicGainNode()
       return
@@ -345,7 +354,8 @@ export class AudioService {
 
     this.syncMusicGainNode()
     const meta = MUSIC_TRACK_METADATA[name]
-    const stepDuration = 60 / meta.bpm / 4 // 16th-note grid
+    const stepDuration = 60 / (meta.bpm ?? 120) / 4 // 16th-note grid
+    const stepCount = meta.stepCount ?? 64
     this.currentStep = 0
     this.nextStepTime = ctx.currentTime + 0.04
 
@@ -358,7 +368,7 @@ export class AudioService {
       while (this.nextStepTime < this.audioCtx.currentTime + scheduleAheadTime) {
         this.scheduleMusicStep(this.currentMusicName, this.currentStep, this.nextStepTime, stepDuration)
         this.nextStepTime += stepDuration
-        this.currentStep = (this.currentStep + 1) % meta.stepCount
+        this.currentStep = (this.currentStep + 1) % stepCount
       }
     }, 35)
   }
@@ -672,7 +682,7 @@ export class AudioService {
   }
 
   getMusicTypes(): MusicTrackName[] {
-    return ['main', 'gameplay', 'boss', 'universal_collapse']
+    return ['main', 'gameplay', 'boss', 'universal_collapse', 'astral_scourge']
   }
 
   destroy(): void {

@@ -11,7 +11,9 @@ import {
   ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS,
   ASTRAL_SCOURGE_PHASE_TWO_RUSH_SECONDS,
+  ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT,
   DEVOURER_CUTSCENE_DURATION_SECONDS,
   WAVE_15_CUTSCENE_DURATION_SECONDS
 } from '../../config/arenas'
@@ -945,8 +947,7 @@ export class Enemy {
     this.y = start.y - this.height / 2
 
     const headCenter = this.getCenter()
-    const phaseTwoSegmentCount = Math.round(this.dogSegments.length * 1.5)
-    this.dogSegments = Array.from({ length: phaseTwoSegmentCount }, (_, index) => ({
+    this.dogSegments = Array.from({ length: ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT }, (_, index) => ({
       x: headCenter.x,
       y: headCenter.y - (index + 1) * 2,
       angle: Math.PI / 2
@@ -1494,10 +1495,6 @@ export class Enemy {
     let telegraph: BossTelegraphAttack
 
     if (kind === 'astral_orbital_grid') {
-      const orbitRadius = Math.max(
-        300,
-        Math.min(420, Vector2.distance(bossCenter, targetCenter))
-      )
       const randomAngle = Math.random() * Math.PI
       const aimedAngle = Math.atan2(targetCenter.y - bossCenter.y, targetCenter.x - bossCenter.x)
       telegraph = {
@@ -1508,10 +1505,10 @@ export class Enemy {
         angle: randomAngle,
         turnRate: this.specialAttackCounter % 2 === 0 ? 3.1 : -3.1,
         orbitAngle: Math.atan2(bossCenter.y - targetCenter.y, bossCenter.x - targetCenter.x),
-        orbitRadius,
+        orbitRadius: ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS,
         radius: 5,
         gridLines: getAstralOrbitalGridLines(targetCenter, randomAngle, aimedAngle),
-        chargeDuration: 1.45,
+        chargeDuration: 2.15,
         chargeTimer: 0,
         activeDuration: 0.76,
         activeTimer: 0,

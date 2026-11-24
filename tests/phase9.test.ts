@@ -28,6 +28,8 @@ import {
   ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS,
+  ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT,
   computeBossCutsceneShake,
   computeDevourerCutsceneCameraFrame,
   computeDevourerCutsceneShake,
@@ -142,6 +144,8 @@ import {
 import { getLocalPlayerTelemetry, submitScore } from '../src/services/scores'
 import { computePostGameMetrics, formatSurvivalClock } from '../src/config/postGameSummary'
 import AudioService, {
+  ASTRAL_SCOURGE_YOUTUBE_URL,
+  ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID,
   buildYouTubeEmbedUrl,
   DEVOURER_BEAT_DROP_SECONDS,
   DEVOURER_YOUTUBE_URL,
@@ -2510,7 +2514,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(scourge.pendingAstralPhaseTwoCutscene, true)
 
     scourge.beginAstralScourgePhaseTwoRush({ x: 300, y: -160 }, { x: 1200, y: 1500 })
-    assert.equal(scourge.dogSegments.length, 33)
+    assert.equal(scourge.dogSegments.length, ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT)
+    assert.ok(
+      scourge.dogSegments.length * 24 >= 2 * Math.PI * ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS
+    )
     assert.equal(scourge.isAstralPhaseTwoRushing, true)
     scourge.update(ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS)
     assert.equal(scourge.isAstralPhaseTwoRushing, false)
@@ -2548,6 +2555,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(grid?.gridLines?.filter((line) => line.aimMode === 'random').length, 3)
     assert.equal(grid?.gridLines?.filter((line) => line.aimMode === 'player').length, 3)
     assert.ok(grid?.gridLines?.every((line) => line.width <= 6))
+    assert.equal(grid?.orbitRadius, ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS)
     assert.equal(
       checkBossTelegraphHit(grid!, { x: grid!.x, y: grid!.y, radius: 10 }),
       true
@@ -3211,6 +3219,15 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(audio.getCurrentMusicTrack(), null)
     assert.equal(audio.isMusicPlaying(), false)
     assert.equal(audio.isExternalYouTubeActive(), false)
+    assert.ok(audio.getMusicTypes().includes('astral_scourge'))
+    assert.equal(MUSIC_TRACK_METADATA.astral_scourge.title, 'Astral Scourge')
+    assert.equal(MUSIC_TRACK_METADATA.astral_scourge.youtubeVideoId, ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID)
+    assert.equal(MUSIC_TRACK_METADATA.astral_scourge.youtubeUrl, ASTRAL_SCOURGE_YOUTUBE_URL)
+    assert.equal(parseYouTubeVideoId(ASTRAL_SCOURGE_YOUTUBE_URL), ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID)
+    audio.playMusic('astral_scourge')
+    assert.equal(audio.getCurrentMusicTrack(), 'astral_scourge')
+    assert.equal(audio.isExternalYouTubeActive(), true)
+    audio.stopMusic()
     audio.destroy()
   })
 

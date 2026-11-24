@@ -1,7 +1,6 @@
 /**
  * Hidden YouTube Boss Music Player
- * Silently streams the official YouTube track ("Universal Collapse" — EaB1utQkmT8)
- * off-screen with zero visual popup whenever Devourer of Gods spawns, while reporting
+ * Streams YouTube-backed boss themes off-screen with no visible video, while reporting
  * live playback timestamps to AudioContext so the spawn cutscene ends right on the beat drop.
  */
 
@@ -152,7 +151,7 @@ export const YouTubeBossMusicPlayer: React.FC = () => {
   const isMutedRef = useRef(settings.isMuted)
   isMutedRef.current = settings.isMuted
 
-  // Initialize hidden YouTube player whenever Devourer of Gods spawns & keep playback/timestamps synced
+  // Initialize the hidden player for the active YouTube-backed boss theme.
   useEffect(() => {
     if (!videoId) {
       setExternalYouTubeActive(false)
@@ -311,8 +310,8 @@ export const YouTubeBossMusicPlayer: React.FC = () => {
     >
       <iframe
         ref={iframeRef}
-        id="dog-youtube-music-iframe"
-        title="Devourer of Gods Boss Music"
+        id="boss-youtube-music-iframe"
+        title={`${trackMeta.title} Boss Music`}
         src={embedUrl}
         width={2}
         height={2}

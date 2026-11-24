@@ -1621,7 +1621,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
       enemiesRef.current.push(enemy)
       if (forceBoss && !dogBossActiveRef.current) {
-        playMusicRef.current('boss')
+        playMusicRef.current(enemy.isAstralScourge ? 'astral_scourge' : 'boss')
       }
     },
     []

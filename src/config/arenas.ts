@@ -151,6 +151,10 @@ export const ASTRAL_SCOURGE_PHASE_TWO_HP = 2_500_000
 export const ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS = 3
 export const ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS = 2.8
 export const ASTRAL_SCOURGE_PHASE_TWO_RUSH_SECONDS = 1.8
+export const ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS = 320
+export const ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT = Math.ceil(
+  (2 * Math.PI * ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS) / 24
+)
 
 /**
  * Dedicated Area 2 Bosses spawning every 5 waves (Wave 5, Wave 10, Wave 15, Wave 20 Final Boss, and Endless 25+)

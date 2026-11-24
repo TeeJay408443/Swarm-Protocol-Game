@@ -2655,12 +2655,18 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(grid!.gridPulseCount === 3 || grid!.gridPulseCount === 4)
     assert.equal(grid!.gridPulseIndex, 0)
     assert.equal(grid!.gridPulseFiring, false)
-    assert.equal(grid!.gridPulseWarningDuration, 0.48)
+    assert.equal(grid!.gridPulseWarningDuration, 0.24)
+    assert.equal(grid!.gridPulseFirstWarningDuration, 0.24)
+    assert.equal(grid!.gridPulseFollowupWarningDuration, 0.64)
     assert.equal(grid!.gridPulseFireDuration, 0.34)
     assert.equal(grid!.gridPulseGapDuration, 0.22)
     const expectedLaserDuration =
-      grid!.gridPulseCount! * (grid!.gridPulseWarningDuration! + grid!.gridPulseFireDuration!) +
-      (grid!.gridPulseCount! - 1) * grid!.gridPulseGapDuration!
+      grid!.gridPulseFirstWarningDuration! +
+      grid!.gridPulseFireDuration! +
+      (grid!.gridPulseCount! - 1) *
+        (grid!.gridPulseFollowupWarningDuration! +
+          grid!.gridPulseFireDuration! +
+          grid!.gridPulseGapDuration!)
     assert.ok(Math.abs(grid!.laserDuration! - expectedLaserDuration) < 0.001)
     assert.ok(Math.abs(grid!.activeDuration - (expectedLaserDuration + 1.35)) < 0.001)
     const lockedSegments = grid!.ringLockedSegments!.map((segment) => ({ ...segment }))
@@ -2695,6 +2701,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     while (grid!.gridPulseIndex === 0) scourge.update(0.1, player)
     assert.equal(grid!.gridPulseIndex, 1)
+    assert.equal(grid!.gridPulseWarningDuration, 0.64)
     assert.equal(grid!.gridPulseFiring, false)
     assert.notDeepEqual(grid!.gridLines, firstPulseLines, 'Each volley should roll a fresh grid orientation')
     assert.deepEqual(scourge.dogSegments, lockedSegments)

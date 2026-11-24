@@ -180,6 +180,8 @@ export interface BossTelegraphAttack {
   gridPulseIndex?: number
   gridPulseTimer?: number
   gridPulseWarningDuration?: number
+  gridPulseFirstWarningDuration?: number
+  gridPulseFollowupWarningDuration?: number
   gridPulseFireDuration?: number
   gridPulseGapDuration?: number
   gridPulseFiring?: boolean
@@ -2421,14 +2423,18 @@ export class Enemy {
             t.gridPulseCount = 3 + Math.floor(Math.random() * 2)
             t.gridPulseIndex = 0
             t.gridPulseTimer = 0
-            t.gridPulseWarningDuration = 0.48
+            t.gridPulseFirstWarningDuration = 0.24
+            t.gridPulseFollowupWarningDuration = 0.64
+            t.gridPulseWarningDuration = t.gridPulseFirstWarningDuration
             t.gridPulseFireDuration = 0.34
             t.gridPulseGapDuration = 0.22
             t.gridPulseFiring = false
             t.laserDuration =
-              t.gridPulseCount *
-                ((t.gridPulseWarningDuration ?? 0) + (t.gridPulseFireDuration ?? 0)) +
-              (t.gridPulseCount - 1) * (t.gridPulseGapDuration ?? 0)
+              (t.gridPulseFirstWarningDuration ?? 0) + (t.gridPulseFireDuration ?? 0) +
+              (t.gridPulseCount - 1) *
+                ((t.gridPulseFollowupWarningDuration ?? 0) +
+                  (t.gridPulseFireDuration ?? 0) +
+                  (t.gridPulseGapDuration ?? 0))
             t.activeDuration = t.laserDuration + (t.escapeDuration ?? 1.35)
             this.randomizeAstralGridPulse(t)
           }
@@ -2488,20 +2494,29 @@ export class Enemy {
 
         if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
-          const warningDuration = t.gridPulseWarningDuration ?? 0.48
+          const firstWarningDuration = t.gridPulseFirstWarningDuration ?? 0.24
+          const followupWarningDuration = t.gridPulseFollowupWarningDuration ?? 0.64
           const fireDuration = t.gridPulseFireDuration ?? 0.34
           const gapDuration = t.gridPulseGapDuration ?? 0.22
-          const pulseCycleDuration = warningDuration + fireDuration + gapDuration
-          const nextPulseIndex = Math.min(
-            pulseCount - 1,
-            Math.floor(t.activeTimer / pulseCycleDuration)
-          )
-          if (nextPulseIndex > (t.gridPulseIndex ?? 0)) {
-            t.gridPulseIndex = nextPulseIndex
+          let nextPulseIndex = 0
+          let pulseTimer = t.activeTimer
+          while (nextPulseIndex < pulseCount - 1) {
+            const currentWarning =
+              nextPulseIndex === 0 ? firstWarningDuration : followupWarningDuration
+            const currentCycleDuration = currentWarning + fireDuration + gapDuration
+            if (pulseTimer < currentCycleDuration) break
+            pulseTimer -= currentCycleDuration
+            nextPulseIndex++
+          }
+          const previousPulseIndex = t.gridPulseIndex ?? 0
+          for (let pulse = previousPulseIndex + 1; pulse <= nextPulseIndex; pulse++) {
             this.randomizeAstralGridPulse(t)
           }
-          t.gridPulseTimer =
-            t.activeTimer - (t.gridPulseIndex ?? 0) * pulseCycleDuration
+          t.gridPulseIndex = nextPulseIndex
+          t.gridPulseTimer = pulseTimer
+          t.gridPulseWarningDuration =
+            nextPulseIndex === 0 ? firstWarningDuration : followupWarningDuration
+          const warningDuration = t.gridPulseWarningDuration
           t.gridPulseFiring =
             (t.gridPulseTimer ?? 0) >= warningDuration &&
             (t.gridPulseTimer ?? 0) < warningDuration + fireDuration
@@ -3451,10 +3466,10 @@ export class Enemy {
           t.hasTriggered &&
           !t.gridPulseFiring &&
           (t.gridPulseIndex ?? 0) < (t.gridPulseCount ?? 0) &&
-          (t.gridPulseTimer ?? 0) < (t.gridPulseWarningDuration ?? 0.48)
+          (t.gridPulseTimer ?? 0) < (t.gridPulseWarningDuration ?? 0.24)
         const pulseFiring = t.hasTriggered && Boolean(t.gridPulseFiring)
         const pulseImpactProgress =
-          ((t.gridPulseTimer ?? 0) - (t.gridPulseWarningDuration ?? 0.48)) /
+          ((t.gridPulseTimer ?? 0) - (t.gridPulseWarningDuration ?? 0.24)) /
           Math.max(0.01, t.gridPulseFireDuration ?? 0.34)
         ctx.save()
         ctx.lineCap = 'round'

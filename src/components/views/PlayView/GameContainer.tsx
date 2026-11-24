@@ -12,6 +12,7 @@ import { isVisiblePlayerWeaponId, Player } from '../../../game/entities/Player'
 import {
   BossArenaBounds,
   checkBossTelegraphHit,
+  checkAstralScourgeTailHit,
   checkDevourerSegmentHit,
   checkEnemyAoeHit,
   Enemy,
@@ -42,6 +43,7 @@ import {
   AREA_TWO_ENEMIES,
   ArenaId,
   ASTRAL_SCOURGE_BOSS_ID,
+  ASTRAL_SCOURGE_PHASE_ONE_HP,
   BossCutsceneKind,
   BossCutsceneTheme,
   computeBossCutsceneShake,
@@ -57,6 +59,7 @@ import {
   getAreaMiniBossCap,
   getAreaOneBossBuff,
   getAreaTwoBossBuff,
+  getAstralScourgePhaseTwoCutsceneTheme,
   getDevSpawnableEnemyById,
   SECRET_DEVOURER_OF_GODS_ID,
   SECRET_DEVOURER_OF_GODS_TEMPLATE,
@@ -1366,11 +1369,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const diffMeta = difficultyRef.current
       if (isFinalAreaBoss) {
         const finalCombat = getAreaFinalBossCombatProfile(areaMeta.id)
-        const finalHp = Math.round(
-          getAreaFinalBossHp(areaMeta.id) *
-            finalCombat.hpMultiplier *
-            diffMeta.enemyHpMultiplier
-        )
+        const finalHp = isWormBoss
+          ? ASTRAL_SCOURGE_PHASE_ONE_HP
+          : Math.round(
+              getAreaFinalBossHp(areaMeta.id) *
+                finalCombat.hpMultiplier *
+                diffMeta.enemyHpMultiplier
+            )
         enemy.maxHealth = finalHp
         enemy.health = finalHp
         enemy.damage = Math.round(
@@ -2364,6 +2369,68 @@ const GameContainer: React.FC<GameContainerProps> = ({
           : displayedDamage
       const wasSpawningBeforeHit = enemy.isSpawning
       const wasKilled = enemy.takeDamage(finalDamage)
+      if (enemy.pendingAstralPhaseTwoCutscene) {
+        enemy.pendingAstralPhaseTwoCutscene = false
+        const theme = getAstralScourgePhaseTwoCutsceneTheme()
+        const duration = WAVE_15_CUTSCENE_DURATION_SECONDS
+        const focus = enemy.getCenter()
+        const player = playerRef.current
+        if (player) {
+          player.isInvulnerable = true
+          player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, duration + 0.5)
+        }
+        dogCutsceneRef.current = {
+          active: true,
+          kind: theme.kind,
+          theme,
+          elapsed: 0,
+          wallElapsed: 0,
+          duration,
+          line2Delay: 0.8,
+          portalX: focus.x,
+          portalY: focus.y,
+          triggeredPhase2Sound: false,
+          lastOpacityStep: 100,
+          particleAccumulator: 0,
+          pulseStep: 0
+        }
+        dogPostDropRef.current = null
+        dogCutsceneParticlesRef.current = []
+        dogGroundCracksRef.current = createDogGroundCracks(
+          focus.x,
+          focus.y,
+          14,
+          390,
+          duration + 1.6,
+          [theme.primaryColor, theme.secondaryColor]
+        )
+        pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focus.x, focus.y, {
+          flames: 58,
+          embers: 50,
+          speedScale: 1.35,
+          palette: theme.palette,
+          coreColor: theme.coreColor,
+          shockwaves: [
+            { maxRadius: 420, color: theme.primaryColor, lineWidth: 6, duration: 0.8 },
+            { maxRadius: 300, color: theme.secondaryColor, lineWidth: 4.5, duration: 0.62 }
+          ]
+        })
+        explosionsRef.current.push({
+          x: focus.x,
+          y: focus.y,
+          radius: 380,
+          timer: 0,
+          duration: 0.8,
+          color: 'rgba(52, 211, 153, 0.8)'
+        })
+        setDogCutsceneUi({
+          active: true,
+          showSecondLine: false,
+          opacity: 1,
+          theme
+        })
+        playSoundRef.current('wave')
+      }
       if (!wasSpawningBeforeHit) {
         totalDamageDealtRef.current += effectiveHitDamage
         totalHitsRef.current += 1
@@ -5586,6 +5653,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const enemyCircle = { x: ec.x, y: ec.y, radius: enemy.width / 2 }
             if (!enemy.isSpawning && Collision.circleCircle(playerCircle, enemyCircle)) {
               damagePlayer(enemy.damage, ec)
+            } else if (!enemy.isSpawning && checkAstralScourgeTailHit(enemy, playerCircle)) {
+              const tail = enemy.dogSegments[enemy.dogSegments.length - 1]
+              damagePlayer(enemy.damage, tail)
             } else if (!enemy.isSpawning && checkDevourerSegmentHit(enemy, playerCircle)) {
               damagePlayer(Math.max(12, Math.round(enemy.damage * 0.65)), ec)
             }
@@ -5921,7 +5991,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 health: liveBoss.health,
                 maxHealth: liveBoss.maxHealth,
                 phase: liveBoss.bossPhase,
-                totalPhases: liveBoss.isFinalBoss ? 3 : liveBoss.enableEnrage ? 2 : 1,
+                totalPhases: liveBoss.isAstralScourge
+                  ? 2
+                  : liveBoss.isFinalBoss
+                    ? 3
+                    : liveBoss.enableEnrage
+                      ? 2
+                      : 1,
                 damageReduction: liveBoss.damageReduction,
                 isEnraged: liveBoss.isEnraged,
                 isFinalBoss: liveBoss.isFinalBoss

@@ -146,6 +146,8 @@ export const AREA_TWO_ENEMIES: EnemiesRow[] = [
 ]
 
 export const ASTRAL_SCOURGE_BOSS_ID = 'boss_a2_20'
+export const ASTRAL_SCOURGE_PHASE_ONE_HP = 1_000_000
+export const ASTRAL_SCOURGE_PHASE_TWO_HP = 2_500_000
 
 /**
  * Dedicated Area 2 Bosses spawning every 5 waves (Wave 5, Wave 10, Wave 15, Wave 20 Final Boss, and Endless 25+)
@@ -795,6 +797,21 @@ export function getAreaFinalBossCutsceneTheme(areaId: ArenaId): BossCutsceneThem
     }
   }
   return getWave15CutsceneTheme('carbon_sector')
+}
+
+export function getAstralScourgePhaseTwoCutsceneTheme(): BossCutsceneTheme {
+  const theme = getAreaFinalBossCutsceneTheme('astral_citadel')
+  return {
+    ...theme,
+    presentation: 'dialogue',
+    speaker: 'ASTRAL SCOURGE',
+    line1: "IT'S NOT OVER YET",
+    line2: '',
+    borderClass: 'border-emerald-300/90 shadow-[0_0_42px_rgba(52,211,153,0.65)]',
+    speakerClass: 'text-amber-300',
+    line1Class: 'text-emerald-200 drop-shadow-[0_0_18px_rgba(52,211,153,0.9)]',
+    line2Class: 'text-amber-100 drop-shadow-[0_0_12px_rgba(250,204,21,0.75)]'
+  }
 }
 
 export interface CutsceneShakeFrame {

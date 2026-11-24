@@ -24,6 +24,8 @@ import {
 import {
   AREA_TWO_BOSSES,
   AREA_TWO_ENEMIES,
+  ASTRAL_SCOURGE_PHASE_ONE_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_HP,
   computeBossCutsceneShake,
   computeDevourerCutsceneCameraFrame,
   computeDevourerCutsceneShake,
@@ -37,6 +39,7 @@ import {
   getAreaMiniBossCap,
   getAreaOneBossBuff,
   getAreaTwoBossBuff,
+  getAstralScourgePhaseTwoCutsceneTheme,
   getDevSpawnableEnemyById,
   getWave15BossCombatProfile,
   getWave15CutsceneTheme,
@@ -114,6 +117,7 @@ import {
   BossArenaBounds,
   ClosingSideLaserMode,
   checkBossTelegraphHit,
+  checkAstralScourgeTailHit,
   checkDevourerSegmentHit,
   checkEnemyAoeHit,
   Enemy,
@@ -2454,6 +2458,44 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     w15Boss.update(0.05, player)
     const p3Seekers = w15Boss.projectiles.filter((p) => (p.homingTurnRate ?? 0) > 0)
     assert.equal(p3Seekers.length, 6)
+  })
+
+  it('gives Astral Scourge a damaging tail and a defeat-triggered two-phase fight', () => {
+    const scourge = new Enemy({
+      x: 500,
+      y: 500,
+      enemyData: AREA_TWO_BOSSES[3],
+      isBoss: true,
+      isFinalBoss: true
+    })
+    scourge.isSpawning = false
+
+    assert.equal(scourge.isAstralScourge, true)
+    assert.equal(scourge.maxHealth, ASTRAL_SCOURGE_PHASE_ONE_HP)
+
+    const tail = scourge.dogSegments[scourge.dogSegments.length - 1]
+    assert.equal(
+      checkAstralScourgeTailHit(scourge, { x: tail.x, y: tail.y, radius: 12 }),
+      true
+    )
+    assert.equal(checkAstralScourgeTailHit(scourge, { x: 0, y: 0, radius: 12 }), false)
+
+    scourge.damageReduction = 0
+    assert.equal(scourge.takeDamage(ASTRAL_SCOURGE_PHASE_ONE_HP), false)
+    assert.equal(scourge.bossPhase, 2)
+    assert.equal(scourge.maxHealth, ASTRAL_SCOURGE_PHASE_TWO_HP)
+    assert.equal(scourge.health, ASTRAL_SCOURGE_PHASE_TWO_HP)
+    assert.equal(scourge.isAlive, true)
+    assert.equal(scourge.pendingAstralPhaseTwoCutscene, true)
+
+    scourge.isSpawning = false
+    scourge.phaseTransitionTimer = 0
+    assert.equal(scourge.takeDamage(ASTRAL_SCOURGE_PHASE_TWO_HP), true)
+    assert.equal(scourge.isAlive, false)
+
+    const phaseTwoTheme = getAstralScourgePhaseTwoCutsceneTheme()
+    assert.equal(phaseTwoTheme.presentation, 'dialogue')
+    assert.equal(phaseTwoTheme.line1, "IT'S NOT OVER YET")
   })
 
   it('sets base crit chance to 1% and introduces unlockable Storm Assassin hero (hero_07)', async () => {

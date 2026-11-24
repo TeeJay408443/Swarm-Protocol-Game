@@ -7,6 +7,8 @@ import { Vector2 } from '../utils/vector'
 import { Camera } from '../engine/Camera'
 import { GAME_CONFIG } from '../../config/gameConstants'
 import {
+  ASTRAL_SCOURGE_PHASE_ONE_HP,
+  ASTRAL_SCOURGE_PHASE_TWO_HP,
   DEVOURER_CUTSCENE_DURATION_SECONDS,
   WAVE_15_CUTSCENE_DURATION_SECONDS
 } from '../../config/arenas'
@@ -263,6 +265,7 @@ export class Enemy {
   /** Calamity-style Worm Boss (Devourer of Gods / Astral Scourge) multi-segment serpent state */
   isDevourerOfGods: boolean = false
   isAstralScourge: boolean = false
+  pendingAstralPhaseTwoCutscene: boolean = false
   dogSegments: Array<{ x: number; y: number; angle: number }> = []
   cutsceneDelayTimer: number = 0
   private dogDashTimer: number = 0
@@ -550,6 +553,11 @@ export class Enemy {
     } else if (this.isFinalBoss && !this.isDevourerOfGods) {
       this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
       this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
+    }
+
+    if (this.isAstralScourge && this.isFinalBoss) {
+      this.maxHealth = ASTRAL_SCOURGE_PHASE_ONE_HP
+      this.health = this.maxHealth
     }
   }
 
@@ -2249,8 +2257,34 @@ export class Enemy {
     this.color = '#FFFFFF'
     this.hitFlashTimer = 0.08
 
+    // Astral Scourge enters Phase 2 only after Phase 1 is fully defeated.
+    if (this.isAstralScourge && this.isFinalBoss && this.bossPhase === 1 && this.health <= 0) {
+      this.maxHealth = ASTRAL_SCOURGE_PHASE_TWO_HP
+      this.health = this.maxHealth
+      this.bossPhase = 2
+      this.isEnraged = true
+      this.isDying = false
+      this.deathTimer = 0
+      this.isSpawning = true
+      this.spawnTime = 0
+      this.spawnDelay = WAVE_15_CUTSCENE_DURATION_SECONDS
+      this.cutsceneDelayTimer = WAVE_15_CUTSCENE_DURATION_SECONDS
+      this.phaseTransitionTimer = 0.85
+      this.pendingAstralPhaseTwoCutscene = true
+      this.pendingPhaseAnnouncement = null
+      this.speed = this.baseSpeed * 1.26
+      this.shootCooldownMax = Math.max(0.7, this.shootCooldownMax * 0.78)
+      this.specialCooldownMax = Math.max(1.8, this.specialCooldownMax * 0.78)
+      this.shootCooldown = Math.min(this.shootCooldown, 0.25)
+      this.specialCooldown = 0.2
+      this.telegraphs = []
+      this.projectiles = []
+      this.aoeProjectiles = []
+      return false
+    }
+
     // Area Final Boss 3-Phase Progression (Phase 2 @ 66% HP, Phase 3 @ 33% HP)
-    if (this.isFinalBoss) {
+    if (this.isFinalBoss && !this.isAstralScourge) {
       const phase2Threshold = Math.floor(this.maxHealth * 0.66)
       const phase3Threshold = Math.floor(this.maxHealth * 0.33)
 
@@ -4475,6 +4509,28 @@ export function checkDevourerSegmentHit(
     }
   }
   return false
+}
+
+export function checkAstralScourgeTailHit(
+  enemy: Enemy,
+  targetCircle: { x: number; y: number; radius: number }
+): boolean {
+  if (
+    !enemy.isAlive ||
+    enemy.isSpawning ||
+    !enemy.isAstralScourge ||
+    enemy.dogSegments.length === 0
+  ) {
+    return false
+  }
+  const tailIndex = enemy.dogSegments.length - 1
+  const tail = enemy.dogSegments[tailIndex]
+  const taper = 1 - (tailIndex / enemy.dogSegments.length) * 0.56
+  const tailRadius = Math.max(10, 27 * taper) * 1.25
+  const dx = targetCircle.x - tail.x
+  const dy = targetCircle.y - tail.y
+  const minDist = tailRadius + targetCircle.radius * 0.72
+  return dx * dx + dy * dy <= minDist * minDist
 }
 
 export default Enemy

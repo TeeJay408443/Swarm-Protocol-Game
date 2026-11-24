@@ -427,20 +427,20 @@ export class Summon {
 
     if (this.kind === 'grim_reaper') {
       this.scytheSwingTimer = 0.28
-      const scytheSpeed = 450 + this.level * 28
+      const scytheSpeed = 480 + this.level * 30
       const scytheColor = isLv5 || this.isPairedHero ? '#FFD700' : '#FF2E63'
-      const scytheSize = 22 + this.level * 2
-      const pierces = 3 + this.level
+      const scytheSize = 28 + this.level * 3.5
+      const pierces = 4 + this.level * 2
       const count = this.scytheCount
-      const span = count > 1 ? (count - 1) * 0.24 : 0
+      const span = count > 1 ? Math.min(1.15, (count - 1) * 0.22) : 0
       const projectiles = []
       for (let s = 0; s < count; s++) {
         const off = count === 1 ? 0 : -span / 2 + (s / (count - 1)) * span
         const a = this.aimAngle + off
         const d = { x: Math.cos(a), y: Math.sin(a) }
         projectiles.push({
-          x: this.x + d.x * 16,
-          y: this.y + d.y * 16,
+          x: this.x + d.x * 24,
+          y: this.y + d.y * 24,
           direction: d,
           speed: scytheSpeed,
           damage: this.damage,
@@ -452,8 +452,8 @@ export class Summon {
         })
       }
 
-      // Life-steal soul siphon on nearby enemies around the Reaper
-      const siphonRange = 250 + this.level * 20
+      // Life-steal soul siphon on nearby enemies around the Grim Reaper
+      const siphonRange = 280 + this.level * 28
       const siphonCandidates = enemies
         .filter((e) => e.isAlive && !e.isSpawning)
         .map((e) => ({
@@ -465,7 +465,7 @@ export class Summon {
         .sort((a, b) => a.dist - b.dist)
         .slice(0, this.siphonTargetCount)
 
-      const siphonDamage = Math.max(8, Math.round(this.damage * 0.55))
+      const siphonDamage = Math.max(12, Math.round(this.damage * (0.6 + this.level * 0.08)))
       const siphonTargets = siphonCandidates.map((item) => ({
         x: item.ec.x,
         y: item.ec.y,
@@ -870,7 +870,8 @@ export class Summon {
   ): void {
     const isLv5 = this.level >= 5
     const accent = isLv5 || this.isPairedHero ? '#FFD700' : '#FF2E63'
-    const floatY = Math.sin(this.animTime * 4.5) * 4.5
+    const scale = 1.6 + (this.level - 1) * 0.08
+    const floatY = Math.sin(this.animTime * 4.5) * 5.5
     const rx = sp.x
     const ry = sp.y + floatY
 
@@ -882,14 +883,14 @@ export class Summon {
       ctx.globalAlpha = Math.max(0.05, ghost.alpha * 0.42)
       ctx.fillStyle = '#9F1239'
       ctx.beginPath()
-      ctx.arc(gp.x, gp.y, 14, 0, Math.PI * 2)
+      ctx.arc(gp.x, gp.y, 14 * scale, 0, Math.PI * 2)
       ctx.fill()
     }
     ctx.globalAlpha = 1
 
     // Crimson soul link tether to player
-    ctx.strokeStyle = this.isPairedHero ? 'rgba(255, 215, 0, 0.34)' : 'rgba(255, 46, 99, 0.28)'
-    ctx.lineWidth = 1.6
+    ctx.strokeStyle = this.isPairedHero ? 'rgba(255, 215, 0, 0.36)' : 'rgba(255, 46, 99, 0.3)'
+    ctx.lineWidth = 2
     ctx.setLineDash([5, 5])
     ctx.beginPath()
     ctx.moveTo(playerScreen.x, playerScreen.y)
@@ -898,17 +899,28 @@ export class Summon {
     ctx.setLineDash([])
 
     // Ground dark vortex shadow
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.48)'
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.52)'
     ctx.beginPath()
-    ctx.ellipse(sp.x, sp.y + 18, 13, 5, 0, 0, Math.PI * 2)
+    ctx.ellipse(sp.x, sp.y + 20 * scale, 14 * scale, 5.5 * scale, 0, 0, Math.PI * 2)
     ctx.fill()
 
+    // Scale Towering Grim Reaper around its spectral center
+    ctx.translate(rx, ry)
+    ctx.scale(scale, scale)
+
+    // Crimson/gold dread aura ring behind shroud
+    ctx.strokeStyle = isLv5 || this.isPairedHero ? 'rgba(255, 215, 0, 0.35)' : 'rgba(255, 46, 99, 0.3)'
+    ctx.lineWidth = 1.6
+    ctx.beginPath()
+    ctx.arc(0, 0, 22 + Math.sin(this.animTime * 5) * 1.5, 0, Math.PI * 2)
+    ctx.stroke()
+
     // Orbiting soul wisps around the Grim Reaper
-    for (let w = 0; w < 3; w++) {
-      const wa = this.animTime * 3.1 + (w / 3) * Math.PI * 2
-      const wx = rx + Math.cos(wa) * 20
-      const wy = ry + Math.sin(wa) * 14
-      ctx.fillStyle = w === 0 ? accent : '#FB7185'
+    for (let w = 0; w < 4; w++) {
+      const wa = this.animTime * 3.1 + (w / 4) * Math.PI * 2
+      const wx = Math.cos(wa) * 22
+      const wy = Math.sin(wa) * 15
+      ctx.fillStyle = w % 2 === 0 ? accent : '#FB7185'
       ctx.beginPath()
       ctx.arc(wx, wy, 2.8, 0, Math.PI * 2)
       ctx.fill()
@@ -917,21 +929,20 @@ export class Summon {
     // Reaper Death Scythe held beside cloak
     const scytheSwing = this.scytheSwingTimer > 0 ? Math.sin((1 - this.scytheSwingTimer / 0.28) * Math.PI) * 1.15 : 0
     ctx.save()
-    ctx.translate(rx, ry)
     ctx.rotate(this.aimAngle * 0.25 + scytheSwing)
     ctx.strokeStyle = '#CBD5E1'
-    ctx.lineWidth = 2.6
+    ctx.lineWidth = 2.8
     ctx.beginPath()
-    ctx.moveTo(-14, 14)
-    ctx.lineTo(13, -15)
+    ctx.moveTo(-16, 16)
+    ctx.lineTo(15, -17)
     ctx.stroke()
     ctx.fillStyle = accent
     ctx.strokeStyle = '#FFFFFF'
     ctx.lineWidth = 1.4
     ctx.beginPath()
-    ctx.moveTo(11, -14)
-    ctx.quadraticCurveTo(26, -6, 16, 10)
-    ctx.quadraticCurveTo(16, -4, 7, -10)
+    ctx.moveTo(13, -16)
+    ctx.quadraticCurveTo(29, -7, 18, 11)
+    ctx.quadraticCurveTo(18, -4, 8, -11)
     ctx.closePath()
     ctx.fill()
     ctx.stroke()
@@ -940,15 +951,15 @@ export class Summon {
     // Tattered obsidian Grim Reaper shroud & hood
     ctx.fillStyle = '#09090B'
     ctx.strokeStyle = accent
-    ctx.lineWidth = 1.8
+    ctx.lineWidth = 1.9
     ctx.beginPath()
-    ctx.moveTo(rx, ry - 18)
-    ctx.quadraticCurveTo(rx + 14, ry - 6, rx + 12, ry + 13)
-    ctx.lineTo(rx + 5, ry + 9)
-    ctx.lineTo(rx, ry + 16)
-    ctx.lineTo(rx - 5, ry + 9)
-    ctx.lineTo(rx - 12, ry + 13)
-    ctx.quadraticCurveTo(rx - 14, ry - 6, rx, ry - 18)
+    ctx.moveTo(0, -19)
+    ctx.quadraticCurveTo(15, -6, 13, 14)
+    ctx.lineTo(5.5, 9.5)
+    ctx.lineTo(0, 17)
+    ctx.lineTo(-5.5, 9.5)
+    ctx.lineTo(-13, 14)
+    ctx.quadraticCurveTo(-15, -6, 0, -19)
     ctx.closePath()
     ctx.fill()
     ctx.stroke()
@@ -956,22 +967,22 @@ export class Summon {
     // Dark hollow hood face + glowing eyes
     ctx.fillStyle = '#18181B'
     ctx.beginPath()
-    ctx.arc(rx, ry - 5, 7, 0, Math.PI * 2)
+    ctx.arc(0, -5, 7.2, 0, Math.PI * 2)
     ctx.fill()
 
     ctx.fillStyle = accent
     ctx.beginPath()
-    ctx.arc(rx - 2.6, ry - 5, 1.9, 0, Math.PI * 2)
-    ctx.arc(rx + 2.6, ry - 5, 1.9, 0, Math.PI * 2)
+    ctx.arc(-2.7, -5, 2, 0, Math.PI * 2)
+    ctx.arc(2.7, -5, 2, 0, Math.PI * 2)
     ctx.fill()
 
     // Glowing crimson soul heart crystal on robe
     ctx.fillStyle = '#FF2E63'
     ctx.beginPath()
-    ctx.moveTo(rx, ry + 1)
-    ctx.lineTo(rx + 3.2, ry + 5)
-    ctx.lineTo(rx, ry + 9)
-    ctx.lineTo(rx - 3.2, ry + 5)
+    ctx.moveTo(0, 1)
+    ctx.lineTo(3.5, 5.5)
+    ctx.lineTo(0, 10)
+    ctx.lineTo(-3.5, 5.5)
     ctx.closePath()
     ctx.fill()
 

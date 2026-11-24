@@ -63,6 +63,8 @@ export interface AccessoryBonuses {
   damageMultiplier?: number
   hpRegenPerSec?: number
   xpMultiplier?: number
+  critChance?: number
+  critDamageMultiplier?: number
 }
 
 export interface ShopAccessoryItem {
@@ -127,6 +129,8 @@ export interface ComputedAccessoryBonuses {
   damageMultiplier: number
   hpRegenPerSec: number
   xpMultiplier: number
+  critChance: number
+  critDamageBonus: number
 }
 
 export const MAX_EQUIPPED_ACCESSORIES = 3
@@ -318,9 +322,9 @@ export const SHOP_WEAPONS: ShopWeaponItem[] = [
     salvageValue: 675,
     damage: 78,
     cooldown_s: 1.25,
-    special: 'Boomerang spinning solar mace + fire area',
+    special: 'Boomerang spinning solar mace · Full-extension fire area',
     function_desc:
-      'Launches a blazing spiked solar mace on a molten chain toward enemies, spinning back to the wielder while igniting burning magma zones.',
+      'Launches a blazing spiked solar mace on a molten chain toward enemies, erupting into a scorching magma fire area at full extension before whipping back.',
     accentColor: '#FFD700'
   },
   {
@@ -384,12 +388,64 @@ export const SHOP_WEAPONS: ShopWeaponItem[] = [
     salvageValue: 1560,
     crateOnly: true,
     pairedHeroId: 'hero_03',
-    pairedHeroLabel: 'Pairs with Tech Engineer (+50% DMG · Extra Reaper · +22% Attack Speed · Bonus Soul Heal)',
+    pairedHeroLabel: 'Pairs with Tech Engineer (+60% DMG · +28% Attack Speed · +1 Scythe · +2 Siphon & Heal)',
     damage: 88,
     cooldown_s: 1.05,
-    special: 'Mythic Grim Reaper · Throws Scythes & Life Siphon · Engineer Synergy',
+    special: 'Mythic Towering Grim Reaper · +20% Crit · Scythes & Life Siphon · Engineer Synergy',
     function_desc:
-      'Summons an autonomous spectral Grim Reaper that throws spinning scythes and siphons enemy life force back to heal you. Pairs with Tech Engineer for an extra Reaper, +50% damage, faster attacks, and stronger healing.',
+      'Summons a towering spectral Grim Reaper that throws giant piercing scythes (+20% Crit Chance) and siphons enemy life force back to heal you. Upgrades empower scythe count, size, siphon targets, and attack speed. Pairs with Tech Engineer for massive attack buffs.',
+    accentColor: '#FF2E63'
+  },
+  {
+    id: 'wpn_crimson_railblade',
+    kind: 'weapon',
+    name: 'Crimson Precision Edge',
+    category: 'Melee Weapon',
+    rarity: 'rare',
+    tierLabel: 'Rare',
+    price: 890,
+    salvageValue: 265,
+    damage: 54,
+    cooldown_s: 0.92,
+    special: '+22% Crit Chance · +30% Crit DMG · Piercing Slash',
+    function_desc:
+      'Surgical mono-edge crimson blade engineered for lethal weak-point strikes with elevated critical hit rate and crit damage.',
+    accentColor: '#38BDF8'
+  },
+  {
+    id: 'wpn_phantom_sniper',
+    kind: 'weapon',
+    name: 'Deadeye Phantom Railrifle',
+    category: 'Ranged',
+    rarity: 'epic',
+    tierLabel: 'Epic',
+    price: 1580,
+    salvageValue: 475,
+    damage: 74,
+    cooldown_s: 1.15,
+    special: '+34% Crit Chance · +50% Crit DMG · High-Velocity Pierce',
+    function_desc:
+      'Fires hyper-accelerated armor-piercing precision bolts that lock onto targets with devastating critical strike accuracy.',
+    accentColor: '#C084FC'
+  },
+  {
+    id: 'wpn_tempest_sphere',
+    kind: 'weapon',
+    name: 'Tempest Sphere: Skyfall',
+    category: 'Heavy AoE',
+    rarity: 'mythic',
+    tierLabel: 'Mythic',
+    price: 5300,
+    salvageValue: 1590,
+    crateOnly: true,
+    pairedHeroId: 'hero_07',
+    pairedHeroLabel:
+      'Pairs with Storm Assassin (+60% DMG · +1 Falling Sphere · +35% Giant Pulse Wave · 22% Faster CD)',
+    damage: 118,
+    cooldown_s: 1.15,
+    special: 'Mythic Sky-Drop Lightning Orb · +25% Crit · Shock Pulse Wave · Storm Synergy',
+    function_desc:
+      'Calls down a colossal high-voltage lightning sphere from the sky that crashes onto the ground, detonating a crackling pulse wave outward (+25% Crit Chance). Pairs with Storm Assassin for extra spheres, faster drops, and massive pulse waves.',
     accentColor: '#FF2E63'
   }
 ]
@@ -619,16 +675,52 @@ export const SHOP_ACCESSORIES: ShopAccessoryItem[] = [
     price: 4200,
     salvageValue: 1260,
     crateOnly: true,
-    statSummary: '+120 Max HP • +48% Weapon Damage • +20% Fire Rate • -15% Damage Taken • +4 HP/sec',
+    statSummary: '+120 Max HP • +48% Weapon Damage • +20% Fire Rate • +15% Crit Chance • -15% Damage Taken • +4 HP/sec',
     function_desc:
-      'Apex Calamity reactor core overflowing with crimson energy, elevating every offensive and defensive stat simultaneously.',
+      'Apex Calamity reactor core overflowing with crimson energy, elevating every offensive, critical, and defensive stat simultaneously.',
     accentColor: '#FF2E63',
     bonuses: {
       bonusHp: 120,
       damageMultiplier: 0.48,
       cooldownReduction: 0.2,
       damageReduction: 0.15,
-      hpRegenPerSec: 4
+      hpRegenPerSec: 4,
+      critChance: 0.15
+    }
+  },
+  {
+    id: 'acc_targeting_visor',
+    kind: 'accessory',
+    name: 'Crimson Telemetry Visor',
+    slotLabel: 'Optics Unit',
+    rarity: 'rare',
+    price: 720,
+    salvageValue: 215,
+    statSummary: '+14% Crit Chance • +10% Weapon Damage',
+    function_desc:
+      'Locks neural crosshairs onto structural weak points, substantially increasing critical strike frequency across all equipped weapons.',
+    accentColor: '#38BDF8',
+    bonuses: {
+      critChance: 0.14,
+      damageMultiplier: 0.1
+    }
+  },
+  {
+    id: 'acc_assassin_core',
+    kind: 'accessory',
+    name: 'Apex Assassin Gyro-Core',
+    slotLabel: 'Strike Core',
+    rarity: 'epic',
+    price: 1390,
+    salvageValue: 415,
+    statSummary: '+22% Crit Chance • +45% Crit DMG • +8% Move Speed',
+    function_desc:
+      'Overclocks kinetic reflexes for razor-sharp critical execution and amplified critical strike damage multipliers.',
+    accentColor: '#C084FC',
+    bonuses: {
+      critChance: 0.22,
+      critDamageMultiplier: 0.45,
+      speedMultiplier: 0.08
     }
   }
 ]
@@ -767,7 +859,9 @@ export function getStarScaledAccessoryBonuses(
     cooldownReduction: scaleVal(acc.bonuses.cooldownReduction),
     damageMultiplier: scaleVal(acc.bonuses.damageMultiplier),
     hpRegenPerSec: scaleVal(acc.bonuses.hpRegenPerSec),
-    xpMultiplier: scaleVal(acc.bonuses.xpMultiplier)
+    xpMultiplier: scaleVal(acc.bonuses.xpMultiplier),
+    critChance: scaleVal(acc.bonuses.critChance),
+    critDamageMultiplier: scaleVal(acc.bonuses.critDamageMultiplier)
   }
 }
 
@@ -790,6 +884,8 @@ export function formatAccessoryStatSummary(acc: ShopAccessoryItem, stars: number
     const pct = Math.round(b.damageMultiplier * 100)
     parts.push(`${pct >= 0 ? '+' : ''}${pct}% Damage`)
   }
+  if (b.critChance) parts.push(`+${Math.round(b.critChance * 100)}% Crit Chance`)
+  if (b.critDamageMultiplier) parts.push(`+${Math.round(b.critDamageMultiplier * 100)}% Crit DMG`)
   if (b.hpRegenPerSec) parts.push(`+${Number(b.hpRegenPerSec.toFixed(1))} HP/sec`)
   if (b.xpMultiplier) parts.push(`+${Math.round(b.xpMultiplier * 100)}% XP Gain`)
   return parts.length > 0 ? parts.join(' · ') : acc.statSummary
@@ -830,6 +926,8 @@ export function computeEquippedAccessoryBonuses(
   let damageBonus = 0
   let hpRegenPerSec = 0
   let xpBonus = 0
+  let critChance = 0
+  let critDamageBonus = 0
 
   for (const id of equippedAccessoryIds) {
     const item = getShopAccessoryById(id)
@@ -845,6 +943,8 @@ export function computeEquippedAccessoryBonuses(
     if (b.damageMultiplier) damageBonus += b.damageMultiplier
     if (b.hpRegenPerSec) hpRegenPerSec += b.hpRegenPerSec
     if (b.xpMultiplier) xpBonus += b.xpMultiplier
+    if (b.critChance) critChance += b.critChance
+    if (b.critDamageMultiplier) critDamageBonus += b.critDamageMultiplier
   }
 
   return {
@@ -856,7 +956,9 @@ export function computeEquippedAccessoryBonuses(
     cooldownRateMultiplier: Math.max(0.45, Number((1 + cooldownBonus).toFixed(2))),
     damageMultiplier: Math.max(0.5, Number((1 + damageBonus).toFixed(2))),
     hpRegenPerSec: Math.max(0, Number(hpRegenPerSec.toFixed(2))),
-    xpMultiplier: Math.max(0.5, Number((1 + xpBonus).toFixed(2)))
+    xpMultiplier: Math.max(0.5, Number((1 + xpBonus).toFixed(2))),
+    critChance: Math.max(0, Math.min(0.75, Number(critChance.toFixed(3)))),
+    critDamageBonus: Math.max(0, Number(critDamageBonus.toFixed(2)))
   }
 }
 
@@ -988,6 +1090,94 @@ export function getInventoryStacks(state: ShopAccountState): GearStackEntry[] {
   })
 
   return entries
+}
+
+export type ArmorySortOption =
+  | 'equipped'
+  | 'rarity_desc'
+  | 'rarity_asc'
+  | 'stars_desc'
+  | 'count_desc'
+  | 'name_asc'
+  | 'power_desc'
+
+export function sortGearStacks(
+  entries: ReadonlyArray<GearStackEntry>,
+  sortBy: ArmorySortOption,
+  state?: Pick<
+    ShopAccountState,
+    'equippedWeaponId' | 'equippedWeaponStars' | 'equippedAccessoryIds' | 'equippedAccessoryStars'
+  >
+): GearStackEntry[] {
+  const list = [...entries]
+  const equippedAccSet = new Set(state?.equippedAccessoryIds || [])
+
+  const isEquippedEntry = (e: GearStackEntry): boolean =>
+    Boolean(
+      (state?.equippedWeaponId === e.itemId && state?.equippedWeaponStars === e.stars) ||
+        (equippedAccSet.has(e.itemId) && (state?.equippedAccessoryStars?.[e.itemId] ?? 0) === e.stars)
+    )
+
+  const getPowerScore = (e: GearStackEntry): number => {
+    if (e.item.kind === 'weapon') {
+      const scaled = getStarScaledWeaponStats(e.item, e.stars)
+      return scaled.cooldown_s > 0 ? scaled.damage / scaled.cooldown_s : scaled.damage
+    }
+    return getItemSalvageValue(e.item, e.stars)
+  }
+
+  list.sort((a, b) => {
+    if (sortBy === 'equipped') {
+      const aEq = isEquippedEntry(a)
+      const bEq = isEquippedEntry(b)
+      if (aEq !== bEq) return aEq ? -1 : 1
+      if (b.stars !== a.stars) return b.stars - a.stars
+      const rarityDiff = RARITY_META[b.item.rarity].order - RARITY_META[a.item.rarity].order
+      if (rarityDiff !== 0) return rarityDiff
+      return a.item.name.localeCompare(b.item.name)
+    }
+
+    if (sortBy === 'rarity_desc') {
+      const rarityDiff = RARITY_META[b.item.rarity].order - RARITY_META[a.item.rarity].order
+      if (rarityDiff !== 0) return rarityDiff
+      if (b.stars !== a.stars) return b.stars - a.stars
+      return a.item.name.localeCompare(b.item.name)
+    }
+
+    if (sortBy === 'rarity_asc') {
+      const rarityDiff = RARITY_META[a.item.rarity].order - RARITY_META[b.item.rarity].order
+      if (rarityDiff !== 0) return rarityDiff
+      if (b.stars !== a.stars) return b.stars - a.stars
+      return a.item.name.localeCompare(b.item.name)
+    }
+
+    if (sortBy === 'stars_desc') {
+      if (b.stars !== a.stars) return b.stars - a.stars
+      const rarityDiff = RARITY_META[b.item.rarity].order - RARITY_META[a.item.rarity].order
+      if (rarityDiff !== 0) return rarityDiff
+      return a.item.name.localeCompare(b.item.name)
+    }
+
+    if (sortBy === 'count_desc') {
+      if (b.count !== a.count) return b.count - a.count
+      const rarityDiff = RARITY_META[b.item.rarity].order - RARITY_META[a.item.rarity].order
+      if (rarityDiff !== 0) return rarityDiff
+      return a.item.name.localeCompare(b.item.name)
+    }
+
+    if (sortBy === 'power_desc') {
+      const diff = getPowerScore(b) - getPowerScore(a)
+      if (Math.abs(diff) > 0.001) return diff
+      return a.item.name.localeCompare(b.item.name)
+    }
+
+    // 'name_asc'
+    const nameDiff = a.item.name.localeCompare(b.item.name)
+    if (nameDiff !== 0) return nameDiff
+    return b.stars - a.stars
+  })
+
+  return list
 }
 
 function addItemStackToRecord(
@@ -1129,6 +1319,47 @@ export function creditShopCoins(userId: string | null | undefined, amount: numbe
   return next
 }
 
+/**
+ * Atomically deduct Battle Coins from an operative's wallet if balance is sufficient.
+ */
+export function spendShopCoins(
+  userId: string | null | undefined,
+  amount: number
+): {
+  success: boolean
+  state: ShopAccountState
+  spent: number
+  error?: string
+} {
+  const safeAmount = Math.max(0, Math.floor(amount))
+  const current = getShopAccountState(userId)
+  if (safeAmount <= 0) {
+    return { success: true, state: current, spent: 0 }
+  }
+  if (current.balance < safeAmount) {
+    const needed = safeAmount - current.balance
+    return {
+      success: false,
+      state: current,
+      spent: 0,
+      error: `Need ${needed.toLocaleString()} more Battle Coins.`
+    }
+  }
+
+  const next: ShopAccountState = {
+    ...current,
+    balance: current.balance - safeAmount,
+    totalSpent: current.totalSpent + safeAmount,
+    updatedAt: new Date().toISOString()
+  }
+  writeShopState(next)
+  return {
+    success: true,
+    state: next,
+    spent: safeAmount
+  }
+}
+
 export interface ShopActionResult {
   success: boolean
   state: ShopAccountState
@@ -1137,6 +1368,8 @@ export interface ShopActionResult {
   stars?: number
   newCount?: number
   refundCoins?: number
+  pricePaid?: number
+  discountPercent?: number
 }
 
 export interface CrateOpenResult {
@@ -1166,38 +1399,182 @@ export interface GearFusionResult {
   error?: string
 }
 
+export const SHOP_ROTATION_INTERVAL_MS = 10 * 60 * 1000 // 10 minutes
+export const SHOP_ROTATION_WEAPON_SLOTS = 3
+export const SHOP_ROTATION_ACCESSORY_SLOTS = 3
+const ROTATION_DISCOUNT_CHOICES = [15, 20, 25, 30, 35] as const
+
+export interface ShopRotationEntry {
+  slotIndex: number
+  item: ShopCatalogItem
+  originalPrice: number
+  salePrice: number
+  discountPercent: number
+}
+
+export interface ShopRotationSnapshot {
+  windowIndex: number
+  startsAtMs: number
+  endsAtMs: number
+  remainingMs: number
+  entries: ShopRotationEntry[]
+}
+
+function createRotationPrng(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function getRotationWeightForRarity(rarity: GearRarity): number {
+  switch (rarity) {
+    case 'common':
+      return 4
+    case 'uncommon':
+      return 7
+    case 'rare':
+      return 8
+    case 'epic':
+      return 5
+    case 'legendary':
+      return 2.5
+    case 'mythic':
+      return 0.75
+    default:
+      return 0
+  }
+}
+
+function pickWeightedUniqueRotationItems<T extends ShopCatalogItem>(
+  pool: ReadonlyArray<T>,
+  count: number,
+  rng: () => number
+): T[] {
+  const candidates = pool.filter((item) => !isBadGearRarity(item.rarity))
+  const chosen: T[] = []
+  const remaining = [...candidates]
+
+  while (chosen.length < count && remaining.length > 0) {
+    const totalWeight = remaining.reduce(
+      (sum, item) => sum + Math.max(0.1, getRotationWeightForRarity(item.rarity)),
+      0
+    )
+    let cursor = rng() * totalWeight
+    let pickedIdx = remaining.length - 1
+    for (let i = 0; i < remaining.length; i++) {
+      cursor -= Math.max(0.1, getRotationWeightForRarity(remaining[i].rarity))
+      if (cursor <= 0) {
+        pickedIdx = i
+        break
+      }
+    }
+    chosen.push(remaining[pickedIdx])
+    remaining.splice(pickedIdx, 1)
+  }
+
+  return chosen
+}
+
+export function getShopRotation(nowMs: number = Date.now()): ShopRotationSnapshot {
+  const safeNow = Number.isFinite(nowMs) ? Math.max(0, nowMs) : Date.now()
+  const windowIndex = Math.floor(safeNow / SHOP_ROTATION_INTERVAL_MS)
+  const startsAtMs = windowIndex * SHOP_ROTATION_INTERVAL_MS
+  const endsAtMs = startsAtMs + SHOP_ROTATION_INTERVAL_MS
+  const remainingMs = Math.max(0, endsAtMs - safeNow)
+
+  const rng = createRotationPrng(windowIndex * 2654435761 + 1013904223)
+  const weapons = pickWeightedUniqueRotationItems(
+    SHOP_WEAPONS,
+    SHOP_ROTATION_WEAPON_SLOTS,
+    rng
+  )
+  const accessories = pickWeightedUniqueRotationItems(
+    SHOP_ACCESSORIES,
+    SHOP_ROTATION_ACCESSORY_SLOTS,
+    rng
+  )
+
+  const combined: ShopCatalogItem[] = []
+  const maxLen = Math.max(weapons.length, accessories.length)
+  for (let i = 0; i < maxLen; i++) {
+    if (weapons[i]) combined.push(weapons[i])
+    if (accessories[i]) combined.push(accessories[i])
+  }
+
+  const entries: ShopRotationEntry[] = combined.map((item, idx) => {
+    const discountIndex = Math.floor(rng() * ROTATION_DISCOUNT_CHOICES.length)
+    const discountPercent = ROTATION_DISCOUNT_CHOICES[discountIndex] ?? 20
+    const originalPrice = Math.max(25, item.price)
+    const rawSale = originalPrice * (1 - discountPercent / 100)
+    const salePrice = Math.max(25, Math.round(rawSale / 5) * 5)
+    return {
+      slotIndex: idx,
+      item,
+      originalPrice,
+      salePrice,
+      discountPercent
+    }
+  })
+
+  return {
+    windowIndex,
+    startsAtMs,
+    endsAtMs,
+    remainingMs,
+    entries
+  }
+}
+
+export function getShopRotationEntry(
+  itemId: string,
+  nowMs: number = Date.now()
+): ShopRotationEntry | undefined {
+  return getShopRotation(nowMs).entries.find((entry) => entry.item.id === itemId)
+}
+
+export function formatRotationCountdown(remainingMs: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 /**
- * Purchase a direct-sale Accessory (adds +1 stack at 0★) using Battle Coins.
- * Weapons unlock only via Supply Crates.
+ * Purchase an item currently featured in the active 10-minute Rotating Shop (Weapons & Accessories).
+ * Adds +1 stack at 0★ using Battle Coins at its active discounted sale price.
  */
-export function purchaseShopItem(userId: string | null | undefined, itemId: string): ShopActionResult {
+export function purchaseShopItem(
+  userId: string | null | undefined,
+  itemId: string,
+  nowMs: number = Date.now()
+): ShopActionResult {
   const current = getShopAccountState(userId)
   const item = getShopItemById(itemId)
   if (!item) {
     return { success: false, state: current, error: 'Shop item not found.' }
   }
-  if (item.kind === 'weapon') {
+
+  const rotationEntry = getShopRotationEntry(itemId, nowMs)
+  if (!rotationEntry) {
     return {
       success: false,
       state: current,
-      error: `${item.name} cannot be bought directly—open Supply Crates to unlock weapons.`,
+      error: `${item.name} is not currently on sale in the 10-minute Shop Rotation. Wait for the next rotation or open Supply Crates.`,
       item
     }
   }
-  if (item.crateOnly) {
+
+  const price = rotationEntry.salePrice
+  if (current.balance < price) {
+    const needed = price - current.balance
     return {
       success: false,
       state: current,
-      error: `${item.name} is crate-only salvage and cannot be bought directly.`,
-      item
-    }
-  }
-  if (current.balance < item.price) {
-    const needed = item.price - current.balance
-    return {
-      success: false,
-      state: current,
-      error: `Need ${needed} more Battle Coins to buy ${item.name}.`,
+      error: `Need ${needed.toLocaleString()} more Battle Coins to buy ${item.name} on sale.`,
       item
     }
   }
@@ -1206,8 +1583,8 @@ export function purchaseShopItem(userId: string | null | undefined, itemId: stri
   const next: ShopAccountState = normalizeAccountState(
     {
       ...current,
-      balance: current.balance - item.price,
-      totalSpent: current.totalSpent + item.price,
+      balance: current.balance - price,
+      totalSpent: current.totalSpent + price,
       gearStacks: nextStacks,
       ownedIds: deriveOwnedIdsFromStacks(nextStacks),
       updatedAt: new Date().toISOString()
@@ -1220,7 +1597,9 @@ export function purchaseShopItem(userId: string | null | undefined, itemId: stri
     state: next,
     item,
     stars: 0,
-    newCount: getStackCount(next, item.id, 0)
+    newCount: getStackCount(next, item.id, 0),
+    pricePaid: price,
+    discountPercent: rotationEntry.discountPercent
   }
 }
 
@@ -1740,6 +2119,7 @@ export function subscribeShopState(listener: () => void): () => void {
 export function useShopState(userId?: string | null) {
   const effectiveUserId = userId || 'guest_user'
   const [state, setState] = useState<ShopAccountState>(() => getShopAccountState(effectiveUserId))
+  const [rotationNowMs, setRotationNowMs] = useState<number>(() => Date.now())
 
   useEffect(() => {
     setState(getShopAccountState(effectiveUserId))
@@ -1749,8 +2129,18 @@ export function useShopState(userId?: string | null) {
     return unsubscribe
   }, [effectiveUserId])
 
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setRotationNowMs(Date.now())
+    }, 1000)
+    return () => clearInterval(intervalId)
+  }, [])
+
+  const rotation = getShopRotation(rotationNowMs)
+
   return {
     shopState: state,
+    rotation,
     inventoryStacks: getInventoryStacks(state),
     bonuses: computeEquippedAccessoryBonuses(state.equippedAccessoryIds, state.equippedAccessoryStars),
     equippedWeapon: state.equippedWeaponId ? getShopWeaponById(state.equippedWeaponId) || null : null,

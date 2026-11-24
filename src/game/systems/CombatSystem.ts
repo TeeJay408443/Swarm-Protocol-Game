@@ -61,8 +61,8 @@ export class CombatSystem {
   /** Combat modifiers */
   private damageMultipliers: Map<string, number> = new Map()
   private defenseMultipliers: Map<string, number> = new Map()
-  private critChance: number = 0.1 // 10% critical chance
-  private critMultiplier: number = 1.5 // 50% more damage
+  private critChance: number = 0.01 // 1% base critical chance
+  private critMultiplier: number = 2.0 // 2.0x crit multiplier
   
   /** Invulnerability */
   private invulnerableEntities: Set<any> = new Set()

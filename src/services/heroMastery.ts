@@ -265,6 +265,43 @@ export const HERO_MASTERY_TIERS: Record<string, HeroMasteryTier[]> = {
       summary: '+24% Weapon Damage · +12% Fire Rate',
       bonuses: { damageMultiplier: 0.24, fireRateMultiplier: 0.12 }
     }
+  ],
+  hero_07: [
+    {
+      tier: 1,
+      requiredRounds: 3,
+      title: 'Slipstream Reflex',
+      summary: '+10% Move Speed',
+      bonuses: { speedMultiplier: 0.1 }
+    },
+    {
+      tier: 2,
+      requiredRounds: 8,
+      title: 'Static Dynamo',
+      summary: '+12% Fire Rate',
+      bonuses: { fireRateMultiplier: 0.12 }
+    },
+    {
+      tier: 3,
+      requiredRounds: 15,
+      title: 'Voltage Surge',
+      summary: '+15% Weapon Damage',
+      bonuses: { damageMultiplier: 0.15 }
+    },
+    {
+      tier: 4,
+      requiredRounds: 25,
+      title: 'Bounty Protocol',
+      summary: '+15% Bonus Coins · +25% Pickup Range',
+      bonuses: { bonusCoinChance: 0.15, magnetRangeMultiplier: 0.25 }
+    },
+    {
+      tier: 5,
+      requiredRounds: 40,
+      title: 'Storm Sovereign',
+      summary: '+20% Weapon Damage · +12% Fire Rate',
+      bonuses: { damageMultiplier: 0.2, fireRateMultiplier: 0.12 }
+    }
   ]
 }
 

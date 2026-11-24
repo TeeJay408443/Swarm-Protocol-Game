@@ -7,6 +7,7 @@ import { Vector2 } from '../utils/vector'
 import { Camera } from '../engine/Camera'
 import { GAME_CONFIG } from '../../config/gameConstants'
 import { HeroesRow } from '../../types/database'
+import { drawWorldWeaponSprite, getWeaponVisualBehavior } from '../weaponVisuals'
 
 export interface PlayerOptions {
   x?: number
@@ -17,6 +18,35 @@ export interface PlayerOptions {
   color?: string
   maxHealth?: number
   hero?: HeroesRow
+}
+
+export interface PlayerMountedWeapon {
+  id: string
+  level: number
+}
+
+export interface WeaponActionState {
+  timer: number
+  duration: number
+  aimAngle: number
+  swingParity: number
+}
+
+const HERO_STARTER_WEAPON_IDS = new Set([
+  'upg_06', // Chain Tesla (Storm Assassin starter weapon)
+  'upg_10', // Flamethrower Pulse (Pyrotechnic starter weapon)
+  'upg_12', // Arc Slash Katana (Vanguard Blade starter weapon)
+  'upg_13'  // Dual Kinetic Pistols (Outpost Ranger starter weapon)
+])
+
+/**
+ * Only Armory/Shop weapons (wpn_*) and handheld hero weapons render directly on the operative.
+ * Level-up upgrades, passives, summons, and utility powers do not clutter the player sprite.
+ */
+export function isVisiblePlayerWeaponId(weaponId: string): boolean {
+  if (!weaponId) return false
+  if (weaponId.startsWith('wpn_')) return true
+  return HERO_STARTER_WEAPON_IDS.has(weaponId)
 }
 
 export class Player {
@@ -58,6 +88,10 @@ export class Player {
   animTime: number = 0
   isMoving: boolean = false
 
+  /** Mounted visible weapons & live swing/recoil states */
+  private mountedWeapons: PlayerMountedWeapon[] = []
+  private weaponActionStates: Map<string, WeaponActionState> = new Map()
+
   constructor(options: PlayerOptions = {}) {
     this.x = options.x || 0
     this.y = options.y || 0
@@ -74,7 +108,48 @@ export class Player {
       this.maxHealth = this.hero.hp
       this.health = this.maxHealth
       this.speed = this.hero.speed * GAME_CONFIG.BASE_PLAYER_SPEED
+      if (isVisiblePlayerWeaponId(this.hero.starting_upgrade_id)) {
+        this.mountedWeapons = [{ id: this.hero.starting_upgrade_id, level: 1 }]
+      }
     }
+  }
+
+  /**
+   * Sync the visible weapons carried by the player (Shop equipped weapons + handheld starter weapon only).
+   */
+  setActiveWeapons(weapons: ReadonlyArray<{ id: string; level?: number }>): void {
+    const next: PlayerMountedWeapon[] = []
+    const seen = new Set<string>()
+    for (const w of weapons) {
+      if (!w?.id || seen.has(w.id) || !isVisiblePlayerWeaponId(w.id)) continue
+      seen.add(w.id)
+      next.push({ id: w.id, level: w.level ?? 1 })
+    }
+    this.mountedWeapons = next
+  }
+
+  getActiveWeapons(): ReadonlyArray<PlayerMountedWeapon> {
+    return this.mountedWeapons
+  }
+
+  /**
+   * Trigger a visible swing, thrust, recoil, or cast animation for a weapon ID.
+   */
+  triggerWeaponAction(weaponId: string, aimAngle?: number): void {
+    if (!isVisiblePlayerWeaponId(weaponId)) return
+    const behavior = getWeaponVisualBehavior(weaponId)
+    const prev = this.weaponActionStates.get(weaponId)
+    const nextParity = prev ? -prev.swingParity : 1
+    this.weaponActionStates.set(weaponId, {
+      timer: behavior.duration,
+      duration: behavior.duration,
+      aimAngle: aimAngle ?? this.facingAngle,
+      swingParity: nextParity
+    })
+  }
+
+  getWeaponActionState(weaponId: string): WeaponActionState | undefined {
+    return this.weaponActionStates.get(weaponId)
   }
 
   /**
@@ -102,6 +177,14 @@ export class Player {
     // Update cooldowns
     if (this.attackCooldown > 0) {
       this.attackCooldown -= deltaTime
+    }
+
+    // Advance live weapon swing/recoil timers
+    for (const [id, state] of this.weaponActionStates.entries()) {
+      if (state.timer > 0) {
+        const remaining = Math.max(0, state.timer - deltaTime)
+        this.weaponActionStates.set(id, { ...state, timer: remaining })
+      }
     }
     
     // Update invulnerability
@@ -235,7 +318,7 @@ export class Player {
   }
 
   /**
-   * Draw hero-specific operative sprite on canvas
+   * Draw hero-specific operative sprite and all visible active/mounted weapons on canvas
    */
   draw(ctx: CanvasRenderingContext2D, camera: Camera): void {
     const { x: screenX, y: screenY } = camera.worldToScreen(this.x, this.y)
@@ -251,6 +334,7 @@ export class Player {
       hero_04: { primary: '#4C1D95', secondary: '#8B5CF6', accent: '#C084FC', visor: '#00F0FF' },
       hero_05: { primary: '#92400E', secondary: '#F59E0B', accent: '#FDE68A', visor: '#FFFFFF' },
       hero_06: { primary: '#7F1D1D', secondary: '#EF4444', accent: '#FB923C', visor: '#FEF08A' },
+      hero_07: { primary: '#312E81', secondary: '#7C3AED', accent: '#38BDF8', visor: '#FDE047' },
     }
     const colors = palette[heroId] || palette.hero_01
 
@@ -280,23 +364,21 @@ export class Player {
     }
 
     // Back gear / silhouette accents per hero archetype
-    if (heroId === 'hero_04') {
-      // Chrono speedster swept phase fins
-      ctx.fillStyle = colors.accent
+    if (heroId === 'hero_04' || heroId === 'hero_07') {
+      ctx.fillStyle = heroId === 'hero_07' ? '#A855F7' : colors.accent
       ctx.beginPath()
       ctx.moveTo(-4, -r * 0.4)
-      ctx.lineTo(-r * 1.1, -r * 0.85)
+      ctx.lineTo(-r * 1.15, -r * 0.88)
       ctx.lineTo(-r * 0.65, -2)
       ctx.closePath()
       ctx.fill()
       ctx.beginPath()
       ctx.moveTo(-4, r * 0.4)
-      ctx.lineTo(-r * 1.1, r * 0.85)
+      ctx.lineTo(-r * 1.15, r * 0.88)
       ctx.lineTo(-r * 0.65, 2)
       ctx.closePath()
       ctx.fill()
     } else if (heroId === 'hero_03' || heroId === 'hero_06') {
-      // Twin backpack power cells / fuel canisters
       ctx.fillStyle = heroId === 'hero_06' ? '#EA580C' : '#334155'
       ctx.strokeStyle = colors.accent
       ctx.lineWidth = 1.5
@@ -322,33 +404,22 @@ export class Player {
     ctx.arc(0, 0, r * 0.56, 0, Math.PI * 2)
     ctx.fill()
 
-    // Hero signature weapon silhouette
-    if (heroId === 'hero_01') {
-      // Vanguard plasma katana angled forward-right
-      ctx.strokeStyle = '#E0F2FE'
-      ctx.lineWidth = 3.5
-      ctx.beginPath()
-      ctx.moveTo(4, r * 0.55)
-      ctx.lineTo(r * 1.35, r * 0.15)
-      ctx.stroke()
-      ctx.strokeStyle = colors.accent
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-    } else if (heroId === 'hero_05') {
-      // Paladin curved tower shield in front
+    // Paladin keeps curved tower shield in front even alongside weapons
+    if (heroId === 'hero_05') {
       ctx.strokeStyle = '#FDE047'
       ctx.lineWidth = 5
       ctx.beginPath()
       ctx.arc(3, 0, r * 0.95, -Math.PI * 0.42, Math.PI * 0.42)
       ctx.stroke()
-    } else {
-      // Tactical blaster / carbine barrel extending forward
-      ctx.fillStyle = '#0F172A'
-      ctx.strokeStyle = colors.accent
-      ctx.lineWidth = 1.5
+    } else if (heroId === 'hero_07' && this.mountedWeapons.length === 0) {
+      // Fallback twin plasma daggers if no mounted weapons set
+      ctx.strokeStyle = '#38BDF8'
+      ctx.lineWidth = 3
       ctx.beginPath()
-      ctx.roundRect(r * 0.25, 3, r * 0.85, 5, 2)
-      ctx.fill()
+      ctx.moveTo(4, -r * 0.52)
+      ctx.lineTo(r * 1.25, -r * 0.22)
+      ctx.moveTo(4, r * 0.52)
+      ctx.lineTo(r * 1.25, r * 0.22)
       ctx.stroke()
     }
 
@@ -366,6 +437,89 @@ export class Player {
     ctx.fill()
 
     ctx.restore()
+
+    // Draw only visible equipped/handheld weapons around/held by the operative
+    const weaponsToDraw =
+      this.mountedWeapons.length > 0
+        ? this.mountedWeapons
+        : this.hero?.starting_upgrade_id && isVisiblePlayerWeaponId(this.hero.starting_upgrade_id)
+          ? [{ id: this.hero.starting_upgrade_id, level: 1 }]
+          : []
+
+    if (weaponsToDraw.length > 0) {
+      const targetAim = this.targetPosition
+        ? Math.atan2(
+            this.targetPosition.y - (this.y + this.height / 2),
+            this.targetPosition.x - (this.x + this.width / 2)
+          )
+        : this.facingAngle
+
+      // Render secondary unlocked weapons at clean flanking shoulder hardpoints first
+      const secondaryWeapons = weaponsToDraw.slice(1)
+      secondaryWeapons.forEach((mw, idx) => {
+        const action = this.weaponActionStates.get(mw.id)
+        const progress =
+          action && action.timer > 0 && action.duration > 0
+            ? 1 - action.timer / action.duration
+            : 0
+        const side = idx % 2 === 0 ? -1 : 1
+        const ringRank = Math.floor(idx / 2)
+        const mountAngle = this.facingAngle + side * (1.28 + ringRank * 0.46)
+        const bob = Math.sin(this.animTime * 4 + idx * 1.3) * 2.2
+        const mountDist = r + 10 + ringRank * 9
+        const mx = cx + Math.cos(mountAngle) * mountDist
+        const my = cy + Math.sin(mountAngle) * mountDist + bob
+        const weaponAim = progress > 0 && action ? action.aimAngle : targetAim
+
+        ctx.save()
+        ctx.translate(mx, my)
+        drawWorldWeaponSprite(ctx, {
+          weaponId: mw.id,
+          aimAngle: weaponAim,
+          actionProgress: progress,
+          swingParity: action?.swingParity ?? side,
+          animTime: this.animTime + idx * 0.7,
+          isLv5: mw.level >= 5,
+          scale: 0.76
+        })
+        ctx.restore()
+      })
+
+      // Render primary weapon directly in-hand at full scale
+      const primary = weaponsToDraw[0]
+      const primaryAction = this.weaponActionStates.get(primary.id)
+      const primaryProgress =
+        primaryAction && primaryAction.timer > 0 && primaryAction.duration > 0
+          ? 1 - primaryAction.timer / primaryAction.duration
+          : 0
+      const primaryAim =
+        primaryProgress > 0 && primaryAction ? primaryAction.aimAngle : targetAim
+
+      ctx.save()
+      ctx.translate(cx, cy)
+      drawWorldWeaponSprite(ctx, {
+        weaponId: primary.id,
+        aimAngle: primaryAim,
+        actionProgress: primaryProgress,
+        swingParity: primaryAction?.swingParity ?? 1,
+        animTime: this.animTime,
+        isLv5: primary.level >= 5,
+        scale: 1
+      })
+      // Dual Kinetic Pistols also renders the mirror off-hand pistol!
+      if (primary.id === 'upg_13') {
+        drawWorldWeaponSprite(ctx, {
+          weaponId: primary.id,
+          aimAngle: primaryAim,
+          actionProgress: primaryProgress,
+          swingParity: -(primaryAction?.swingParity ?? 1),
+          animTime: this.animTime + 0.5,
+          isLv5: primary.level >= 5,
+          scale: 0.92
+        })
+      }
+      ctx.restore()
+    }
 
     // Invulnerability phase-shield shimmer ring
     if (this.isInvulnerable) {

@@ -454,10 +454,10 @@ export function getUpgradeLevelPerkHint(upgradeId: string, targetLevel: number):
       4: 'High-impact frost shatter rails (8 pierces)'
     },
     wpn_solar_flail: {
-      1: 'Launches 1 spinning boomerang solar mace + fire pool',
-      2: 'Longer chain reach & wider scorching fire area',
-      3: 'Launches twin spinning solar maces in formation',
-      4: 'Blazing magma trail + high-impact return smash'
+      1: 'Launches 1 spinning solar mace; ignites fire AoE at full extension',
+      2: 'Longer chain reach & wider apex fire AoE detonation',
+      3: 'Launches twin solar maces erupting in fire pools at full reach',
+      4: 'Larger blazing magma area on full extension & return smash'
     },
     wpn_void_reaper: {
       1: 'Abyssal scythe cleave + 90px void vortex',
@@ -472,16 +472,46 @@ export function getUpgradeLevelPerkHint(upgradeId: string, targetLevel: number):
       4: '254px hyper-crimson katana sweep (Vanguard Pair Boost)'
     },
     wpn_grim_reaper: {
-      1: 'Summons 1 Grim Reaper throwing scythes & draining HP',
-      2: 'Reaper siphons 2 enemies & throws faster scythes',
-      3: 'Throws twin spinning scythes per Reaper attack',
-      4: 'Drains 3 enemies for soul heal (Tech Engineer +1 Reaper)'
+      1: 'Summons 1 giant Grim Reaper throwing giant scythes & siphoning HP',
+      2: 'Throws twin piercing scythes + drains 3 enemies',
+      3: 'Throws 3 huge scythes faster + drains 4 enemies',
+      4: 'Unleashes 4-scythe volley + stronger 5-target soul heal'
     },
     wpn_permafrost_spire: {
       1: 'Fires freezing frost lance (1.5s freeze)',
       2: 'Wider 64px ice burst & 1.65s solid freeze',
       3: 'Launches twin parallel permafrost lances',
       4: 'Twin 7-pierce cryo lances freezing packs for 1.9s'
+    },
+    wpn_crimson_railblade: {
+      1: 'High-crit crimson shock slash (+22% Crit Chance)',
+      2: 'Wider 148px critical cleave & faster draw speed',
+      3: 'Dual crimson crescent waves tearing weak points',
+      4: 'Massive 186px high-crit execution arc'
+    },
+    wpn_phantom_sniper: {
+      1: 'Piercing deadeye bolt (+34% Crit · 2.5x Crit DMG)',
+      2: 'Higher muzzle velocity & +2 extra enemy pierces',
+      3: 'Fires twin synchronized deadeye sniper bolts',
+      4: 'Triple hyper-velocity critical rail rounds'
+    },
+    wpn_tempest_sphere: {
+      1: 'Drops 1 crackling sky lightning sphere + 205px shock pulse wave',
+      2: 'Wider 154px ground slam & 239px electric pulse wave',
+      3: 'Calls twin crashing lightning spheres with 273px shockwaves',
+      4: '198px crater crash & sweeping 307px storm pulse waves'
+    },
+    upg_crit_01: {
+      1: '+8% Critical Hit Chance across all attacks',
+      2: '+13% Crit Chance & +20% Critical Damage',
+      3: '+18% Crit Chance & +40% Critical Damage',
+      4: '+24% Crit Chance & +60% Critical Damage'
+    },
+    upg_crit_02: {
+      1: '+5% Crit Chance & +8% Weapon Damage',
+      2: '+8% Crit Chance & +14% Weapon Damage',
+      3: '+11% Crit Chance & +20% Weapon Damage',
+      4: '+14% Crit Chance & +26% Weapon Damage'
     },
     upg_a2_01: {
       1: 'Spawns 1 bouncing arena tornado (78px cyclone)',
@@ -558,11 +588,16 @@ export function getUpgradeOverdriveHint(upgradeId: string): string {
     wpn_bent_launcher: 'LV 5 OVERDRIVE: 3-shell 72px jury-rigged cluster mortar',
     wpn_pulse_carbine: 'LV 5 OVERDRIVE: 5-round high-velocity piercing carbine barrage',
     wpn_cryo_railgun: 'LV 5 OVERDRIVE: Tri-barrel 10-pierce sub-zero shatter rail volley',
-    wpn_solar_flail: 'LV 5 OVERDRIVE: Launches 3 spinning solar maces scorching wide magma arenas',
+    wpn_solar_flail: 'LV 5 OVERDRIVE: Launches 3 spinning solar maces detonating huge apex fire areas',
     wpn_void_reaper: 'LV 5 OVERDRIVE: Cataclysmic 200px reaper arc + twin singularities',
     wpn_muramasa: 'LV 5 OVERDRIVE: Dual/Triple Calamity Muramasa crescent waves obliterating entire screens',
-    wpn_grim_reaper: 'LV 5 OVERDRIVE: Twin/Triple Grim Reapers hurling 3 scythes & siphoning HP to you',
+    wpn_grim_reaper: 'LV 5 OVERDRIVE: Towering Death Reaper unleashes 5 giant scythes & 6-target soul siphon',
     wpn_permafrost_spire: 'LV 5 OVERDRIVE: Tri-lance glacial barrage freezing enemies solid for 2.1s',
+    wpn_crimson_railblade: 'LV 5 OVERDRIVE: Sweeps dual 220px crimson execution crescents with lethal crits',
+    wpn_phantom_sniper: 'LV 5 OVERDRIVE: 4-round piercing Deadeye salvo tearing through entire waves',
+    wpn_tempest_sphere: 'LV 5 OVERDRIVE: Drops 3 towering lightning spheres unleashing massive 341px+ skyfall pulse waves',
+    upg_crit_01: 'LV 5 OVERDRIVE: +30% Critical Hit Chance & +85% Critical Damage across all weapons',
+    upg_crit_02: 'LV 5 OVERDRIVE: +18% Crit Chance, +34% Weapon Damage & +35% Critical Damage',
     upg_a2_01: 'LV 5 OVERDRIVE: Spawns 3 hyper-cyclones bouncing wildly with crackling storm cores',
     upg_a2_02: 'LV 5 OVERDRIVE: Twin Apex Laser Striders sweep 3-beam non-orbiting laser arrays',
     upg_a2_03: 'LV 5 OVERDRIVE: Hurls 4 Golden Astral Spears (14 pierces) erupting in 160px supernovas',

@@ -5,7 +5,7 @@ import { Button } from '../../ui/Button'
 import { Badge } from '../../ui/Badge'
 import { Select } from '../../ui/Select'
 import { LeaderboardsEmptyState } from '../../ui/EmptyState'
-import { heroes } from '../../../db/seedData'
+import { ALL_HEROES as heroes } from '../../../config/unlockableHeroes'
 import { useSupabase } from '../../../hooks/useSupabase'
 import {
   getScores,

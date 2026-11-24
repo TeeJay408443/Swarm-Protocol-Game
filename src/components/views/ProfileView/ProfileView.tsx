@@ -8,7 +8,7 @@ import { useToast } from '../../ui/ToastContainer'
 import { ValidationPresets } from '../../../hooks/useValidation'
 import { useSupabase } from '../../../hooks/useSupabase'
 import { useAudio } from '../../../context/AudioContext'
-import { heroes } from '../../../db/seedData'
+import { ALL_HEROES as heroes } from '../../../config/unlockableHeroes'
 import { GAME_CONFIG } from '../../../config/gameConstants'
 import {
   getPlayerTelemetry,

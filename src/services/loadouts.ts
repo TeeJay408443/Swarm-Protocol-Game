@@ -7,7 +7,8 @@
  */
 
 import { supabase } from './supabase'
-import { heroes, upgrades } from '../db/seedData'
+import { upgrades } from '../db/seedData'
+import { ALL_HEROES } from '../config/unlockableHeroes'
 import { shopWeaponsAsUpgrades } from './shop'
 import { AREA_TWO_UPGRADES } from '../config/areaUpgrades'
 import type { LoadoutsRow } from '../types/database'
@@ -188,7 +189,7 @@ export const getLoadout = async (id: string): Promise<LoadoutsRow | null> => {
 }
 
 const enrichLoadout = (loadout: LoadoutsRow): ExtendedLoadout => {
-  const heroData = heroes.find(h => h.id === loadout.hero_id)
+  const heroData = ALL_HEROES.find(h => h.id === loadout.hero_id)
   const upgradeData = [...upgrades, ...AREA_TWO_UPGRADES, ...shopWeaponsAsUpgrades()].find(
     u => u.id === loadout.primary_upgrade_id
   )

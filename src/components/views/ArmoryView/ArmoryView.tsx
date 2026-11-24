@@ -3,18 +3,30 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card } from '../../ui/Card'
 import { Button } from '../../ui/Button'
 import { Modal } from '../../ui/Modal'
+import { ItemSpriteIcon } from '../../ui/ItemSpriteIcon'
 import { ArmoryEmptyState } from '../../ui/EmptyState'
 import ValidatedInput from '../../ui/ValidatedInput'
 import { useToast } from '../../ui/ToastContainer'
 import { ValidationPresets } from '../../../hooks/useValidation'
 import { useSupabase } from '../../../hooks/useSupabase'
 import { useLoadouts } from '../../../hooks/useLoadouts'
-import { heroes, upgrades } from '../../../db/seedData'
+import { upgrades } from '../../../db/seedData'
+import { ALL_HEROES, getUnlockableHeroSpec } from '../../../config/unlockableHeroes'
 import { AREA_TWO_UPGRADES, isAreaTwoUpgrade, isAreaTwoUpgradesUnlocked } from '../../../config/areaUpgrades'
+import { CRIT_CONFIG, getWeaponCritProfile, UNIVERSAL_CRIT_UPGRADES } from '../../../config/critSystem'
 import { getLocalPlayerTelemetry } from '../../../services/scores'
-import { GAME_CONFIG } from '../../../config/gameConstants'
-import { getHeroAbility, getHeroDamageReduction } from '../../../config/heroAbilities'
+import { GAME_CONFIG, getUpgradeOverdriveHint } from '../../../config/gameConstants'
 import {
+  getHeroAbility,
+  getHeroCritBonuses,
+  getHeroDamageReduction,
+  getHeroSignatureTierSummary,
+  MAX_HERO_SIGNATURE_LEVEL
+} from '../../../config/heroAbilities'
+import { useHeroUpgrades } from '../../../services/heroUpgrades'
+import { isHeroUnlocked, useHeroUnlocks } from '../../../services/heroUnlocks'
+import {
+  type ArmorySortOption,
   formatAccessoryStatSummary,
   FUSION_COPIES_REQUIRED,
   type GearStackEntry,
@@ -27,6 +39,7 @@ import {
   MAX_GEAR_STARS,
   RARITY_META,
   shopWeaponsAsUpgrades,
+  sortGearStacks,
   useShopState
 } from '../../../services/shop'
 import type { ExtendedLoadout } from '../../../services/loadouts'
@@ -38,6 +51,16 @@ import {
 
 type ArmoryTab = 'inventory' | 'forge' | 'loadouts' | 'builder'
 type InventoryFilter = 'all' | 'weapon' | 'accessory' | 'fusable'
+
+const ARMORY_SORT_OPTIONS: ReadonlyArray<{ value: ArmorySortOption; label: string }> = [
+  { value: 'equipped', label: 'Equipped First' },
+  { value: 'rarity_desc', label: 'Rarity (High to Low)' },
+  { value: 'rarity_asc', label: 'Rarity (Low to High)' },
+  { value: 'stars_desc', label: 'Star Tier (5★ to 0★)' },
+  { value: 'power_desc', label: 'Power / Value' },
+  { value: 'count_desc', label: 'Quantity (High to Low)' },
+  { value: 'name_asc', label: 'Name (A to Z)' }
+]
 
 function calculateUpgradeDps(damage: number, cooldownSeconds: number): number | null {
   if (damage <= 0) return 0
@@ -78,6 +101,9 @@ export function ArmoryView() {
     setEquippedWeapon,
     toggleAccessory
   } = useShopState(effectiveUserId)
+  const { getSignatureLevel } = useHeroUpgrades(effectiveUserId)
+  const highestWave = getLocalPlayerTelemetry(effectiveUserId).highest_wave || 0
+  const { isUnlocked: isHeroAvailable } = useHeroUnlocks(user?.id, highestWave)
 
   const highestWeaponStarsMap = useMemo(() => {
     const map: Record<string, number> = {}
@@ -122,12 +148,16 @@ export function ArmoryView() {
     [ownedShopUpgrades, area2Unlocked]
   )
   const allKnownUpgrades = useMemo(
-    () => [...shopUpgradeRows, ...upgrades, ...AREA_TWO_UPGRADES],
+    () => [...shopUpgradeRows, ...upgrades, ...AREA_TWO_UPGRADES, ...UNIVERSAL_CRIT_UPGRADES],
     [shopUpgradeRows]
   )
 
   const [activeTab, setActiveTab] = useState<ArmoryTab>('inventory')
   const [inventoryFilter, setInventoryFilter] = useState<InventoryFilter>('all')
+  const [inventorySort, setInventorySort] = useState<ArmorySortOption>('equipped')
+  const [inspectedStack, setInspectedStack] = useState<{ itemId: string; stars: number } | null>(
+    null
+  )
   const [forgeSelection, setForgeSelection] = useState<{ itemId: string; stars: number } | null>(
     null
   )
@@ -135,8 +165,8 @@ export function ArmoryView() {
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loadoutName, setLoadoutName] = useState('')
-  const [selectedHeroId, setSelectedHeroId] = useState<string>(heroes[0].id)
-  const [selectedUpgradeId, setSelectedUpgradeId] = useState<string>(heroes[0].starting_upgrade_id)
+  const [selectedHeroId, setSelectedHeroId] = useState<string>(ALL_HEROES[0].id)
+  const [selectedUpgradeId, setSelectedUpgradeId] = useState<string>(ALL_HEROES[0].starting_upgrade_id)
   const [upgradeManuallyChosen, setUpgradeManuallyChosen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<ExtendedLoadout | null>(null)
@@ -158,8 +188,15 @@ export function ArmoryView() {
 
     const heroParam = searchParams.get('heroId')
     if (heroParam) {
-      const heroMatch = heroes.find((h) => h.id === heroParam)
+      const heroMatch = ALL_HEROES.find((h) => h.id === heroParam)
       if (heroMatch) {
+        if (!isHeroUnlocked(user?.id, heroMatch.id, highestWave)) {
+          const spec = getUnlockableHeroSpec(heroMatch.id)
+          toast.warning(
+            `${heroMatch.name} is locked. ${spec?.unlockSummary || 'Unlock first in Play or Shop.'}`
+          )
+          return
+        }
         setEditingId(null)
         setSelectedHeroId(heroMatch.id)
         setSelectedUpgradeId(heroMatch.starting_upgrade_id)
@@ -168,7 +205,7 @@ export function ArmoryView() {
         setActiveTab('builder')
       }
     }
-  }, [searchParams])
+  }, [searchParams, user?.id, highestWave])
 
   const fusableStacks = useMemo(
     () =>
@@ -192,17 +229,25 @@ export function ArmoryView() {
   )
 
   const filteredInventory = useMemo(() => {
-    if (inventoryFilter === 'weapon') {
-      return inventoryStacks.filter((e) => e.item.kind === 'weapon')
-    }
-    if (inventoryFilter === 'accessory') {
-      return inventoryStacks.filter((e) => e.item.kind === 'accessory')
-    }
-    if (inventoryFilter === 'fusable') {
-      return fusableStacks
-    }
-    return inventoryStacks
-  }, [inventoryFilter, inventoryStacks, fusableStacks])
+    const base =
+      inventoryFilter === 'weapon'
+        ? inventoryStacks.filter((e) => e.item.kind === 'weapon')
+        : inventoryFilter === 'accessory'
+          ? inventoryStacks.filter((e) => e.item.kind === 'accessory')
+          : inventoryFilter === 'fusable'
+            ? fusableStacks
+            : inventoryStacks
+    return sortGearStacks(base, inventorySort, shopState)
+  }, [inventoryFilter, inventorySort, inventoryStacks, fusableStacks, shopState])
+
+  const inspectedEntry = useMemo(() => {
+    if (!inspectedStack) return null
+    return (
+      inventoryStacks.find(
+        (e) => e.itemId === inspectedStack.itemId && e.stars === inspectedStack.stars
+      ) || null
+    )
+  }, [inspectedStack, inventoryStacks])
 
   // Keep Fusion Workbench populated cleanly when entering Forge or after consuming a stack
   const activeForgeStack: GearStackEntry | null = useMemo(() => {
@@ -216,7 +261,7 @@ export function ArmoryView() {
   }, [forgeSelection, inventoryStacks, fusableStacks])
 
   const selectedHero = useMemo(
-    () => heroes.find((h) => h.id === selectedHeroId) || heroes[0],
+    () => ALL_HEROES.find((h) => h.id === selectedHeroId) || ALL_HEROES[0],
     [selectedHeroId]
   )
 
@@ -226,9 +271,17 @@ export function ArmoryView() {
   )
 
   const handleSelectHero = (heroId: string) => {
+    if (!isHeroAvailable(heroId)) {
+      const spec = getUnlockableHeroSpec(heroId)
+      const hero = ALL_HEROES.find((h) => h.id === heroId)
+      toast.warning(
+        `${hero?.name || 'Hero'} is locked! ${spec?.unlockSummary || 'Unlock in Shop or Play.'}`
+      )
+      return
+    }
     setSelectedHeroId(heroId)
     if (!upgradeManuallyChosen && !editingId) {
-      const hero = heroes.find((h) => h.id === heroId)
+      const hero = ALL_HEROES.find((h) => h.id === heroId)
       if (hero) setSelectedUpgradeId(hero.starting_upgrade_id)
     }
   }
@@ -241,8 +294,8 @@ export function ArmoryView() {
   const startCreate = () => {
     setEditingId(null)
     setLoadoutName('')
-    setSelectedHeroId(heroes[0].id)
-    setSelectedUpgradeId(heroes[0].starting_upgrade_id)
+    setSelectedHeroId(ALL_HEROES[0].id)
+    setSelectedUpgradeId(ALL_HEROES[0].starting_upgrade_id)
     setUpgradeManuallyChosen(false)
     setActiveTab('builder')
   }
@@ -259,8 +312,8 @@ export function ArmoryView() {
   const resetBuilder = () => {
     setEditingId(null)
     setLoadoutName('')
-    setSelectedHeroId(heroes[0].id)
-    setSelectedUpgradeId(heroes[0].starting_upgrade_id)
+    setSelectedHeroId(ALL_HEROES[0].id)
+    setSelectedUpgradeId(ALL_HEROES[0].starting_upgrade_id)
     setUpgradeManuallyChosen(false)
   }
 
@@ -268,6 +321,13 @@ export function ArmoryView() {
     const trimmed = loadoutName.trim()
     if (trimmed.length < 3 || trimmed.length > 50) {
       toast.warning('Loadout name must be between 3 and 50 characters.')
+      return
+    }
+    if (!isHeroAvailable(selectedHeroId)) {
+      const spec = getUnlockableHeroSpec(selectedHeroId)
+      toast.warning(
+        `Cannot save loadout: ${spec?.name || 'Hero'} is locked (${spec?.unlockSummary || 'Unlock first'}).`
+      )
       return
     }
 
@@ -456,91 +516,171 @@ export function ArmoryView() {
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
             {/* Weapon Slot */}
             <div
-              className={`rounded-lg p-3.5 border flex flex-col justify-between ${
-                equippedWeapon ? 'bg-gray-800 border-hazard-gold/60' : 'bg-gray-950/60 border-gray-800'
+              className={`rounded-lg p-3.5 flex items-center gap-3 transition-colors ${
+                equippedWeapon ? 'bg-gray-800 border-2' : 'bg-gray-950/60 border border-gray-800'
               }`}
+              style={
+                equippedWeapon
+                  ? {
+                      borderColor: RARITY_META[equippedWeapon.rarity].color,
+                      boxShadow: `0 0 14px ${RARITY_META[equippedWeapon.rarity].color}22`
+                    }
+                  : undefined
+              }
             >
-              <div>
-                <div className="flex items-center justify-between text-[11px] font-mono uppercase text-gray-400 mb-1">
-                  <span>Equipped Weapon</span>
+              {equippedWeapon ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setInspectedStack({ itemId: equippedWeapon.id, stars: equippedWeaponStars })
+                  }
+                  className="shrink-0 w-13 h-13 rounded-lg bg-gray-950/85 border flex items-center justify-center transition-colors"
+                  style={{ borderColor: `${RARITY_META[equippedWeapon.rarity].color}88` }}
+                  aria-label={`Inspect ${equippedWeapon.name}`}
+                >
+                  <ItemSpriteIcon
+                    itemId={equippedWeapon.id}
+                    size={44}
+                    glowColor={RARITY_META[equippedWeapon.rarity].color}
+                    stars={equippedWeaponStars}
+                    altLabel={equippedWeapon.name}
+                  />
+                </button>
+              ) : (
+                <div className="shrink-0 w-13 h-13 rounded-lg bg-gray-900/80 border border-gray-800 flex items-center justify-center text-xs font-mono text-gray-500">
+                  BASE
+                </div>
+              )}
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between text-[11px] font-mono uppercase text-gray-400 mb-0.5">
+                  <span>Weapon Slot</span>
                   {equippedWeapon && (
-                    <span className="text-hazard-gold font-semibold">
+                    <span className="text-hazard-gold font-semibold tabular-nums">
                       {equippedWeaponStars}★
                     </span>
                   )}
                 </div>
                 {equippedWeapon ? (
                   <>
-                    <p className="text-sm font-bold text-white truncate">{equippedWeapon.name}</p>
-                    <p className="text-xs text-hazard-gold tabular-nums mt-0.5">
-                      {renderStarGlyphs(equippedWeaponStars)} ·{' '}
-                      {equippedWeaponDps === null ? 'DoT' : `${equippedWeaponDps} DPS`}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInspectedStack({ itemId: equippedWeapon.id, stars: equippedWeaponStars })
+                      }
+                      className="text-left text-sm font-bold text-white hover:text-hazard-gold truncate block w-full"
+                    >
+                      {equippedWeapon.name}
+                    </button>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <span className="text-xs text-hazard-gold tabular-nums truncate">
+                        {equippedWeaponDps === null ? 'DoT' : `${equippedWeaponDps} DPS`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleEquipWeapon(null)}
+                        className="text-xs text-red-400 hover:text-red-300 font-medium whitespace-nowrap shrink-0"
+                      >
+                        Unequip
+                      </button>
+                    </div>
                   </>
                 ) : (
                   <>
-                    <p className="text-sm font-semibold text-gray-300">Hero Starter Only</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Equip a bonus weapon below (keeps hero starter)</p>
+                    <p className="text-sm font-semibold text-gray-300 truncate">Hero Starter Only</p>
+                    <p className="text-xs text-gray-500 truncate">Click an item box below</p>
                   </>
                 )}
               </div>
-              {equippedWeapon && (
-                <button
-                  type="button"
-                  onClick={() => handleEquipWeapon(null)}
-                  className="mt-2 text-left text-xs text-red-400 hover:text-red-300 font-medium"
-                >
-                  Unequip Weapon
-                </button>
-              )}
             </div>
 
             {/* 3 Accessory Slots */}
             {Array.from({ length: MAX_EQUIPPED_ACCESSORIES }).map((_, slotIdx) => {
               const acc = equippedAccessories[slotIdx]
               const accStars = acc ? shopState.equippedAccessoryStars?.[acc.id] ?? 0 : 0
+              const accRarityColor = acc ? RARITY_META[acc.rarity].color : undefined
               return (
                 <div
                   key={`slot-${slotIdx}`}
-                  className={`rounded-lg p-3.5 border flex flex-col justify-between ${
-                    acc ? 'bg-gray-800 border-cyan-accent/60' : 'bg-gray-950/60 border-gray-800'
+                  className={`rounded-lg p-3.5 flex items-center gap-3 transition-colors ${
+                    acc ? 'bg-gray-800 border-2' : 'bg-gray-950/60 border border-gray-800'
                   }`}
+                  style={
+                    accRarityColor
+                      ? {
+                          borderColor: accRarityColor,
+                          boxShadow: `0 0 14px ${accRarityColor}22`
+                        }
+                      : undefined
+                  }
                 >
-                  <div>
-                    <div className="flex items-center justify-between text-[11px] font-mono uppercase text-gray-400 mb-1">
-                      <span>Accessory Slot {slotIdx + 1}</span>
-                      {acc && <span className="text-cyan-accent font-semibold">{accStars}★</span>}
+                  {acc ? (
+                    <button
+                      type="button"
+                      onClick={() => setInspectedStack({ itemId: acc.id, stars: accStars })}
+                      className="shrink-0 w-13 h-13 rounded-lg bg-gray-950/85 border flex items-center justify-center transition-colors"
+                      style={{ borderColor: `${accRarityColor}88` }}
+                      aria-label={`Inspect ${acc.name}`}
+                    >
+                      <ItemSpriteIcon
+                        itemId={acc.id}
+                        size={44}
+                        glowColor={RARITY_META[acc.rarity].color}
+                        stars={accStars}
+                        altLabel={acc.name}
+                      />
+                    </button>
+                  ) : (
+                    <div className="shrink-0 w-13 h-13 rounded-lg bg-gray-900/60 border border-dashed border-gray-800 flex items-center justify-center text-xs font-mono text-gray-600 tabular-nums">
+                      0{slotIdx + 1}
+                    </div>
+                  )}
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between text-[11px] font-mono uppercase text-gray-400 mb-0.5">
+                      <span>Accessory {slotIdx + 1}</span>
+                      {acc && (
+                        <span className="text-cyan-accent font-semibold tabular-nums">
+                          {accStars}★
+                        </span>
+                      )}
                     </div>
                     {acc ? (
                       <>
-                        <p className="text-sm font-bold text-white truncate">{acc.name}</p>
-                        <p className="text-xs text-cyan-accent mt-0.5 truncate">
-                          {renderStarGlyphs(accStars)} · {formatAccessoryStatSummary(acc, accStars)}
-                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setInspectedStack({ itemId: acc.id, stars: accStars })}
+                          className="text-left text-sm font-bold text-white hover:text-cyan-accent truncate block w-full"
+                        >
+                          {acc.name}
+                        </button>
+                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                          <span className="text-xs text-cyan-accent truncate">
+                            {formatAccessoryStatSummary(acc, accStars)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAccessory(acc.id)}
+                            className="text-xs text-red-400 hover:text-red-300 font-medium whitespace-nowrap shrink-0"
+                          >
+                            Unequip
+                          </button>
+                        </div>
                       </>
                     ) : (
                       <>
                         <p className="text-sm font-semibold text-gray-500">Empty Slot</p>
-                        <p className="text-xs text-gray-500 mt-0.5">Equip from Inventory</p>
+                        <p className="text-xs text-gray-500 truncate">Click an item box below</p>
                       </>
                     )}
                   </div>
-                  {acc && (
-                    <button
-                      type="button"
-                      onClick={() => handleToggleAccessory(acc.id)}
-                      className="mt-2 text-left text-xs text-red-400 hover:text-red-300 font-medium"
-                    >
-                      Unequip
-                    </button>
-                  )}
                 </div>
               )
             })}
           </div>
 
           {/* Combined Passive Stats Strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 pt-1">
             <div className="bg-gray-800/80 rounded p-2.5 text-center">
               <p className="text-[11px] uppercase text-gray-400">Bonus HP</p>
               <p className="text-sm font-bold text-emerald-400 tabular-nums">+{bonuses.bonusHp}</p>
@@ -567,6 +707,16 @@ export function ArmoryView() {
               <p className="text-[11px] uppercase text-gray-400">Fire Rate</p>
               <p className="text-sm font-bold text-cyan-accent tabular-nums">
                 {Math.round(bonuses.cooldownRateMultiplier * 100)}%
+              </p>
+            </div>
+            <div className="bg-gray-800/80 rounded p-2.5 text-center">
+              <p className="text-[11px] uppercase text-gray-400">Crit Chance</p>
+              <p className="text-sm font-bold text-rose-400 tabular-nums">
+                {Math.min(
+                  90,
+                  Math.round((CRIT_CONFIG.BASE_CRIT_CHANCE + bonuses.critChance) * 100)
+                )}
+                %
               </p>
             </div>
             <div className="bg-gray-800/80 rounded p-2.5 text-center">
@@ -633,14 +783,14 @@ export function ArmoryView() {
         {/* INVENTORY TAB */}
         {!loading && activeTab === 'inventory' && (
           <section className="space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 bg-gray-900 border border-gray-800 rounded-lg p-4">
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant={inventoryFilter === 'all' ? 'primary' : 'secondary'}
                   size="sm"
                   onClick={() => setInventoryFilter('all')}
                 >
-                  All Stacks ({inventoryStacks.length})
+                  All ({inventoryStacks.length})
                 </Button>
                 <Button
                   variant={inventoryFilter === 'weapon' ? 'primary' : 'secondary'}
@@ -661,23 +811,46 @@ export function ArmoryView() {
                   size="sm"
                   onClick={() => setInventoryFilter('fusable')}
                 >
-                  Ready to Fuse ({fusableStacks.length})
+                  Fuse Ready ({fusableStacks.length})
                 </Button>
               </div>
 
-              <p className="text-xs text-gray-400 tabular-nums">
-                Unique Items: <span className="text-white font-semibold">{shopState.ownedIds.length}</span> · Total
-                Copies: <span className="text-white font-semibold">{totalCopiesCount}</span> · Can Fuse:{' '}
-                <span className="text-hazard-gold font-semibold">{fusableStacks.length}</span>
-              </p>
+              <div className="flex flex-wrap items-center justify-between lg:justify-end gap-3">
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="armory-sort-select"
+                    className="text-xs font-mono uppercase text-gray-400 whitespace-nowrap"
+                  >
+                    Sort
+                  </label>
+                  <select
+                    id="armory-sort-select"
+                    aria-label="Sort inventory"
+                    value={inventorySort}
+                    onChange={(e) => setInventorySort(e.target.value as ArmorySortOption)}
+                    className="bg-gray-800 border border-gray-700 rounded-md px-2.5 py-1.5 text-xs font-medium text-white focus:outline-none focus:border-cyan-accent whitespace-nowrap"
+                  >
+                    {ARMORY_SORT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <p className="text-xs text-gray-400 tabular-nums whitespace-nowrap">
+                  <span className="text-white font-semibold">{totalCopiesCount}</span> Copies ·{' '}
+                  <span className="text-hazard-gold font-semibold">{fusableStacks.length}</span> Fusable
+                </p>
+              </div>
             </div>
 
             {inventoryStacks.length === 0 ? (
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-10 text-center">
                 <h2 className="text-xl font-bold text-white mb-2">Your Inventory Is Empty</h2>
                 <p className="text-sm text-gray-400 max-w-md mx-auto mb-6">
-                  Open Supply Crates or buy accessories in the Shop to collect gear stacks starting at
-                  0★, then fuse duplicates here up to 5★.
+                  Open Supply Crates or grab discounted gear in the 10-minute Rotating Shop to collect
+                  stacks starting at 0★, then fuse duplicates here up to 5★.
                 </p>
                 <Button variant="primary" onClick={() => navigate('/shop')}>
                   Open Shop &amp; Crates
@@ -690,143 +863,88 @@ export function ArmoryView() {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredInventory.map((entry) => {
-                  const { item, stars, count } = entry
-                  const rarityMeta = RARITY_META[item.rarity]
-                  const isBad = isBadGearRarity(item.rarity)
-                  const canFuse = stars < MAX_GEAR_STARS && count >= FUSION_COPIES_REQUIRED
-                  const salvageCoins = getItemSalvageValue(item, stars)
+              <div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Select any gear box to inspect full stats, hero pairings, equip, fuse, or salvage.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
+                  {filteredInventory.map((entry) => {
+                    const { item, stars, count } = entry
+                    const rarityMeta = RARITY_META[item.rarity]
+                    const isBad = isBadGearRarity(item.rarity)
+                    const canFuse = stars < MAX_GEAR_STARS && count >= FUSION_COPIES_REQUIRED
+                    const isWeapon = item.kind === 'weapon'
+                    const isEquippedThisStar = isWeapon
+                      ? shopState.equippedWeaponId === item.id && equippedWeaponStars === stars
+                      : equippedAccessorySet.has(item.id) &&
+                        (shopState.equippedAccessoryStars?.[item.id] ?? 0) === stars
 
-                  const isWeapon = item.kind === 'weapon'
-                  const isEquippedThisStar = isWeapon
-                    ? shopState.equippedWeaponId === item.id && equippedWeaponStars === stars
-                    : equippedAccessorySet.has(item.id) &&
-                      (shopState.equippedAccessoryStars?.[item.id] ?? 0) === stars
-                  const isEquippedOtherStar =
-                    !isWeapon &&
-                    equippedAccessorySet.has(item.id) &&
-                    (shopState.equippedAccessoryStars?.[item.id] ?? 0) !== stars
+                    const statusLabel = isEquippedThisStar
+                      ? 'Equipped'
+                      : canFuse
+                        ? 'Fuse Ready'
+                        : stars >= MAX_GEAR_STARS
+                          ? '5★ Max'
+                          : rarityMeta.label
 
-                  const weaponScaled = isWeapon ? getStarScaledWeaponStats(item, stars) : null
-                  const weaponDps = weaponScaled
-                    ? calculateUpgradeDps(weaponScaled.damage, weaponScaled.cooldown_s)
-                    : null
+                    const statusColorClass = isEquippedThisStar
+                      ? 'text-cyan-accent'
+                      : canFuse
+                        ? 'text-hazard-gold'
+                        : isBad
+                          ? 'text-alert-red'
+                          : 'text-gray-400'
 
-                  return (
-                    <article
-                      key={`${item.id}-${stars}`}
-                      className={`bg-gray-900 border rounded-lg p-4 flex flex-col justify-between transition-colors ${
-                        isEquippedThisStar
-                          ? 'border-cyan-accent'
-                          : canFuse
-                            ? 'border-hazard-gold/60'
-                            : isBad
-                              ? 'border-alert-red/40'
-                              : 'border-gray-800 hover:border-gray-700'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-2 text-xs font-mono uppercase mb-1.5">
-                          <span style={{ color: rarityMeta.color }} className="truncate">
-                            {rarityMeta.label} · {isWeapon ? item.category : item.slotLabel}
+                    return (
+                      <button
+                        type="button"
+                        key={`${item.id}-${stars}`}
+                        onClick={() => setInspectedStack({ itemId: item.id, stars })}
+                        className="group text-left bg-gray-900 border-2 rounded-xl p-2.5 flex flex-col justify-between transition-all hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-accent"
+                        style={{
+                          borderColor: rarityMeta.color,
+                          boxShadow: isEquippedThisStar
+                            ? `0 0 18px ${rarityMeta.color}48`
+                            : `0 0 10px ${rarityMeta.color}1C`
+                        }}
+                      >
+                        <div className="flex items-center justify-between text-[11px] font-mono mb-2">
+                          <span className="text-hazard-gold font-bold tabular-nums">
+                            {stars}★
                           </span>
-                          <span className="font-bold text-white tabular-nums shrink-0">
+                          <span className="text-white/90 font-semibold tabular-nums">
                             ×{count}
                           </span>
                         </div>
 
-                        <div className="flex items-baseline justify-between gap-2 mb-1">
-                          <h3 className="text-base font-bold text-white truncate">{item.name}</h3>
-                          <span className="text-xs font-mono text-hazard-gold shrink-0 tabular-nums">
-                            {renderStarGlyphs(stars)} {stars}★
-                          </span>
+                        <div
+                          className="w-full aspect-square rounded-lg border flex items-center justify-center mb-2.5 overflow-hidden transition-transform group-hover:scale-[1.03]"
+                          style={{
+                            borderColor: `${rarityMeta.color}66`,
+                            background: `radial-gradient(circle at 50% 45%, ${rarityMeta.color}26 0%, #090d16 74%)`
+                          }}
+                        >
+                          <ItemSpriteIcon
+                            itemId={item.id}
+                            size={74}
+                            glowColor={rarityMeta.color}
+                            stars={stars}
+                            altLabel={item.name}
+                          />
                         </div>
 
-                        {isEquippedThisStar ? (
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-accent mb-2">
-                            Equipped at {stars}★
-                          </p>
-                        ) : canFuse ? (
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-hazard-gold mb-2">
-                            Fusion Ready ({count}/{FUSION_COPIES_REQUIRED} copies → {stars + 1}★)
-                          </p>
-                        ) : (
-                          <p className="text-[11px] text-gray-500 uppercase tracking-wide mb-2">
-                            {stars >= MAX_GEAR_STARS
-                              ? 'Max Tier (5★)'
-                              : `${count}/${FUSION_COPIES_REQUIRED} copies toward ${stars + 1}★`}
-                          </p>
-                        )}
-
-                        {isWeapon && weaponScaled ? (
-                          <p className="text-xs text-gray-200 mb-2 tabular-nums">
-                            {weaponScaled.damage} dmg · {weaponScaled.cooldown_s}s cd ·{' '}
-                            <span
-                              className={
-                                isBad ? 'text-alert-red font-semibold' : 'text-hazard-gold font-semibold'
-                              }
-                            >
-                              {weaponDps === null ? 'DoT' : `${weaponDps} DPS`}
-                            </span>
-                          </p>
-                        ) : (
+                        <div>
+                          <p className="text-xs font-bold text-white truncate">{item.name}</p>
                           <p
-                            className={`text-xs font-semibold mb-2 ${
-                              isBad ? 'text-alert-red' : 'text-cyan-accent'
-                            }`}
+                            className={`text-[11px] font-semibold uppercase tracking-wide mt-0.5 truncate ${statusColorClass}`}
                           >
-                            {formatAccessoryStatSummary(item as Extract<typeof item, { kind: 'accessory' }>, stars)}
+                            {statusLabel}
                           </p>
-                        )}
-
-                        <p className="text-xs text-gray-400 mb-2">{item.function_desc}</p>
-                        {isWeapon && item.pairedHeroLabel && (
-                          <p className="text-xs font-semibold text-rose-400 mb-3">
-                            {item.pairedHeroLabel}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant={isEquippedThisStar ? 'danger' : 'primary'}
-                          size="sm"
-                          className="flex-1"
-                          onClick={() =>
-                            isWeapon
-                              ? handleEquipWeapon(isEquippedThisStar ? null : item.id, stars)
-                              : handleToggleAccessory(item.id, stars)
-                          }
-                        >
-                          {isEquippedThisStar
-                            ? 'Unequip'
-                            : isEquippedOtherStar
-                              ? `Equip ${stars}★`
-                              : 'Equip'}
-                        </Button>
-
-                        {canFuse && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleOpenInForge(item.id, stars)}
-                          >
-                            Fuse
-                          </Button>
-                        )}
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSalvageStack(item.id, stars)}
-                        >
-                          Salvage +{salvageCoins}c
-                        </Button>
-                      </div>
-                    </article>
-                  )
-                })}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </section>
@@ -877,20 +995,35 @@ export function ArmoryView() {
                             return (
                               <div
                                 key={slotIdx}
-                                className={`rounded-lg p-4 border flex flex-col justify-between ${
+                                className={`rounded-lg p-4 flex flex-col justify-between ${
                                   filled
-                                    ? 'bg-gray-800 border-gray-700'
-                                    : 'bg-gray-950/60 border-gray-800 border-dashed opacity-70'
+                                    ? 'bg-gray-800 border-2'
+                                    : 'bg-gray-950/60 border border-gray-800 border-dashed opacity-70'
                                 }`}
+                                style={filled ? { borderColor: `${rarityMeta.color}CC` } : undefined}
                               >
-                                <div>
-                                  <p className="text-[11px] font-mono uppercase text-gray-400 mb-1">
-                                    Material {slotIdx + 1}
-                                  </p>
-                                  <p className="text-sm font-bold text-white truncate">{item.name}</p>
-                                  <p className="text-xs font-mono text-hazard-gold mt-1">
-                                    {renderStarGlyphs(stars)} {stars}★
-                                  </p>
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className="w-12 h-12 rounded-md bg-gray-950/85 border flex items-center justify-center shrink-0"
+                                    style={{ borderColor: `${rarityMeta.color}77` }}
+                                  >
+                                    <ItemSpriteIcon
+                                      itemId={item.id}
+                                      size={40}
+                                      glowColor={rarityMeta.color}
+                                      stars={stars}
+                                      altLabel={item.name}
+                                    />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-[11px] font-mono uppercase text-gray-400">
+                                      Material {slotIdx + 1}
+                                    </p>
+                                    <p className="text-sm font-bold text-white truncate">{item.name}</p>
+                                    <p className="text-xs font-mono text-hazard-gold tabular-nums">
+                                      {stars}★
+                                    </p>
+                                  </div>
                                 </div>
                                 <p
                                   className={`text-xs mt-3 font-medium ${
@@ -910,21 +1043,39 @@ export function ArmoryView() {
                         </div>
 
                         {/* Result Preview */}
-                        <div className="md:col-span-5 rounded-lg p-4 border border-hazard-gold/50 bg-gray-800 flex flex-col justify-between">
-                          <div>
-                            <div className="flex items-center justify-between text-xs font-mono uppercase mb-1">
+                        <div
+                          className="md:col-span-5 rounded-lg p-4 border-2 bg-gray-800 flex items-center gap-4"
+                          style={{
+                            borderColor: rarityMeta.color,
+                            boxShadow: `0 0 18px ${rarityMeta.color}26`
+                          }}
+                        >
+                          <div
+                            className="w-16 h-16 rounded-lg bg-gray-950/90 border flex items-center justify-center shrink-0"
+                            style={{ borderColor: `${rarityMeta.color}88` }}
+                          >
+                            <ItemSpriteIcon
+                              itemId={item.id}
+                              size={56}
+                              glowColor={rarityMeta.color}
+                              stars={nextStars}
+                              altLabel={item.name}
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between text-xs font-mono uppercase mb-0.5">
                               <span style={{ color: rarityMeta.color }}>{rarityMeta.label}</span>
-                              <span className="text-hazard-gold font-bold">
+                              <span className="text-hazard-gold font-bold tabular-nums">
                                 {stars}★ → {nextStars}★
                               </span>
                             </div>
-                            <p className="text-base font-bold text-white">{item.name}</p>
-                            <p className="text-xs font-mono text-hazard-gold mt-0.5 mb-2">
+                            <p className="text-base font-bold text-white truncate">{item.name}</p>
+                            <p className="text-xs font-mono text-hazard-gold mt-0.5 mb-2 tabular-nums">
                               {renderStarGlyphs(nextStars)} ({nextStars}/5 Stars)
                             </p>
 
                             {isWeapon && beforeWeapon && afterWeapon ? (
-                              <div className="text-xs space-y-1 tabular-nums">
+                              <div className="text-xs space-y-0.5 tabular-nums">
                                 <p className="text-gray-400">
                                   Current ({stars}★): {beforeWeapon.damage} dmg · {beforeWeapon.cooldown_s}s cd ·{' '}
                                   {beforeDps === null ? 'DoT' : `${beforeDps} DPS`}
@@ -935,7 +1086,7 @@ export function ArmoryView() {
                                 </p>
                               </div>
                             ) : (
-                              <div className="text-xs space-y-1">
+                              <div className="text-xs space-y-0.5">
                                 <p className="text-gray-400">
                                   Current ({stars}★):{' '}
                                   {formatAccessoryStatSummary(
@@ -1009,11 +1160,13 @@ export function ArmoryView() {
                     return (
                       <div
                         key={`fuse-${entry.itemId}-${entry.stars}`}
-                        className={`rounded-lg p-4 border flex flex-col justify-between ${
-                          isSelected
-                            ? 'bg-gray-800 border-hazard-gold'
-                            : 'bg-gray-800/60 border-gray-700'
+                        className={`rounded-lg p-4 border-2 flex flex-col justify-between transition-colors ${
+                          isSelected ? 'bg-gray-800' : 'bg-gray-800/60'
                         }`}
+                        style={{
+                          borderColor: isSelected ? rarityMeta.color : `${rarityMeta.color}99`,
+                          boxShadow: isSelected ? `0 0 16px ${rarityMeta.color}30` : undefined
+                        }}
                       >
                         <div>
                           <div className="flex items-center justify-between text-xs font-mono uppercase mb-1">
@@ -1072,7 +1225,8 @@ export function ArmoryView() {
                             ? setForgeSelection({ itemId: entry.itemId, stars: entry.stars })
                             : undefined
                         }
-                        className="text-left rounded-lg p-3 bg-gray-800/50 border border-gray-800 hover:border-gray-700 transition-colors"
+                        className="text-left rounded-lg p-3 bg-gray-800/50 border-2 transition-colors"
+                        style={{ borderColor: `${rarityMeta.color}99` }}
                       >
                         <div className="flex items-center justify-between text-[11px] font-mono uppercase mb-1">
                           <span style={{ color: rarityMeta.color }}>{rarityMeta.label}</span>
@@ -1098,7 +1252,7 @@ export function ArmoryView() {
             {loadouts.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {loadouts.map((loadout) => {
-                  const hero = heroes.find((h) => h.id === loadout.hero_id)
+                  const hero = ALL_HEROES.find((h) => h.id === loadout.hero_id)
                   const upgrade = allKnownUpgrades.find((u) => u.id === loadout.primary_upgrade_id)
                   const dps = upgrade
                     ? calculateUpgradeDps(upgrade.damage, upgrade.cooldown_s)
@@ -1206,20 +1360,31 @@ export function ArmoryView() {
                   1. Select Hero Operative
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {heroes.map((hero) => {
+                  {ALL_HEROES.map((hero) => {
                     const spec = getHeroAbility(hero.id)
+                    const unlocked = isHeroAvailable(hero.id)
+                    const unlockSpec = getUnlockableHeroSpec(hero.id)
                     return (
                       <button
                         type="button"
                         key={hero.id}
                         onClick={() => handleSelectHero(hero.id)}
                         className={`text-left bg-gray-800 rounded-lg p-3 transition-all border-2 ${
-                          selectedHeroId === hero.id
-                            ? 'border-cyan-accent bg-gray-800/90'
-                            : 'border-transparent hover:border-gray-600'
+                          !unlocked
+                            ? 'border-purple-500/30 opacity-65 hover:border-purple-400/60'
+                            : selectedHeroId === hero.id
+                              ? 'border-cyan-accent bg-gray-800/90'
+                              : 'border-transparent hover:border-gray-600'
                         }`}
                       >
-                        <h4 className="font-semibold text-white text-sm">{hero.name}</h4>
+                        <div className="flex items-start justify-between gap-1.5">
+                          <h4 className="font-semibold text-white text-sm">{hero.name}</h4>
+                          {!unlocked && unlockSpec && (
+                            <span className="shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-950/90 text-purple-200 border border-purple-500/40">
+                              Locked
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-cyan-accent mb-0.5">{hero.archetype}</p>
                         <p className="text-[11px] font-semibold text-amber-300 mb-1">
                           {spec.shortTag}
@@ -1227,6 +1392,11 @@ export function ArmoryView() {
                         <p className="text-xs text-gray-400 tabular-nums">
                           {hero.hp} HP · {Math.round(hero.speed * GAME_CONFIG.BASE_PLAYER_SPEED)} px/s
                         </p>
+                        {!unlocked && unlockSpec && (
+                          <p className="text-[10px] text-purple-300 mt-1">
+                            Wave {unlockSpec.unlockWave} or {unlockSpec.unlockCoinCost.toLocaleString()} Coins
+                          </p>
+                        )}
                       </button>
                     )
                   })}
@@ -1320,17 +1490,33 @@ export function ArmoryView() {
                       </span>
                     </div>
                     <p className="text-lg font-bold text-white">{selectedHero.name}</p>
-                    <p className="text-xs font-semibold text-amber-300 mt-1">
-                      Signature: {getHeroAbility(selectedHero.id).abilityName}
-                    </p>
-                    <p className="text-xs text-gray-300 mt-0.5">
-                      {getHeroAbility(selectedHero.id).description}
-                    </p>
-                    {getHeroDamageReduction(selectedHero.id) > 0 && (
-                      <p className="text-xs text-emerald-300 font-semibold mt-1">
-                        Base Damage Reduction: +{Math.round(getHeroDamageReduction(selectedHero.id) * 100)}%
-                      </p>
-                    )}
+                    {(() => {
+                      const sigLv = getSignatureLevel(selectedHero.id)
+                      const sigSummary = getHeroSignatureTierSummary(selectedHero.id, sigLv)
+                      const dr = getHeroDamageReduction(selectedHero.id, sigLv)
+                      const heroCrit = getHeroCritBonuses(selectedHero.id, sigLv)
+                      return (
+                        <>
+                          <p className="text-xs font-semibold text-amber-300 mt-1 tabular-nums">
+                            Signature: {getHeroAbility(selectedHero.id).abilityName} · Lv.{sigLv}/{MAX_HERO_SIGNATURE_LEVEL}
+                          </p>
+                          <p className="text-xs text-cyan-200 mt-0.5 tabular-nums">
+                            {sigSummary.currentSummary}
+                          </p>
+                          {dr > 0 && (
+                            <p className="text-xs text-emerald-300 font-semibold mt-1 tabular-nums">
+                              Base Damage Reduction: +{Math.round(dr * 100)}%
+                            </p>
+                          )}
+                          {heroCrit.critChanceBonus > 0 && (
+                            <p className="text-xs text-purple-300 font-semibold mt-1 tabular-nums">
+                              Innate Crit: +{Math.round(heroCrit.critChanceBonus * 100)}% Chance · +
+                              {Math.round(heroCrit.critDamageBonus * 100)}% Crit Damage
+                            </p>
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
 
                   <div className="bg-gray-800 rounded p-4">
@@ -1419,6 +1605,206 @@ export function ArmoryView() {
         onClose={() => setFusionAnim(null)}
         onFuseAnother={(itemId, stars) => handleFuseStack(itemId, stars)}
       />
+
+      {/* Item Box Inspection Modal */}
+      <Modal
+        isOpen={!!inspectedEntry}
+        onClose={() => setInspectedStack(null)}
+        title={inspectedEntry ? inspectedEntry.item.name : 'Gear Details'}
+        size="md"
+      >
+        {inspectedEntry &&
+          (() => {
+            const { item, stars, count } = inspectedEntry
+            const rarityMeta = RARITY_META[item.rarity]
+            const isBad = isBadGearRarity(item.rarity)
+            const isWeapon = item.kind === 'weapon'
+            const canFuse = stars < MAX_GEAR_STARS && count >= FUSION_COPIES_REQUIRED
+            const salvageCoins = getItemSalvageValue(item, stars)
+
+            const isEquippedThisStar = isWeapon
+              ? shopState.equippedWeaponId === item.id && equippedWeaponStars === stars
+              : equippedAccessorySet.has(item.id) &&
+                (shopState.equippedAccessoryStars?.[item.id] ?? 0) === stars
+            const isEquippedOtherStar =
+              isWeapon
+                ? shopState.equippedWeaponId === item.id && equippedWeaponStars !== stars
+                : equippedAccessorySet.has(item.id) &&
+                  (shopState.equippedAccessoryStars?.[item.id] ?? 0) !== stars
+            const currentEquippedStar = isWeapon
+              ? equippedWeaponStars
+              : shopState.equippedAccessoryStars?.[item.id] ?? 0
+
+            const weaponScaled = isWeapon ? getStarScaledWeaponStats(item, stars) : null
+            const weaponDps = weaponScaled
+              ? calculateUpgradeDps(weaponScaled.damage, weaponScaled.cooldown_s)
+              : null
+            const weaponCrit = isWeapon ? getWeaponCritProfile(item.id) : null
+            const overdriveHint = isWeapon ? getUpgradeOverdriveHint(item.id) : null
+
+            return (
+              <div className="space-y-5">
+                {/* Sprite & Core Identity Header */}
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                  <div
+                    className="w-28 h-28 rounded-xl border-2 flex items-center justify-center shrink-0"
+                    style={{
+                      borderColor: rarityMeta.color,
+                      boxShadow: `0 0 22px ${rarityMeta.color}33`,
+                      background: `radial-gradient(circle at 50% 45%, ${rarityMeta.color}30 0%, #090d16 74%)`
+                    }}
+                  >
+                    <ItemSpriteIcon
+                      itemId={item.id}
+                      size={96}
+                      glowColor={rarityMeta.color}
+                      stars={stars}
+                      altLabel={item.name}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1 text-center sm:text-left">
+                    <p
+                      className="text-xs font-mono uppercase tracking-wider font-semibold"
+                      style={{ color: rarityMeta.color }}
+                    >
+                      {rarityMeta.label} · {isWeapon ? item.category : item.slotLabel}
+                    </p>
+                    <p className="text-base font-mono text-hazard-gold mt-1 tabular-nums">
+                      {renderStarGlyphs(stars)} ({stars}/{MAX_GEAR_STARS} Stars)
+                    </p>
+                    <p className="text-xs text-gray-300 mt-1 tabular-nums">
+                      Owned at {stars}★: <span className="font-bold text-white">×{count}</span>
+                      {' · '}
+                      Salvage Value:{' '}
+                      <span className="font-semibold text-hazard-gold">+{salvageCoins} Coins</span>
+                    </p>
+                    {isEquippedThisStar && (
+                      <p className="text-xs font-semibold text-cyan-accent mt-1.5">
+                        Currently Equipped in Arena Loadout
+                      </p>
+                    )}
+                    {isEquippedOtherStar && (
+                      <p className="text-xs font-semibold text-amber-300 mt-1.5">
+                        Another tier ({currentEquippedStar}★) is currently equipped
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats Block */}
+                {isWeapon && weaponScaled ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                      <div className="bg-gray-900 border border-gray-800 rounded-lg p-2.5">
+                        <p className="text-[11px] uppercase text-gray-400">Damage</p>
+                        <p className="text-base font-bold text-white tabular-nums">
+                          {weaponScaled.damage}
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 border border-gray-800 rounded-lg p-2.5">
+                        <p className="text-[11px] uppercase text-gray-400">Cooldown</p>
+                        <p className="text-base font-bold text-white tabular-nums">
+                          {weaponScaled.cooldown_s}s
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 border border-gray-800 rounded-lg p-2.5">
+                        <p className="text-[11px] uppercase text-gray-400">Output DPS</p>
+                        <p
+                          className={`text-base font-bold tabular-nums ${
+                            isBad ? 'text-alert-red' : 'text-hazard-gold'
+                          }`}
+                        >
+                          {weaponDps === null ? 'DoT' : weaponDps}
+                        </p>
+                      </div>
+                      <div className="bg-gray-900 border border-gray-800 rounded-lg p-2.5">
+                        <p className="text-[11px] uppercase text-gray-400">Bonus Crit</p>
+                        <p className="text-base font-bold text-rose-400 tabular-nums">
+                          {weaponCrit && weaponCrit.critChanceBonus > 0
+                            ? `+${Math.round(weaponCrit.critChanceBonus * 100)}%`
+                            : '0%'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-900 border border-gray-800 rounded-lg p-3.5 space-y-1.5 text-xs">
+                      <p className="text-gray-200 leading-relaxed">{item.function_desc}</p>
+                      <p className="text-cyan-accent font-medium">
+                        Special: {item.special}
+                        {weaponCrit && weaponCrit.critDamageBonus > 0
+                          ? ` · +${Math.round(weaponCrit.critDamageBonus * 100)}% Crit Damage`
+                          : ''}
+                      </p>
+                      {item.pairedHeroLabel && (
+                        <p className="text-rose-400 font-semibold">{item.pairedHeroLabel}</p>
+                      )}
+                      {overdriveHint && (
+                        <p className="text-hazard-gold/90 font-medium">Lv.5 Overdrive: {overdriveHint}</p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gray-900 border border-gray-800 rounded-lg p-3.5 space-y-2 text-xs">
+                    <p
+                      className={`text-sm font-bold ${
+                        isBad ? 'text-alert-red' : 'text-cyan-accent'
+                      }`}
+                    >
+                      {formatAccessoryStatSummary(
+                        item as Extract<typeof item, { kind: 'accessory' }>,
+                        stars
+                      )}
+                    </p>
+                    <p className="text-gray-200 leading-relaxed">{item.function_desc}</p>
+                    <p className="text-gray-400">
+                      Star Scaling: Higher star tiers (up to 5★) amplify positive modifiers or soften
+                      cursed penalties.
+                    </p>
+                  </div>
+                )}
+
+                {/* Inspection Modal Actions */}
+                <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-gray-800">
+                  <Button
+                    variant={isEquippedThisStar ? 'danger' : 'primary'}
+                    className="flex-1 min-w-[140px]"
+                    onClick={() =>
+                      isWeapon
+                        ? handleEquipWeapon(isEquippedThisStar ? null : item.id, stars)
+                        : handleToggleAccessory(item.id, stars)
+                    }
+                  >
+                    {isEquippedThisStar
+                      ? 'Unequip'
+                      : isEquippedOtherStar
+                        ? `Equip ${stars}★`
+                        : 'Equip'}
+                  </Button>
+
+                  {canFuse && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setInspectedStack(null)
+                        handleOpenInForge(item.id, stars)
+                      }}
+                    >
+                      Fuse in Forge
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSalvageStack(item.id, stars)}
+                  >
+                    Salvage 1× (+{salvageCoins}c)
+                  </Button>
+                </div>
+              </div>
+            )
+          })()}
+      </Modal>
 
       {/* Delete Confirmation Modal */}
       <Modal

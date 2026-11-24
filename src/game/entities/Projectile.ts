@@ -49,6 +49,8 @@ export interface ProjectileOptions {
   burnDuration?: number
   burnDamage?: number
   freezeDuration?: number
+  critChanceBonus?: number
+  critDamageBonus?: number
 }
 
 export interface ProjectileHitInfo {
@@ -114,6 +116,8 @@ export class Projectile {
   burnDuration: number = 0
   burnDamage: number = 0
   freezeDuration: number = 0
+  critChanceBonus: number = 0
+  critDamageBonus: number = 0
   hitEntities: Set<unknown> = new Set()
 
   /** State */
@@ -155,6 +159,8 @@ export class Projectile {
     this.burnDuration = options.burnDuration || 0
     this.burnDamage = options.burnDamage || 0
     this.freezeDuration = options.freezeDuration || 0
+    this.critChanceBonus = options.critChanceBonus || 0
+    this.critDamageBonus = options.critDamageBonus || 0
     
     // Apply upgrade data if provided
     if (this.upgradeData) {

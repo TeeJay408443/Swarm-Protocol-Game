@@ -5,6 +5,7 @@ import { Footer } from './Footer'
 export function Layout() {
   const location = useLocation()
   const isFrontPage = location.pathname === '/hq' || location.pathname === '/'
+  const isPlayRoute = location.pathname === '/play'
 
   return (
     <div className="min-h-screen bg-slate-carbon text-white flex flex-col">
@@ -14,7 +15,7 @@ export function Layout() {
           <Outlet />
         </div>
       </main>
-      {!isFrontPage && <Footer />}
+      {!isFrontPage && !isPlayRoute && <Footer />}
     </div>
   )
 }

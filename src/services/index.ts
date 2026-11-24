@@ -82,3 +82,32 @@ export type {
   HeroMasteryProgress,
   HeroMasteryAccountState
 } from './heroMastery'
+
+// Hero Signature Coin Upgrades Service
+export {
+  getHeroUpgradesAccountState,
+  getHeroUpgradeLevel,
+  getAllHeroUpgradeLevels,
+  purchaseHeroSignatureUpgrade,
+  subscribeHeroUpgrades,
+  useHeroUpgrades
+} from './heroUpgrades'
+export type {
+  HeroUpgradesAccountState,
+  PurchaseHeroUpgradeResult
+} from './heroUpgrades'
+
+// Hero Unlocks Service
+export {
+  getHeroUnlocksAccountState,
+  isHeroUnlocked,
+  unlockHeroWithCoins,
+  checkAndSyncMilestoneHeroUnlocks,
+  setHeroUnlockedForDev,
+  subscribeHeroUnlocks,
+  useHeroUnlocks
+} from './heroUnlocks'
+export type {
+  HeroUnlocksAccountState,
+  UnlockHeroResult
+} from './heroUnlocks'

@@ -11,15 +11,24 @@ import {
   getAchievements,
   sortEntities
 } from '../services/database'
+import {
+  RARITY_META,
+  SHOP_CATALOG,
+  type ShopCatalogItem
+} from '../services/shop'
 import type { HeroesRow, EnemiesRow, UpgradesRow, AchievementsRow } from '../types/database'
 
-export type CodexEntityType = 'heroes' | 'enemies' | 'upgrades' | 'achievements'
-export type CodexEntity = HeroesRow | EnemiesRow | UpgradesRow | AchievementsRow
+export type CodexEntityType = 'heroes' | 'enemies' | 'upgrades' | 'gear' | 'achievements'
+export type CodexEntity = HeroesRow | EnemiesRow | UpgradesRow | ShopCatalogItem | AchievementsRow
+
+const isShopCatalogItem = (entity: CodexEntity): entity is ShopCatalogItem =>
+  'kind' in entity && (entity.kind === 'weapon' || entity.kind === 'accessory')
 
 interface UseCodexReturn {
   heroes: HeroesRow[]
   enemies: EnemiesRow[]
   upgrades: UpgradesRow[]
+  gearItems: ShopCatalogItem[]
   achievements: AchievementsRow[]
   loading: boolean
   error: string | null
@@ -44,6 +53,7 @@ export const useCodex = (): UseCodexReturn => {
   const [enemies, setEnemies] = useState<EnemiesRow[]>([])
   const [upgrades, setUpgrades] = useState<UpgradesRow[]>([])
   const [achievements, setAchievements] = useState<AchievementsRow[]>([])
+  const gearItems = SHOP_CATALOG
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -58,15 +68,31 @@ export const useCodex = (): UseCodexReturn => {
     setActiveTabState(tab)
     setSearchQuery('')
     setFilterCategory('all')
-    setSortBy(tab === 'achievements' ? 'title' : 'name')
-    setSortDirection('asc')
+    if (tab === 'gear') {
+      setSortBy('rarity')
+      setSortDirection('desc')
+    } else if (tab === 'achievements') {
+      setSortBy('title')
+      setSortDirection('asc')
+    } else {
+      setSortBy('name')
+      setSortDirection('asc')
+    }
   }, [])
 
   const clearFilters = useCallback(() => {
     setSearchQuery('')
     setFilterCategory('all')
-    setSortBy(activeTab === 'achievements' ? 'title' : 'name')
-    setSortDirection('asc')
+    if (activeTab === 'gear') {
+      setSortBy('rarity')
+      setSortDirection('desc')
+    } else if (activeTab === 'achievements') {
+      setSortBy('title')
+      setSortDirection('asc')
+    } else {
+      setSortBy('name')
+      setSortDirection('asc')
+    }
   }, [activeTab])
 
   const getActiveTabData = useCallback((): CodexEntity[] => {
@@ -77,14 +103,32 @@ export const useCodex = (): UseCodexReturn => {
         return enemies
       case 'upgrades':
         return upgrades
+      case 'gear':
+        return gearItems
       case 'achievements':
         return achievements
       default:
         return []
     }
-  }, [activeTab, heroes, enemies, upgrades, achievements])
+  }, [activeTab, heroes, enemies, upgrades, gearItems, achievements])
 
   const availableCategories = useMemo(() => {
+    if (activeTab === 'gear') {
+      return [
+        'all',
+        'Weapons',
+        'Accessories',
+        'Mythic',
+        'Legendary',
+        'Epic',
+        'Rare',
+        'Uncommon',
+        'Common',
+        'Faulty',
+        'Scrap'
+      ]
+    }
+
     const data = getActiveTabData()
     const categories = new Set<string>()
 
@@ -95,12 +139,12 @@ export const useCodex = (): UseCodexReturn => {
     })
 
     return ['all', ...Array.from(categories)]
-  }, [getActiveTabData])
+  }, [activeTab, getActiveTabData])
 
   const filteredData = useMemo(() => {
     let data = getActiveTabData()
 
-    // Search across name/title, lore, description, function_desc, requirement, special
+    // Search across name/title, lore, description, function_desc, rarity, pairing, special
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
       data = data.filter(entity => {
@@ -115,13 +159,27 @@ export const useCodex = (): UseCodexReturn => {
         if ('special' in entity && entity.special) fields.push(entity.special)
         if ('requirement' in entity) fields.push(entity.requirement)
         if ('reward_badge' in entity) fields.push(entity.reward_badge)
+        if (isShopCatalogItem(entity)) {
+          fields.push(entity.kind, entity.rarity, RARITY_META[entity.rarity].label)
+          if (entity.kind === 'weapon') {
+            fields.push(entity.tierLabel)
+            if (entity.pairedHeroLabel) fields.push(entity.pairedHeroLabel)
+          } else {
+            fields.push(entity.slotLabel, entity.statSummary)
+          }
+        }
         return fields.some(f => f.toLowerCase().includes(q))
       })
     }
 
-    // Filter across archetype, category, or reward_badge
+    // Filter across archetype, category, gear kind/rarity, or reward_badge
     if (filterCategory !== 'all') {
       data = data.filter(entity => {
+        if (isShopCatalogItem(entity)) {
+          if (filterCategory === 'Weapons') return entity.kind === 'weapon'
+          if (filterCategory === 'Accessories') return entity.kind === 'accessory'
+          return entity.rarity === filterCategory.toLowerCase()
+        }
         if ('archetype' in entity) return entity.archetype === filterCategory
         if ('category' in entity) return entity.category === filterCategory
         if ('reward_badge' in entity) return entity.reward_badge === filterCategory
@@ -131,11 +189,33 @@ export const useCodex = (): UseCodexReturn => {
 
     // Sort
     if (sortBy) {
-      data = sortEntities(data, sortBy as keyof CodexEntity, sortDirection) as CodexEntity[]
+      if (activeTab === 'gear') {
+        data = [...data].sort((a, b) => {
+          if (!isShopCatalogItem(a) || !isShopCatalogItem(b)) return 0
+          let cmp = 0
+          if (sortBy === 'rarity') {
+            cmp = RARITY_META[a.rarity].order - RARITY_META[b.rarity].order
+            if (cmp === 0) cmp = a.name.localeCompare(b.name)
+          } else if (sortBy === 'price') {
+            cmp = a.price - b.price
+          } else if (sortBy === 'salvageValue') {
+            cmp = a.salvageValue - b.salvageValue
+          } else if (sortBy === 'damage') {
+            const aDmg = a.kind === 'weapon' ? a.damage : 0
+            const bDmg = b.kind === 'weapon' ? b.damage : 0
+            cmp = aDmg - bDmg
+          } else {
+            cmp = a.name.localeCompare(b.name)
+          }
+          return sortDirection === 'asc' ? cmp : -cmp
+        })
+      } else {
+        data = sortEntities(data, sortBy as keyof CodexEntity, sortDirection) as CodexEntity[]
+      }
     }
 
     return data
-  }, [getActiveTabData, searchQuery, filterCategory, sortBy, sortDirection])
+  }, [activeTab, getActiveTabData, searchQuery, filterCategory, sortBy, sortDirection])
 
   const fetchData = useCallback(async () => {
     try {
@@ -168,6 +248,7 @@ export const useCodex = (): UseCodexReturn => {
     heroes,
     enemies,
     upgrades,
+    gearItems,
     achievements,
     loading,
     error,

@@ -15,6 +15,8 @@ import {
 } from '../db/seedData'
 import { AREA_TWO_BOSSES, AREA_TWO_ENEMIES } from '../config/arenas'
 import { AREA_TWO_UPGRADES } from '../config/areaUpgrades'
+import { UNIVERSAL_CRIT_UPGRADES } from '../config/critSystem'
+import { UNLOCKABLE_HEROES } from '../config/unlockableHeroes'
 import type { 
   HeroesRow, 
   EnemiesRow, 
@@ -31,16 +33,21 @@ import type {
  * Fetch all heroes from the database
  */
 export const getHeroes = async (): Promise<HeroesRow[]> => {
-  if (!supabase) return defaultHeroes
+  const mergeWithExtra = (base: HeroesRow[]): HeroesRow[] => {
+    const seen = new Set(base.map((h) => h.id))
+    return [...base, ...UNLOCKABLE_HEROES.filter((h) => !seen.has(h.id))]
+  }
+
+  if (!supabase) return mergeWithExtra(defaultHeroes)
   try {
     const { data, error } = await supabase
       .from('heroes')
       .select('*')
       .order('name', { ascending: true })
-    if (error || !data || data.length === 0) return defaultHeroes
-    return data
+    if (error || !data || data.length === 0) return mergeWithExtra(defaultHeroes)
+    return mergeWithExtra(data)
   } catch {
-    return defaultHeroes
+    return mergeWithExtra(defaultHeroes)
   }
 }
 
@@ -48,17 +55,18 @@ export const getHeroes = async (): Promise<HeroesRow[]> => {
  * Fetch a single hero by ID
  */
 export const getHero = async (id: string): Promise<HeroesRow | null> => {
-  if (!supabase) return defaultHeroes.find(h => h.id === id) || null
+  const localPool = [...defaultHeroes, ...UNLOCKABLE_HEROES]
+  if (!supabase) return localPool.find(h => h.id === id) || null
   try {
     const { data, error } = await supabase
       .from('heroes')
       .select('*')
       .eq('id', id)
       .single()
-    if (error || !data) return defaultHeroes.find(h => h.id === id) || null
+    if (error || !data) return localPool.find(h => h.id === id) || null
     return data
   } catch {
-    return defaultHeroes.find(h => h.id === id) || null
+    return localPool.find(h => h.id === id) || null
   }
 }
 
@@ -107,21 +115,25 @@ export const getEnemy = async (id: string): Promise<EnemiesRow | null> => {
  * Fetch all upgrades from the database
  */
 export const getUpgrades = async (): Promise<UpgradesRow[]> => {
-  const mergeWithAreaTwo = (base: UpgradesRow[]): UpgradesRow[] => {
+  const mergeWithExtra = (base: UpgradesRow[]): UpgradesRow[] => {
     const seen = new Set(base.map((u) => u.id))
-    return [...base, ...AREA_TWO_UPGRADES.filter((u) => !seen.has(u.id))]
+    return [
+      ...base,
+      ...AREA_TWO_UPGRADES.filter((u) => !seen.has(u.id)),
+      ...UNIVERSAL_CRIT_UPGRADES.filter((u) => !seen.has(u.id))
+    ]
   }
 
-  if (!supabase) return mergeWithAreaTwo(defaultUpgrades)
+  if (!supabase) return mergeWithExtra(defaultUpgrades)
   try {
     const { data, error } = await supabase
       .from('upgrades')
       .select('*')
       .order('name', { ascending: true })
-    if (error || !data || data.length === 0) return mergeWithAreaTwo(defaultUpgrades)
-    return mergeWithAreaTwo(data)
+    if (error || !data || data.length === 0) return mergeWithExtra(defaultUpgrades)
+    return mergeWithExtra(data)
   } catch {
-    return mergeWithAreaTwo(defaultUpgrades)
+    return mergeWithExtra(defaultUpgrades)
   }
 }
 
@@ -129,7 +141,7 @@ export const getUpgrades = async (): Promise<UpgradesRow[]> => {
  * Fetch a single upgrade by ID
  */
 export const getUpgrade = async (id: string): Promise<UpgradesRow | null> => {
-  const localPool = [...defaultUpgrades, ...AREA_TWO_UPGRADES]
+  const localPool = [...defaultUpgrades, ...AREA_TWO_UPGRADES, ...UNIVERSAL_CRIT_UPGRADES]
   if (!supabase) return localPool.find(u => u.id === id) || null
   try {
     const { data, error } = await supabase

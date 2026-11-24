@@ -92,6 +92,9 @@ export type BossAttackKind =
   | 'tracking_strikes'
   | 'pursuit_beam'
   | 'bullet_hell'
+  | 'rotating_cross_lasers'
+  | 'void_meteor_salvo'
+  | 'singularity_grid'
 
 export interface TrackingBlastNode {
   x: number
@@ -121,6 +124,9 @@ export interface BossTelegraphAttack {
   closingReachRatio?: number
   zoneRect?: { x: number; y: number; width: number; height: number }
   safeRect?: { x: number; y: number; width: number; height: number }
+  gridRects?: Array<{ x: number; y: number; width: number; height: number }>
+  beamCount?: number
+  beamSegments?: Array<[number, number]>
   subTargets?: Array<{ x: number; y: number; radius: number }>
   trackingBlasts?: TrackingBlastNode[]
   spawnTimer?: number
@@ -212,8 +218,16 @@ export class Enemy {
   specialCooldown: number = 2.0
   specialCooldownMax: number = 3.6
   bossTier: number = 1
+  bossPhase: number = 1
   bossTitle: string = 'AEGIS COMMANDER'
+  damageReduction: number = 0
+  enableEnrage: boolean = false
+  isEnraged: boolean = false
+  phaseTransitionTimer: number = 0
+  pendingPhaseAnnouncement: number | null = null
   private specialAttackCounter: number = 0
+  private phaseTwoAttackIndex: number = 0
+  private phaseThreeAttackIndex: number = 0
   private halfDirectionIndex: number = 0
   private sideLaserModeIndex: number = 0
   
@@ -460,6 +474,9 @@ export class Enemy {
     }
     
     // Update cooldowns and hit flash
+    if (this.phaseTransitionTimer > 0) {
+      this.phaseTransitionTimer = Math.max(0, this.phaseTransitionTimer - deltaTime)
+    }
     if (this.hitFlashTimer > 0) {
       this.hitFlashTimer -= deltaTime
       if (this.hitFlashTimer <= 0) {
@@ -583,7 +600,10 @@ export class Enemy {
             t.kind === 'closing_side_lasers' ||
             t.kind === 'bullet_hell' ||
             t.kind === 'tracking_strikes' ||
-            t.kind === 'pursuit_beam'
+            t.kind === 'pursuit_beam' ||
+            t.kind === 'rotating_cross_lasers' ||
+            t.kind === 'void_meteor_salvo' ||
+            t.kind === 'singularity_grid'
         )
       if (this.specialCooldown <= 0 && !hasPendingMajorPattern && this.target && this.target.isAlive) {
         const distToTarget = Vector2.distance(this.getCenter(), this.target.getCenter())
@@ -591,7 +611,11 @@ export class Enemy {
         if (distToTarget <= triggerRange) {
           this.spawnTelegraphedAttack()
           this.specialCooldown = this.isStationaryBoss
-            ? 2.25
+            ? this.bossPhase >= 3
+              ? 1.7
+              : this.bossPhase === 2
+                ? 1.95
+                : 2.25
             : Math.max(2.6, this.specialCooldownMax - (this.bossTier - 1) * 0.15)
         }
       }
@@ -747,56 +771,83 @@ export class Enemy {
 
     if (this.isBoss) {
       this.attackPatternIndex++
-      const radialDamage = Math.round(14 * Math.max(1, this.damageScale))
-      const volleyDamage = Math.round(16 * Math.max(1, this.damageScale))
+      const heavyPattern = this.bossTier >= 2 || this.isEnraged || this.bossPhase >= 2
+      const radialDamage = Math.round((heavyPattern ? 17 : 14) * Math.max(1, this.damageScale))
+      const volleyDamage = Math.round((heavyPattern ? 19 : 16) * Math.max(1, this.damageScale))
       if (this.isStationaryBoss && this.attackPatternIndex % 3 === 1) {
-        // 3 Homing Seeker Orbs that curve and follow the player
+        // Homing Seeker Orbs that curve and follow the player (3 -> 4 in P2 -> 6 in P3)
         const baseAngle = Math.atan2(direction.y, direction.x)
-        for (const offset of [-0.42, 0, 0.42]) {
+        const seekerOffsets =
+          this.bossPhase >= 3
+            ? [-0.68, -0.4, -0.14, 0.14, 0.4, 0.68]
+            : this.bossPhase === 2 || this.isEnraged
+              ? [-0.54, -0.22, 0.22, 0.54]
+              : [-0.42, 0, 0.42]
+        for (const offset of seekerOffsets) {
           const a = baseAngle + offset
           this.projectiles.push({
             x: startPos.x,
             y: startPos.y,
             width: 12,
             height: 12,
-            speed: 225,
+            speed: this.bossPhase >= 3 ? 255 : this.isEnraged || this.bossPhase === 2 ? 242 : 225,
             direction: { x: Math.cos(a), y: Math.sin(a) },
             damage: radialDamage,
-            color: '#38BDF8',
+            color: this.bossPhase >= 3 ? '#F43F5E' : '#38BDF8',
             lifetime: 0,
-            maxLifetime: 4.0,
-            homingTurnRate: 1.9,
-            homingRemaining: 2.3
+            maxLifetime: 4.2,
+            homingTurnRate: this.bossPhase >= 3 ? 2.15 : 1.9,
+            homingRemaining: 2.35
           })
         }
       } else if (this.attackPatternIndex % 2 === 1) {
-        // Radial 8-bullet burst
-        for (let i = 0; i < 8; i++) {
-          const angle = (i / 8) * Math.PI * 2 + this.attackPatternIndex * 0.2
+        // Radial burst: 16-way (Final P3), 14-way (Final P2), 12-way (Tier 2+/Enraged), 8-way base
+        const isFinalPhase2Plus = this.isFinalBoss || this.isStationaryBoss
+        const radialCount =
+          isFinalPhase2Plus && this.bossPhase >= 3
+            ? 16
+            : isFinalPhase2Plus && this.bossPhase === 2
+              ? 14
+              : heavyPattern
+                ? 12
+                : 8
+        for (let i = 0; i < radialCount; i++) {
+          const angle = (i / radialCount) * Math.PI * 2 + this.attackPatternIndex * 0.2
           this.projectiles.push({
             x: startPos.x,
             y: startPos.y,
-            width: 10,
-            height: 10,
-            speed: 250,
+            width: heavyPattern ? 11 : 10,
+            height: heavyPattern ? 11 : 10,
+            speed: isFinalPhase2Plus && this.bossPhase >= 3 ? 285 : heavyPattern ? 275 : 250,
             direction: { x: Math.cos(angle), y: Math.sin(angle) },
             damage: radialDamage,
-            color: '#FFD700',
+            color:
+              this.isEnraged || this.bossPhase >= 3
+                ? '#FF0055'
+                : isFinalPhase2Plus && this.bossPhase === 2
+                  ? '#38BDF8'
+                  : '#FFD700',
             lifetime: 0,
-            maxLifetime: 3.5
+            maxLifetime: 3.6
           })
         }
       } else {
-        // 3-bolt aimed laser spread
+        // Aimed laser spread: 7-bolt (Final P3), 5-bolt (Tier 2+/P2), 3-bolt base
+        const isFinalPhase3 = (this.isFinalBoss || this.isStationaryBoss) && this.bossPhase >= 3
         const baseAngle = Math.atan2(direction.y, direction.x)
-        for (const offset of [-0.18, 0, 0.18]) {
+        const volleyOffsets = isFinalPhase3
+          ? [-0.42, -0.28, -0.14, 0, 0.14, 0.28, 0.42]
+          : heavyPattern
+            ? [-0.28, -0.14, 0, 0.14, 0.28]
+            : [-0.18, 0, 0.18]
+        for (const offset of volleyOffsets) {
           const a = baseAngle + offset
           this.projectiles.push({
             x: startPos.x,
             y: startPos.y,
-            width: 10,
-            height: 10,
-            speed: 340,
+            width: heavyPattern ? 11 : 10,
+            height: heavyPattern ? 11 : 10,
+            speed: isFinalPhase3 ? 380 : heavyPattern ? 365 : 340,
             direction: { x: Math.cos(a), y: Math.sin(a) },
             damage: volleyDamage,
             color: '#FF0055',
@@ -951,15 +1002,39 @@ export class Enemy {
     if (forcedKind) {
       kind = forcedKind
     } else if (this.isStationaryBoss) {
-      const finalCycle: BossAttackKind[] = [
-        'closing_side_lasers',
-        'tracking_strikes',
-        'bullet_hell',
-        'closing_side_lasers',
-        'pursuit_beam',
-        'bullet_hell'
-      ]
-      kind = finalCycle[(this.specialAttackCounter - 1) % finalCycle.length]
+      if (this.bossPhase >= 3) {
+        // Phase 3 (<=33% HP): Unleashes Singularity Grid + Rotating Cross Lasers + Void Meteor Salvo + core attacks
+        const phase3Cycle: BossAttackKind[] = [
+          'singularity_grid',
+          'rotating_cross_lasers',
+          'void_meteor_salvo',
+          'closing_side_lasers',
+          'bullet_hell',
+          'pursuit_beam'
+        ]
+        kind = phase3Cycle[this.phaseThreeAttackIndex++ % phase3Cycle.length]
+      } else if (this.bossPhase === 2) {
+        // Phase 2 (<=66% HP): Unlocks Rotating Cross Lasers & Void Meteor Salvo
+        const phase2Cycle: BossAttackKind[] = [
+          'rotating_cross_lasers',
+          'void_meteor_salvo',
+          'closing_side_lasers',
+          'pursuit_beam',
+          'bullet_hell',
+          'tracking_strikes'
+        ]
+        kind = phase2Cycle[this.phaseTwoAttackIndex++ % phase2Cycle.length]
+      } else {
+        const finalCycle: BossAttackKind[] = [
+          'closing_side_lasers',
+          'tracking_strikes',
+          'bullet_hell',
+          'closing_side_lasers',
+          'pursuit_beam',
+          'bullet_hell'
+        ]
+        kind = finalCycle[(this.specialAttackCounter - 1) % finalCycle.length]
+      }
     } else {
       const kinds: BossAttackKind[] = ['orbital_slam', 'mega_laser', 'bombardment_ring']
       kind = kinds[(this.specialAttackCounter - 1) % kinds.length]
@@ -967,7 +1042,117 @@ export class Enemy {
 
     let telegraph: BossTelegraphAttack
 
-    if (kind === 'closing_side_lasers') {
+    if (kind === 'rotating_cross_lasers') {
+      // Phase 2+ New Attack: 4 sweeping X-beams anchored on boss with wide dodgeable radial gaps
+      const initialAngle = Math.PI / 4 + (this.specialAttackCounter % 2) * 0.35
+      const spinDir = this.specialAttackCounter % 2 === 0 ? 1 : -1
+      const spinRate = (this.bossPhase >= 3 ? 0.96 : 0.72) * spinDir
+      telegraph = {
+        id,
+        kind: 'rotating_cross_lasers',
+        x: bossCenter.x,
+        y: bossCenter.y,
+        angle: initialAngle,
+        turnRate: spinRate,
+        beamCount: 4,
+        beamSegments: [
+          [50, 200],
+          [365, 520],
+          [685, 850],
+          [1015, 1350]
+        ],
+        radius: this.bossPhase >= 3 ? 28 : 24,
+        length: 1350,
+        hitCooldown: 0,
+        chargeTimer: 0,
+        chargeDuration: this.bossPhase >= 3 ? 1.15 : 1.35,
+        activeTimer: 0,
+        activeDuration: this.bossPhase >= 3 ? 2.65 : 2.35,
+        damage: Math.round(30 * Math.max(1, this.damageScale * 0.72)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'void_meteor_salvo') {
+      // Phase 2+ New Attack: 7 staggered void blast craters framing the player's zone with dodge pockets
+      const bounds: BossArenaBounds = this.arenaBounds ?? {
+        left: Math.max(0, bossCenter.x - 640),
+        top: Math.max(0, bossCenter.y - 210),
+        width: 1280,
+        height: 720
+      }
+      const zoneRadius = this.bossPhase >= 3 ? 98 : 88
+      const clampX = (vx: number) =>
+        Math.max(bounds.left + zoneRadius + 16, Math.min(bounds.left + bounds.width - zoneRadius - 16, vx))
+      const clampY = (vy: number) =>
+        Math.max(bounds.top + 150, Math.min(bounds.top + bounds.height - zoneRadius - 16, vy))
+      const cx = clampX(targetCenter.x)
+      const cy = clampY(targetCenter.y)
+      const offsets: Array<[number, number]> = [
+        [0, 0],
+        [-195, -135],
+        [195, -135],
+        [-195, 135],
+        [195, 135],
+        [-340, 0],
+        [340, 0]
+      ]
+      const subTargets = offsets.map(([ox, oy]) => ({
+        x: clampX(cx + ox),
+        y: clampY(cy + oy),
+        radius: zoneRadius
+      }))
+      telegraph = {
+        id,
+        kind: 'void_meteor_salvo',
+        x: cx,
+        y: cy,
+        radius: zoneRadius,
+        subTargets,
+        chargeTimer: 0,
+        chargeDuration: this.bossPhase >= 3 ? 1.25 : 1.42,
+        activeTimer: 0,
+        activeDuration: 0.45,
+        damage: Math.round(32 * Math.max(1, this.damageScale * 0.72)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'singularity_grid') {
+      // Phase 3 New Attack: 2 vertical + 2 horizontal full-arena laser strips forming 9 safe cells + nova burst
+      const bounds: BossArenaBounds = this.arenaBounds ?? {
+        left: Math.max(0, bossCenter.x - 640),
+        top: Math.max(0, bossCenter.y - 210),
+        width: 1280,
+        height: 720
+      }
+      const beamThick = 88
+      const shift = (this.phaseThreeAttackIndex % 2 === 0 ? 0.04 : -0.04)
+      const v1 = bounds.left + bounds.width * (0.28 + shift) - beamThick / 2
+      const v2 = bounds.left + bounds.width * (0.72 + shift) - beamThick / 2
+      const h1 = bounds.top + bounds.height * 0.34 - beamThick / 2
+      const h2 = bounds.top + bounds.height * 0.72 - beamThick / 2
+      const gridRects = [
+        { x: v1, y: bounds.top, width: beamThick, height: bounds.height },
+        { x: v2, y: bounds.top, width: beamThick, height: bounds.height },
+        { x: bounds.left, y: h1, width: bounds.width, height: beamThick },
+        { x: bounds.left, y: h2, width: bounds.width, height: beamThick }
+      ]
+      telegraph = {
+        id,
+        kind: 'singularity_grid',
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2,
+        radius: beamThick / 2,
+        bounds,
+        gridRects,
+        chargeTimer: 0,
+        chargeDuration: 1.45,
+        activeTimer: 0,
+        activeDuration: 0.65,
+        damage: Math.round(36 * Math.max(1, this.damageScale * 0.72)),
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'closing_side_lasers') {
       const bounds: BossArenaBounds = this.arenaBounds ?? {
         left: Math.max(0, bossCenter.x - 640),
         top: Math.max(0, bossCenter.y - 195),
@@ -1248,7 +1433,20 @@ export class Enemy {
     for (let i = this.telegraphs.length - 1; i >= 0; i--) {
       const t = this.telegraphs[i]
 
-      if (t.kind === 'pursuit_beam') {
+      if (t.kind === 'rotating_cross_lasers') {
+        t.x = bossCenter.x
+        t.y = bossCenter.y
+        if (t.hasTriggered) {
+          t.angle = (t.angle ?? 0) + (t.turnRate ?? 0.72) * deltaTime
+          if (t.hasDamagedPlayer) {
+            t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
+            if (t.hitCooldown >= 0.48) {
+              t.hitCooldown = 0
+              t.hasDamagedPlayer = false
+            }
+          }
+        }
+      } else if (t.kind === 'pursuit_beam') {
         t.x = bossCenter.x
         t.y = bossCenter.y
         const shouldTrack =
@@ -1281,9 +1479,13 @@ export class Enemy {
             t.hasDamagedPlayer = false
           }
         }
-      } else if (t.kind === 'closing_side_lasers' && t.hasTriggered && t.hasDamagedPlayer) {
+      } else if (
+        (t.kind === 'closing_side_lasers' || t.kind === 'singularity_grid') &&
+        t.hasTriggered &&
+        t.hasDamagedPlayer
+      ) {
         t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
-        if (t.hitCooldown >= 0.55) {
+        if (t.hitCooldown >= 0.52) {
           t.hitCooldown = 0
           t.hasDamagedPlayer = false
         }
@@ -1295,6 +1497,25 @@ export class Enemy {
           t.chargeTimer = t.chargeDuration
           t.hasTriggered = true
           t.activeTimer = 0
+          if (t.kind === 'void_meteor_salvo' || t.kind === 'singularity_grid') {
+            const burstCount = t.kind === 'singularity_grid' ? 12 : 8
+            const burstDmg = Math.round(16 * Math.max(1, this.damageScale))
+            for (let b = 0; b < burstCount; b++) {
+              const ba = (b / burstCount) * Math.PI * 2 + this.specialAttackCounter * 0.25
+              this.projectiles.push({
+                x: bossCenter.x,
+                y: bossCenter.y,
+                width: 11,
+                height: 11,
+                speed: t.kind === 'singularity_grid' ? 255 : 230,
+                direction: { x: Math.cos(ba), y: Math.sin(ba) },
+                damage: burstDmg,
+                color: t.kind === 'singularity_grid' ? '#F43F5E' : '#FACC15',
+                lifetime: 0,
+                maxLifetime: 4.0
+              })
+            }
+          }
         }
       } else {
         t.activeTimer += deltaTime
@@ -1468,14 +1689,61 @@ export class Enemy {
    */
   takeDamage(amount: number): boolean {
     if (!this.isAlive || this.isSpawning) return false
-    
-    this.health -= amount
+
+    let effectiveDamage =
+      this.damageReduction > 0
+        ? Math.max(1, Math.round(amount * (1 - Math.min(0.75, Math.max(0, this.damageReduction)))))
+        : amount
+
+    if (this.phaseTransitionTimer > 0) {
+      effectiveDamage = Math.max(1, Math.round(effectiveDamage * 0.15))
+    }
+
+    const prevHealth = this.health
+    this.health -= effectiveDamage
     if (this.health < 0) this.health = 0
-    
+
     // Visual feedback via frame-safe timer
     this.color = '#FFFFFF'
     this.hitFlashTimer = 0.08
-    
+
+    // Wave 15 Final Boss 3-Phase Progression (Phase 2 @ 66% HP, Phase 3 @ 33% HP)
+    if (this.isFinalBoss) {
+      const phase2Threshold = Math.floor(this.maxHealth * 0.66)
+      const phase3Threshold = Math.floor(this.maxHealth * 0.33)
+
+      if (this.bossPhase < 2 && prevHealth > phase2Threshold && this.health <= phase2Threshold) {
+        this.health = Math.max(1, phase2Threshold)
+        this.bossPhase = 2
+        this.phaseTransitionTimer = 0.85
+        this.pendingPhaseAnnouncement = 2
+        this.shootCooldownMax = Math.max(0.85, this.shootCooldownMax * 0.86)
+        this.specialCooldownMax = Math.max(1.85, this.specialCooldownMax * 0.86)
+        this.shootCooldown = Math.min(this.shootCooldown, 0.25)
+        this.specialCooldown = 0.15
+        if (this.target && this.target.isAlive) {
+          this.spawnTelegraphedAttack('rotating_cross_lasers')
+        }
+        return false
+      }
+
+      if (this.bossPhase < 3 && prevHealth > phase3Threshold && this.health <= phase3Threshold) {
+        this.health = Math.max(1, phase3Threshold)
+        this.bossPhase = 3
+        this.isEnraged = true
+        this.phaseTransitionTimer = 0.95
+        this.pendingPhaseAnnouncement = 3
+        this.shootCooldownMax = Math.max(0.68, this.shootCooldownMax * 0.82)
+        this.specialCooldownMax = Math.max(1.55, this.specialCooldownMax * 0.82)
+        this.shootCooldown = Math.min(this.shootCooldown, 0.2)
+        this.specialCooldown = 0.15
+        if (this.target && this.target.isAlive) {
+          this.spawnTelegraphedAttack('singularity_grid')
+        }
+        return false
+      }
+    }
+
     // Check if dead
     if (this.health <= 0) {
       this.isAlive = false
@@ -1485,7 +1753,21 @@ export class Enemy {
       this.aoeProjectiles = []
       return true
     }
-    
+
+    // Standard Boss Phase 2 Enrage at <= 50% HP for armored/buffed non-final bosses
+    if (!this.isFinalBoss && this.enableEnrage && !this.isEnraged && this.health <= this.maxHealth * 0.5) {
+      this.isEnraged = true
+      this.bossPhase = 2
+      this.pendingPhaseAnnouncement = 2
+      if (!this.isStationaryBoss) {
+        this.speed = this.baseSpeed * 1.22
+      }
+      this.shootCooldownMax = Math.max(0.72, this.shootCooldownMax * 0.78)
+      this.specialCooldownMax = Math.max(1.85, this.specialCooldownMax * 0.78)
+      this.shootCooldown = Math.min(this.shootCooldown, 0.35)
+      this.specialCooldown = Math.min(this.specialCooldown, 0.5)
+    }
+
     return false
   }
 
@@ -1533,9 +1815,14 @@ export class Enemy {
     const effectiveDuration = this.isStationaryBoss
       ? Math.min(0.45, duration * 0.25)
       : this.isBoss || this.isMiniBoss
-        ? Math.max(0.55, duration * 0.55)
+        ? this.damageReduction > 0 || this.enableEnrage
+          ? Math.max(0.35, Math.min(0.6, duration * 0.32))
+          : Math.max(0.55, duration * 0.55)
         : duration
     this.freezeTimer = Math.min(2.6, Math.max(this.freezeTimer, effectiveDuration))
+    if (this.isBoss && (this.damageReduction > 0 || this.enableEnrage)) {
+      this.freezeImmuneTimer = Math.max(this.freezeImmuneTimer, 1.35)
+    }
     if (!this.isStationaryBoss) {
       this.velocity = Vector2.zero()
     }
@@ -1949,9 +2236,141 @@ export class Enemy {
           ctx.fillRect(0, -halfW * 0.36, len, halfW * 0.72)
         }
         ctx.restore()
+      } else if (t.kind === 'rotating_cross_lasers') {
+        const start = camera.worldToScreen(t.x, t.y)
+        const baseAngle = t.angle ?? 0
+        const beams = t.beamCount ?? 4
+        const segments = getRotatingCrossLaserSegments(t)
+        const halfW = Math.max(10, t.radius)
+        const pulse = 0.75 + 0.25 * Math.sin(this.animTime * 22)
+
+        for (let b = 0; b < beams; b++) {
+          const beamAngle = baseAngle + (b / beams) * Math.PI * 2
+          ctx.save()
+          ctx.translate(start.x, start.y)
+          ctx.rotate(beamAngle)
+
+          if (!t.hasTriggered) {
+            for (let sIdx = 0; sIdx < segments.length; sIdx++) {
+              const [segStart, segEnd] = segments[sIdx]
+              const segLen = segEnd - segStart
+              if (segLen <= 0) continue
+
+              ctx.fillStyle = `rgba(255, 0, 85, ${0.13 + chargeProgress * 0.16})`
+              ctx.fillRect(segStart, -halfW, segLen, halfW * 2)
+              ctx.fillStyle = `rgba(56, 189, 248, ${0.22 + chargeProgress * 0.24})`
+              const innerH = Math.max(3, halfW * 2 * chargeProgress)
+              ctx.fillRect(segStart, -innerH / 2, segLen, innerH)
+              ctx.strokeStyle = `rgba(250, 204, 21, ${0.72 * pulse})`
+              ctx.lineWidth = 2
+              ctx.setLineDash([12, 8])
+              ctx.strokeRect(segStart, -halfW, segLen, halfW * 2)
+              ctx.setLineDash([])
+
+              if (sIdx < segments.length - 1) {
+                const nextStart = segments[sIdx + 1][0]
+                const gapWidth = nextStart - segEnd
+                if (gapWidth > 30) {
+                  ctx.fillStyle = `rgba(16, 185, 129, ${0.08 + 0.06 * pulse})`
+                  ctx.fillRect(segEnd, -halfW * 0.9, gapWidth, halfW * 1.8)
+                  ctx.strokeStyle = `rgba(52, 211, 153, ${0.45 * pulse})`
+                  ctx.lineWidth = 1.5
+                  ctx.setLineDash([6, 6])
+                  ctx.strokeRect(segEnd + 4, -halfW * 0.85, gapWidth - 8, halfW * 1.7)
+                  ctx.setLineDash([])
+                }
+              }
+            }
+          } else {
+            const fadeOut =
+              impactProgress > 0.85 ? Math.max(0.2, 1 - (impactProgress - 0.85) / 0.15) : 0.94
+            ctx.globalAlpha = fadeOut
+            for (const [segStart, segEnd] of segments) {
+              const segLen = segEnd - segStart
+              if (segLen <= 0) continue
+
+              ctx.fillStyle = '#FF0055'
+              ctx.fillRect(segStart, -halfW * 1.15, segLen, halfW * 2.3)
+              ctx.beginPath()
+              ctx.arc(segStart, 0, halfW * 1.05, 0, Math.PI * 2)
+              ctx.arc(segEnd, 0, halfW * 1.05, 0, Math.PI * 2)
+              ctx.fill()
+
+              ctx.fillStyle = '#FACC15'
+              ctx.fillRect(segStart, -halfW * 0.65, segLen, halfW * 1.3)
+              ctx.beginPath()
+              ctx.arc(segStart, 0, halfW * 0.62, 0, Math.PI * 2)
+              ctx.arc(segEnd, 0, halfW * 0.62, 0, Math.PI * 2)
+              ctx.fill()
+
+              ctx.fillStyle = '#FFFFFF'
+              ctx.fillRect(segStart, -halfW * 0.28, segLen, halfW * 0.56)
+              ctx.beginPath()
+              ctx.arc(segStart, 0, halfW * 0.28, 0, Math.PI * 2)
+              ctx.arc(segEnd, 0, halfW * 0.28, 0, Math.PI * 2)
+              ctx.fill()
+            }
+          }
+          ctx.restore()
+        }
+
+        if (!t.hasTriggered) {
+          ctx.save()
+          ctx.fillStyle = '#FEF08A'
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'center'
+          const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
+          ctx.fillText(`⚠ ROTATING X-BEAM SWEEP — DODGE THROUGH GAPS! (${rem}s)`, start.x, start.y + 68)
+          ctx.restore()
+        }
+      } else if (t.kind === 'singularity_grid' && t.gridRects) {
+        const pulse = 0.72 + 0.28 * Math.sin(this.animTime * 22)
+        ctx.save()
+        for (const gr of t.gridRects) {
+          const sp = camera.worldToScreen(gr.x, gr.y)
+          if (!t.hasTriggered) {
+            ctx.fillStyle = `rgba(244, 63, 94, ${0.15 + chargeProgress * 0.18})`
+            ctx.fillRect(sp.x, sp.y, gr.width, gr.height)
+            ctx.strokeStyle = `rgba(250, 204, 21, ${0.8 * pulse})`
+            ctx.lineWidth = 2.5
+            ctx.setLineDash([10, 8])
+            ctx.strokeRect(sp.x + 1, sp.y + 1, gr.width - 2, gr.height - 2)
+            ctx.setLineDash([])
+          } else {
+            const alpha = Math.max(0, 1 - impactProgress * 0.85)
+            ctx.globalAlpha = alpha
+            ctx.fillStyle = '#FF0055'
+            ctx.fillRect(sp.x, sp.y, gr.width, gr.height)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.55)'
+            if (gr.width < gr.height) {
+              ctx.fillRect(sp.x + gr.width * 0.3, sp.y, gr.width * 0.4, gr.height)
+            } else {
+              ctx.fillRect(sp.x, sp.y + gr.height * 0.3, gr.width, gr.height * 0.4)
+            }
+          }
+        }
+        if (!t.hasTriggered && t.bounds) {
+          const centerSp = camera.worldToScreen(
+            t.bounds.left + t.bounds.width / 2,
+            t.bounds.top + t.bounds.height * 0.52
+          )
+          const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'
+          ctx.fillRect(centerSp.x - 185, centerSp.y - 20, 370, 38)
+          ctx.strokeStyle = '#F43F5E'
+          ctx.lineWidth = 2
+          ctx.strokeRect(centerSp.x - 185, centerSp.y - 20, 370, 38)
+          ctx.fillStyle = '#FEF08A'
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(`⚠ APOCALYPSE LASER GRID • MOVE TO SAFE CELL (${rem}s)`, centerSp.x, centerSp.y + 4)
+        }
+        ctx.restore()
       } else {
         const zones =
-          t.kind === 'bombardment_ring' && t.subTargets && t.subTargets.length > 0
+          (t.kind === 'bombardment_ring' || t.kind === 'void_meteor_salvo') &&
+          t.subTargets &&
+          t.subTargets.length > 0
             ? t.subTargets
             : [{ x: t.x, y: t.y, radius: t.radius }]
 
@@ -2001,7 +2420,11 @@ export class Enemy {
               ctx.font = 'bold 12px monospace'
               ctx.textAlign = 'center'
               ctx.fillText(
-                t.kind === 'orbital_slam' ? '⚠ ORBITAL SLAM!' : '⚠ BARRAGE ZONE!',
+                t.kind === 'orbital_slam'
+                  ? '⚠ ORBITAL SLAM!'
+                  : t.kind === 'void_meteor_salvo'
+                    ? '⚠ VOID METEOR SALVO!'
+                    : '⚠ BARRAGE ZONE!',
                 sp.x,
                 sp.y - r - 8
               )
@@ -2385,10 +2808,20 @@ export class Enemy {
 
         if (this.enemyId === 'boss_a2_15') {
           // Solar Archon Seraph (Area 2 W15 Final Boss): celestial winged golden crown + blinding solar core
+          if (this.bossPhase >= 2 || this.isEnraged) {
+            ctx.save()
+            ctx.strokeStyle =
+              this.bossPhase >= 3 ? 'rgba(255, 0, 85, 0.8)' : 'rgba(56, 189, 248, 0.72)'
+            ctx.lineWidth = 3.5
+            ctx.beginPath()
+            ctx.arc(0, 0, r * (1.2 + Math.sin(this.animTime * 11) * 0.06), 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.restore()
+          }
           ctx.save()
           const wingBeat = Math.sin(this.animTime * 4) * 5
-          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#78350F'
-          ctx.strokeStyle = '#FACC15'
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : this.bossPhase >= 3 ? '#7F1D1D' : '#78350F'
+          ctx.strokeStyle = this.bossPhase >= 3 ? '#FF0055' : '#FACC15'
           ctx.lineWidth = 3
           // Twin seraphic solar wings
           for (const side of [-1, 1]) {
@@ -2443,8 +2876,31 @@ export class Enemy {
         }
 
         // Aegis Commander Drone: octagonal dreadnought hull + 4 orbiting shield pylons + pulsing core
-        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#1E1B4B'
-        ctx.strokeStyle = '#FFD700'
+        if (this.isEnraged || this.bossPhase >= 2) {
+          ctx.save()
+          ctx.strokeStyle =
+            this.isEnraged || this.bossPhase >= 3
+              ? 'rgba(255, 0, 85, 0.78)'
+              : 'rgba(56, 189, 248, 0.72)'
+          ctx.lineWidth = 3.5
+          ctx.beginPath()
+          ctx.arc(0, 0, r * (1.16 + Math.sin(this.animTime * 12) * 0.06), 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.restore()
+        }
+        ctx.fillStyle = isFlashing
+          ? '#FFFFFF'
+          : this.isEnraged || this.bossPhase >= 3
+            ? '#3B0712'
+            : this.bossPhase === 2
+              ? '#0F2942'
+              : '#1E1B4B'
+        ctx.strokeStyle =
+          this.isEnraged || this.bossPhase >= 3
+            ? '#FF0055'
+            : this.bossPhase === 2
+              ? '#38BDF8'
+              : '#FFD700'
         ctx.lineWidth = 3
         ctx.beginPath()
         for (let i = 0; i < 8; i++) {
@@ -2770,6 +3226,35 @@ export function getClosingSideLaserRects(
 }
 
 /**
+ * Returns the radial laser segments ([startDist, endDist]) along each beam of a rotating_cross_lasers attack,
+ * leaving wide dodgeable safe gaps so players can weave through the spinning sweep.
+ */
+export function getRotatingCrossLaserSegments(
+  telegraph: BossTelegraphAttack
+): Array<[number, number]> {
+  const maxLen = Math.max(100, telegraph.length ?? 1350)
+  const rawSegments: Array<[number, number]> =
+    telegraph.beamSegments && telegraph.beamSegments.length > 0
+      ? telegraph.beamSegments
+      : [
+          [50, 200],
+          [365, 520],
+          [685, 850],
+          [1015, 1350]
+        ]
+
+  const result: Array<[number, number]> = []
+  for (const [s, e] of rawSegments) {
+    const start = Math.max(0, s)
+    const end = Math.min(maxLen, e)
+    if (end > start) {
+      result.push([start, end])
+    }
+  }
+  return result
+}
+
+/**
  * Checks whether a player circle is caught inside a triggered boss telegraphed attack
  */
 export function checkBossTelegraphHit(
@@ -2817,6 +3302,47 @@ export function checkBossTelegraphHit(
     return dx * dx + dy * dy <= effectiveR * effectiveR
   }
 
+  if (telegraph.kind === 'rotating_cross_lasers') {
+    const baseAngle = telegraph.angle ?? 0
+    const beams = telegraph.beamCount ?? 4
+    const segments = getRotatingCrossLaserSegments(telegraph)
+    const hitDist = telegraph.radius + targetCircle.radius * 0.65
+    for (let b = 0; b < beams; b++) {
+      const a = baseAngle + (b / beams) * Math.PI * 2
+      const cosA = Math.cos(a)
+      const sinA = Math.sin(a)
+      for (const [segStart, segEnd] of segments) {
+        const x1 = telegraph.x + cosA * segStart
+        const y1 = telegraph.y + sinA * segStart
+        const dx = cosA * (segEnd - segStart)
+        const dy = sinA * (segEnd - segStart)
+        const lenSq = dx * dx + dy * dy
+        if (lenSq <= 0.0001) continue
+        const t = Math.max(0, Math.min(1, ((targetCircle.x - x1) * dx + (targetCircle.y - y1) * dy) / lenSq))
+        const projX = x1 + t * dx
+        const projY = y1 + t * dy
+        if (Math.hypot(targetCircle.x - projX, targetCircle.y - projY) <= hitDist) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  if (telegraph.kind === 'singularity_grid' && telegraph.gridRects) {
+    const effectiveR = targetCircle.radius * 0.65
+    for (const r of telegraph.gridRects) {
+      const closestX = Math.max(r.x, Math.min(targetCircle.x, r.x + r.width))
+      const closestY = Math.max(r.y, Math.min(targetCircle.y, r.y + r.height))
+      const dx = targetCircle.x - closestX
+      const dy = targetCircle.y - closestY
+      if (dx * dx + dy * dy <= effectiveR * effectiveR) {
+        return true
+      }
+    }
+    return false
+  }
+
   if (telegraph.kind === 'mega_laser' || telegraph.kind === 'pursuit_beam') {
     const x1 = telegraph.x
     const y1 = telegraph.y
@@ -2835,7 +3361,9 @@ export function checkBossTelegraphHit(
   }
 
   const zones =
-    telegraph.kind === 'bombardment_ring' && telegraph.subTargets && telegraph.subTargets.length > 0
+    (telegraph.kind === 'bombardment_ring' || telegraph.kind === 'void_meteor_salvo') &&
+    telegraph.subTargets &&
+    telegraph.subTargets.length > 0
       ? telegraph.subTargets
       : [{ x: telegraph.x, y: telegraph.y, radius: telegraph.radius }]
 

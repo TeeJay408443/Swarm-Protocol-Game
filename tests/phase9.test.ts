@@ -29,6 +29,8 @@ import {
   getAreaById,
   getAreaEnemies,
   getAreaMiniBossCap,
+  getAreaOneBossBuff,
+  getWave15BossCombatProfile,
   getWave15FinalBossHp,
   isAreaUnlocked,
   selectAreaEnemyTemplateForWave,
@@ -38,24 +40,50 @@ import {
 import {
   computeHeroBurnPerTick,
   getArcSlashConfig,
+  getChronoCloneConfig,
+  getEngineerSummonBonuses,
   getGrimReaperWeaponConfig,
   getHeroAbility,
   getHeroDamageReduction,
+  getHeroFireRateBonus,
+  getHeroUpgradeCost,
   getMuramasaWeaponConfig,
   getPairedHeroArcSlashBonus,
+  getPaladinConfig,
+  getPyroBurnConfig,
+  getRangerHomingConfig,
+  getStormAssassinConfig,
+  getHeroCritBonuses,
   getSummonCountForUpgrade,
+  getTempestSphereWeaponConfig,
   HERO_ABILITY_CONSTANTS,
+  HERO_UPGRADE_COSTS,
+  MAX_HERO_UPGRADE_LEVEL,
   resolveStartingUpgradeIds,
   shouldApplyHomingForHero
 } from '../src/config/heroAbilities'
+import {
+  ALL_HEROES,
+  getUnlockableHeroSpec,
+  isUnlockableHero
+} from '../src/config/unlockableHeroes'
 import {
   AREA_TWO_UPGRADES,
   getAvailableRunUpgrades,
   isAreaTwoUpgradesUnlocked
 } from '../src/config/areaUpgrades'
+import {
+  CRIT_CONFIG,
+  UNIVERSAL_CRIT_UPGRADES,
+  computeCritTextSwayAngle,
+  formatDamageFloatingText,
+  getPassiveCritUpgradeBonuses,
+  getWeaponCritProfile,
+  rollCriticalHit
+} from '../src/config/critSystem'
 import { heroes, enemies, upgrades, achievements } from '../src/db/seedData'
 import { validateSeedData } from '../src/db/validateSeed'
-import { getEnemies, getUpgrades } from '../src/services/database'
+import { getEnemies, getHeroes, getUpgrades } from '../src/services/database'
 import {
   calculateScoreFormula,
   estimateWaveFromSeconds,
@@ -67,13 +95,14 @@ import { Collision } from '../src/game/utils/collision'
 import { ScoreManager } from '../src/game/ScoreManager'
 import { XPManager } from '../src/game/XPManager'
 import { WaveManager } from '../src/game/WaveManager'
-import { Player } from '../src/game/entities/Player'
+import { isVisiblePlayerWeaponId, Player } from '../src/game/entities/Player'
 import {
   BossArenaBounds,
   ClosingSideLaserMode,
   checkBossTelegraphHit,
   checkEnemyAoeHit,
   Enemy,
+  getRotatingCrossLaserSegments,
   getClosingSideLaserRects,
   getClosingSideLaserTrackRects,
   resolveEnemyCollisions
@@ -89,6 +118,7 @@ import {
   listSavedAccounts
 } from '../src/services/auth'
 import { getLocalPlayerTelemetry, submitScore } from '../src/services/scores'
+import { computePostGameMetrics, formatSurvivalClock } from '../src/config/postGameSummary'
 import { isConfiguredSupabase } from '../src/services/supabase'
 import {
   DEV_AUTHORIZED_EMAIL,
@@ -105,11 +135,13 @@ import {
   computeEquippedAccessoryBonuses,
   creditShopCoins,
   equipShopWeapon,
+  formatRotationCountdown,
   fuseGearStacks,
   FUSION_COPIES_REQUIRED,
   getInventoryStacks,
   getShopAccountState,
   getShopItemById,
+  getShopRotation,
   getShopWeaponById,
   getShopAccessoryById,
   getStackCount,
@@ -126,11 +158,21 @@ import {
   purchaseShopItem,
   salvageShopItem,
   SHOP_ACCESSORIES,
+  SHOP_CATALOG,
+  SHOP_ROTATION_INTERVAL_MS,
   SHOP_WEAPONS,
   shopWeaponsAsUpgrades,
+  sortGearStacks,
   SUPPLY_CRATES,
   toggleEquipAccessory
 } from '../src/services/shop'
+import { getWeaponVisualBehavior } from '../src/game/weaponVisuals'
+import {
+  computeDifficultyCoinPayout,
+  formatDifficultyCoinLabel,
+  GAME_DIFFICULTIES,
+  getDifficultyById
+} from '../src/config/difficulties'
 import {
   computeHeroMasteryBonuses,
   evaluateHeroMasteryProgress,
@@ -140,6 +182,17 @@ import {
   HERO_MASTERY_TIERS,
   recordHeroRoundsCompleted
 } from '../src/services/heroMastery'
+import {
+  getAllHeroUpgradeLevels,
+  getHeroUpgradeLevel,
+  purchaseHeroSignatureUpgrade
+} from '../src/services/heroUpgrades'
+import {
+  checkAndSyncMilestoneHeroUnlocks,
+  isHeroUnlocked,
+  setHeroUnlockedForDev,
+  unlockHeroWithCoins
+} from '../src/services/heroUnlocks'
 import { createLoadout, getExtendedLoadout } from '../src/services/loadouts'
 
 describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
@@ -602,11 +655,11 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
   it('credits Battle Coins from combat, blocks direct weapon buys, sells accessories, and equips crate gear in Armory', async () => {
     const shopTestUser = `shop_user_${Date.now()}`
 
-    // Canonical seed upgrade count is 21 (including Inferno Fireball) while shop exposes 16 crate weapons + 14 accessories
+    // Canonical seed upgrade count is 21 (including Inferno Fireball) while shop exposes 19 crate weapons + 16 accessories
     assert.equal(upgrades.length, 21)
-    assert.equal(SHOP_WEAPONS.length, 16)
-    assert.equal(SHOP_ACCESSORIES.length, 14)
-    assert.equal(shopWeaponsAsUpgrades().length, 16)
+    assert.equal(SHOP_WEAPONS.length, 19)
+    assert.equal(SHOP_ACCESSORIES.length, 16)
+    assert.equal(shopWeaponsAsUpgrades().length, 19)
 
     // Higher Shop pricing & Celestial Seeker Swarm Epic rarity verified
     assert.ok((getShopItemById('wpn_plasma_lance')?.price ?? 0) >= 200)
@@ -646,21 +699,47 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     })
     assert.equal(getShopAccountState(shopTestUser).balance, 150)
 
-    // Cannot equip unowned weapon, cannot direct-buy weapons or crateOnly salvage, and cannot buy accessory exceeding wallet
+    // Deterministic 10-minute rotation timestamp (weapons & accessories on sale)
+    const testNowMs = 1_700_000_000_000
+    const rotation = getShopRotation(testNowMs)
+    assert.equal(rotation.entries.length, 6)
+    assert.equal(rotation.entries.filter((e) => e.item.kind === 'weapon').length, 3)
+    assert.equal(rotation.entries.filter((e) => e.item.kind === 'accessory').length, 3)
+    assert.ok(rotation.remainingMs > 0 && rotation.remainingMs <= SHOP_ROTATION_INTERVAL_MS)
+    assert.equal(formatRotationCountdown(61_000), '01:01')
+    for (const entry of rotation.entries) {
+      assert.equal(isBadGearRarity(entry.item.rarity), false)
+      assert.ok(entry.salePrice < entry.originalPrice)
+      assert.ok(entry.discountPercent >= 15 && entry.discountPercent <= 35)
+    }
+
+    // Advancing 10 minutes advances windowIndex and rotates inventory
+    const nextRotation = getShopRotation(testNowMs + SHOP_ROTATION_INTERVAL_MS)
+    assert.equal(nextRotation.windowIndex, rotation.windowIndex + 1)
+    assert.notDeepEqual(
+      nextRotation.entries.map((e) => e.item.id),
+      rotation.entries.map((e) => e.item.id)
+    )
+
+    // Cannot equip unowned weapon, cannot direct-buy permanent/non-rotation items or bad crate gear, and cannot buy sale item exceeding wallet
     const unownedEquip = equipShopWeapon(shopTestUser, 'wpn_plasma_lance')
     assert.equal(unownedEquip.success, false)
-    const directWeaponBlocked = purchaseShopItem(shopTestUser, 'wpn_plasma_lance')
-    assert.equal(directWeaponBlocked.success, false)
-    const crateOnlyDirect = purchaseShopItem(shopTestUser, 'wpn_rusty_pistol')
+    const nonRotationWeaponBlocked = purchaseShopItem(shopTestUser, 'wpn_plasma_lance', testNowMs)
+    assert.equal(nonRotationWeaponBlocked.success, false)
+    const nonRotationAccBlocked = purchaseShopItem(shopTestUser, 'acc_titanium_core', testNowMs)
+    assert.equal(nonRotationAccBlocked.success, false)
+    const crateOnlyDirect = purchaseShopItem(shopTestUser, 'wpn_rusty_pistol', testNowMs)
     assert.equal(crateOnlyDirect.success, false)
-    const tooExpensiveAcc = purchaseShopItem(shopTestUser, 'acc_regen_matrix')
-    assert.equal(tooExpensiveAcc.success, false)
+    // At testNowMs, acc_chrono_accelerator is on sale for 865c (> 150c balance)
+    const tooExpensiveSaleAcc = purchaseShopItem(shopTestUser, 'acc_chrono_accelerator', testNowMs)
+    assert.equal(tooExpensiveSaleAcc.success, false)
 
-    // Top up wallet for direct accessory purchases (total 150 + 1850 = 2000)
-    creditShopCoins(shopTestUser, 1850) // balance -> 2000
+    // Top up wallet for rotation sale purchases & crate roll (total 150 + 3850 = 4000)
+    creditShopCoins(shopTestUser, 3850) // balance -> 4000
 
-    // Direct weapon purchase remains blocked even with plenty of coins
-    assert.equal(purchaseShopItem(shopTestUser, 'wpn_plasma_lance').success, false)
+    // Non-rotation items remain blocked even with plenty of coins
+    assert.equal(purchaseShopItem(shopTestUser, 'wpn_plasma_lance', testNowMs).success, false)
+    assert.equal(purchaseShopItem(shopTestUser, 'acc_titanium_core', testNowMs).success, false)
 
     // Unlock Plasma Lance via Tactical Crate roll (rng: 0.65 -> uncommon, then pick wpn_plasma_lance index 0)
     const crateRolls = [0.65, 0.01]
@@ -668,22 +747,42 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const crateUnlock = openSupplyCrate(shopTestUser, 'crate_tactical', () => crateRolls[cIdx++] ?? 0)
     assert.equal(crateUnlock.success, true)
     assert.equal(crateUnlock.item?.id, 'wpn_plasma_lance')
-    assert.equal(getShopAccountState(shopTestUser).balance, 1740) // 2000 - 260
+    assert.equal(getShopAccountState(shopTestUser).balance, 3740) // 4000 - 260
 
-    // Purchase 4 accessories directly at higher prices (180 + 260 + 420 + 560 = 1420 -> 320 left)
-    assert.equal(purchaseShopItem(shopTestUser, 'acc_titanium_core').success, true)
-    assert.equal(purchaseShopItem(shopTestUser, 'acc_flux_thrusters').success, true)
-    assert.equal(purchaseShopItem(shopTestUser, 'acc_magnet_array').success, true)
-    assert.equal(purchaseShopItem(shopTestUser, 'acc_overclock_coil').success, true)
-    assert.equal(getShopAccountState(shopTestUser).balance, 320)
+    // Purchase a rotating Weapon & 3 rotating Accessories at their discounted sale prices
+    const rotWeapon = rotation.entries.find((e) => e.item.kind === 'weapon')!
+    const rotAccessories = rotation.entries.filter((e) => e.item.kind === 'accessory')
+    assert.equal(rotAccessories.length, 3)
 
-    // Buying an already-owned accessory stacks another 0★ copy for Armory Fusion
-    const secondTitanium = purchaseShopItem(shopTestUser, 'acc_titanium_core')
-    assert.equal(secondTitanium.success, true)
-    assert.equal(secondTitanium.stars, 0)
-    assert.equal(secondTitanium.newCount, 2)
-    assert.equal(getTotalStackCount(secondTitanium.state, 'acc_titanium_core'), 2)
-    assert.equal(secondTitanium.state.balance, 140)
+    const boughtRotWeapon = purchaseShopItem(shopTestUser, rotWeapon.item.id, testNowMs)
+    assert.equal(boughtRotWeapon.success, true)
+    assert.equal(boughtRotWeapon.pricePaid, rotWeapon.salePrice)
+    assert.equal(boughtRotWeapon.discountPercent, rotWeapon.discountPercent)
+
+    for (const accEntry of rotAccessories) {
+      const res = purchaseShopItem(shopTestUser, accEntry.item.id, testNowMs)
+      assert.equal(res.success, true)
+      assert.equal(res.pricePaid, accEntry.salePrice)
+    }
+
+    // Buying an already-owned rotating item stacks another 0★ copy for Armory Fusion
+    const secondAccCopy = purchaseShopItem(shopTestUser, rotAccessories[0].item.id, testNowMs)
+    assert.equal(secondAccCopy.success, true)
+    assert.equal(secondAccCopy.stars, 0)
+    assert.equal(secondAccCopy.newCount, 2)
+    assert.equal(getTotalStackCount(secondAccCopy.state, rotAccessories[0].item.id), 2)
+
+    // Acquire a 4th distinct accessory from the next 10-minute rotation to test the 3-slot accessory cap
+    const fourthAccEntry = nextRotation.entries.find(
+      (e) =>
+        e.item.kind === 'accessory' &&
+        !rotAccessories.some((existing) => existing.item.id === e.item.id)
+    )!
+    assert.equal(
+      purchaseShopItem(shopTestUser, fourthAccEntry.item.id, testNowMs + SHOP_ROTATION_INTERVAL_MS)
+        .success,
+      true
+    )
 
     // Equip crate-unlocked weapon in Armory (defaults to 0★)
     const eqWpn = equipShopWeapon(shopTestUser, 'wpn_plasma_lance')
@@ -692,27 +791,24 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(eqWpn.state.equippedWeaponStars, 0)
 
     // Equip 3 accessories cleanly; 4th rejected until one is unequipped
-    assert.equal(toggleEquipAccessory(shopTestUser, 'acc_titanium_core').success, true)
-    assert.equal(toggleEquipAccessory(shopTestUser, 'acc_flux_thrusters').success, true)
+    assert.equal(toggleEquipAccessory(shopTestUser, 'acc_chrono_accelerator').success, true)
     assert.equal(toggleEquipAccessory(shopTestUser, 'acc_magnet_array').success, true)
-    const overSlot = toggleEquipAccessory(shopTestUser, 'acc_overclock_coil')
+    assert.equal(toggleEquipAccessory(shopTestUser, 'acc_flux_thrusters').success, true)
+    const overSlot = toggleEquipAccessory(shopTestUser, fourthAccEntry.item.id)
     assert.equal(overSlot.success, false)
     assert.equal(overSlot.state.equippedAccessoryIds.length, MAX_EQUIPPED_ACCESSORIES)
 
-    // Unequip one accessory and verify combined stat bonuses
-    assert.equal(toggleEquipAccessory(shopTestUser, 'acc_flux_thrusters').success, true)
-    assert.equal(toggleEquipAccessory(shopTestUser, 'acc_overclock_coil').success, true)
-
+    // Verify combined stat bonuses from the 3 equipped rotation accessories
     const finalState = getShopAccountState(shopTestUser)
     const bonuses = computeEquippedAccessoryBonuses(
       finalState.equippedAccessoryIds,
       finalState.equippedAccessoryStars
     )
-    assert.equal(bonuses.bonusHp, 40)
-    assert.equal(bonuses.damageReduction, 0.1)
+    assert.equal(bonuses.speedMultiplier, 1.3) // 1 + 0.12 (chrono) + 0.18 (flux)
+    assert.equal(bonuses.cooldownRateMultiplier, 1.24)
+    assert.equal(bonuses.xpMultiplier, 1.15)
     assert.equal(bonuses.magnetRangeMultiplier, 1.9)
     assert.equal(bonuses.bonusCoinChance, 0.25)
-    assert.equal(bonuses.cooldownRateMultiplier, 1.15)
 
     // Loadouts referencing crate-unlocked Shop weapons resolve full primary_upgrade metadata
     const createdLoadout = await createLoadout(
@@ -829,13 +925,16 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(MAX_GEAR_STARS, 5)
     assert.equal(FUSION_COPIES_REQUIRED, 2)
 
-    // Give enough coins for 32 direct purchases of Standard Alloy Vest (32 * 110 = 3520) + crates
+    // Give enough coins for 32 crate pulls of Standard Alloy Vest (32 * 95 = 3040)
     creditShopCoins(forgeUser, 12000)
 
-    // Buy 32 copies of acc_alloy_vest (0★) -> enough for 0★->1★->2★->3★->4★->5★
+    // Collect 32 copies of acc_alloy_vest (0★) via deterministic Salvage Crate rolls (0.6 -> common, 0.9 -> acc_alloy_vest)
+    const alloySeq = [0.6, 0.9]
     for (let i = 0; i < 32; i++) {
-      const buyRes = purchaseShopItem(forgeUser, 'acc_alloy_vest')
-      assert.equal(buyRes.success, true)
+      let sIdx = 0
+      const dropRes = openSupplyCrate(forgeUser, 'crate_salvage', () => alloySeq[sIdx++] ?? 0)
+      assert.equal(dropRes.success, true)
+      assert.equal(dropRes.item?.id, 'acc_alloy_vest')
     }
 
     const beforeForge = getShopAccountState(forgeUser)
@@ -1521,9 +1620,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(openRes.item?.id, 'wpn_muramasa')
     assert.equal(openRes.state.balance, 0)
 
-    // Direct purchase of Mythic Muramasa / Calamity Heart remains blocked
-    assert.equal(purchaseShopItem(mythicUser, 'wpn_muramasa').success, false)
-    assert.equal(purchaseShopItem(mythicUser, 'acc_calamity_heart').success, false)
+    // Direct purchase of Mythic Muramasa / Calamity Heart remains blocked outside rotation
+    const nonMythicRotationNowMs = 1_700_000_000_000
+    assert.equal(purchaseShopItem(mythicUser, 'wpn_muramasa', nonMythicRotationNowMs).success, false)
+    assert.equal(purchaseShopItem(mythicUser, 'acc_calamity_heart', nonMythicRotationNowMs).success, false)
 
     // Equipping Mythic Muramasa pairs with Vanguard Blade (hero_01) for huge damage, wider cleave, faster cooldown, extra wave
     const otherHeroMuramasa = getMuramasaWeaponConfig(138, 1, 'hero_02')
@@ -1653,10 +1753,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       areaId: 'carbon_sector',
       wave15Cleared: false
     })
-    assert.equal(beforeUnlock.length, upgrades.length)
+    assert.equal(beforeUnlock.length, upgrades.length + UNIVERSAL_CRIT_UPGRADES.length)
     assert.equal(beforeUnlock.some((u) => u.id === 'upg_a2_01'), false)
 
-    // Unlocking Area 2 (entering Astral Citadel OR beating Wave 15) unlocks all 5 Area 2 upgrades
+    // Unlocking Area 2 (entering Astral Citadel OR beating Wave 15) unlocks all Area 2 upgrades
     assert.equal(
       isAreaTwoUpgradesUnlocked({ areaId: 'astral_citadel', wave15Cleared: false }),
       true
@@ -1669,16 +1769,22 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       areaId: 'astral_citadel',
       wave15Cleared: true
     })
-    assert.equal(afterUnlock.length, upgrades.length + AREA_TWO_UPGRADES.length)
+    assert.equal(
+      afterUnlock.length,
+      upgrades.length + AREA_TWO_UPGRADES.length + UNIVERSAL_CRIT_UPGRADES.length
+    )
     for (const a2Upg of AREA_TWO_UPGRADES) {
       assert.ok(afterUnlock.some((u) => u.id === a2Upg.id))
       assert.ok(getUpgradeLevelPerkHint(a2Upg.id, 1).length > 0)
       assert.ok(getUpgradeOverdriveHint(a2Upg.id).includes('LV 5 OVERDRIVE'))
     }
 
-    // Codex getUpgrades includes Area 2 upgrades cleanly
+    // Codex getUpgrades includes Area 2 & universal crit upgrades cleanly
     const codexUpgrades = await getUpgrades()
-    assert.equal(codexUpgrades.length, upgrades.length + AREA_TWO_UPGRADES.length)
+    assert.equal(
+      codexUpgrades.length,
+      upgrades.length + AREA_TWO_UPGRADES.length + UNIVERSAL_CRIT_UPGRADES.length
+    )
 
     // Vanguard Laser Strider (upg_a2_02): walks near player and fires piercing laser bolts (+ Engineer bonus)
     assert.equal(getSummonCountForUpgrade('upg_a2_02', 1, 'hero_01'), 1)
@@ -1760,13 +1866,21 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
 
     const nonEngReaper = getGrimReaperWeaponConfig(88, 1, 'hero_01')
     const engReaper = getGrimReaperWeaponConfig(88, 1, 'hero_03')
+    const engReaperLv5 = getGrimReaperWeaponConfig(88, 5, 'hero_03')
     assert.equal(nonEngReaper.isPairedHero, false)
     assert.equal(engReaper.isPairedHero, true)
     assert.equal(nonEngReaper.reaperCount, 1)
-    assert.equal(engReaper.reaperCount, 2) // Tech Engineer extra summon bonus!
-    assert.equal(getSummonCountForUpgrade('wpn_grim_reaper', 5, 'hero_03'), 3)
+    assert.equal(engReaper.reaperCount, 1) // Always strictly 1 towering Reaper; upgrades buff attacks!
+    assert.equal(engReaperLv5.reaperCount, 1)
+    assert.equal(getSummonCountForUpgrade('wpn_grim_reaper', 5, 'hero_03'), 1)
     assert.ok(engReaper.damage > nonEngReaper.damage * 1.4)
+    assert.ok(engReaperLv5.damage > engReaper.damage * 1.4)
     assert.ok(engReaper.cooldownScale < 1)
+    assert.ok(engReaperLv5.cooldownScale < engReaper.cooldownScale)
+    assert.ok(engReaper.scytheCount > nonEngReaper.scytheCount)
+    assert.ok(engReaperLv5.scytheCount >= 5)
+    assert.ok(engReaper.siphonTargets > nonEngReaper.siphonTargets)
+    assert.ok(engReaperLv5.siphonTargets >= 6)
     assert.ok(engReaper.healPerTarget > nonEngReaper.healPerTarget)
 
     // Grim Reaper summon throws Scythe projectiles and siphons nearby enemies
@@ -1829,7 +1943,796 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     frozenTarget.update(0.1, engPlayer)
     assert.ok(frozenTarget.x !== startX || frozenTarget.y !== startY)
   })
+
+  it('indexes all shop weapons & accessories in Codex and applies Easy/Normal/Hard/Expert difficulty coin & enemy modifiers', () => {
+    // 1. Codex Gear Index completeness (every weapon + every accessory appears cleanly in SHOP_CATALOG)
+    assert.equal(SHOP_CATALOG.length, SHOP_WEAPONS.length + SHOP_ACCESSORIES.length)
+    for (const wpn of SHOP_WEAPONS) {
+      assert.ok(SHOP_CATALOG.some((item) => item.id === wpn.id && item.kind === 'weapon'))
+    }
+    for (const acc of SHOP_ACCESSORIES) {
+      assert.ok(SHOP_CATALOG.some((item) => item.id === acc.id && item.kind === 'accessory'))
+    }
+
+    // 2. Difficulties exist in exact Easy -> Normal -> Hard -> Expert order
+    assert.deepEqual(
+      GAME_DIFFICULTIES.map((d) => d.id),
+      ['easy', 'normal', 'hard', 'expert']
+    )
+
+    const easy = getDifficultyById('easy')
+    const normal = getDifficultyById('normal')
+    const hard = getDifficultyById('hard')
+    const expert = getDifficultyById('expert')
+
+    assert.equal(easy.coinBonusPercent, -25)
+    assert.equal(normal.coinBonusPercent, 0)
+    assert.equal(hard.coinBonusPercent, 25)
+    assert.equal(expert.coinBonusPercent, 150)
+
+    assert.equal(formatDifficultyCoinLabel(easy), '-25% Coins')
+    assert.equal(formatDifficultyCoinLabel(normal), 'Standard Coins')
+    assert.equal(formatDifficultyCoinLabel(hard), '+25% Coins')
+    assert.equal(formatDifficultyCoinLabel(expert), '+150% Coins')
+
+    // Enemy threat scales strictly upwards across Easy < Normal < Hard < Expert
+    assert.ok(
+      easy.enemyHpMultiplier < normal.enemyHpMultiplier &&
+        normal.enemyHpMultiplier < hard.enemyHpMultiplier &&
+        hard.enemyHpMultiplier < expert.enemyHpMultiplier
+    )
+    assert.ok(
+      easy.enemyDamageMultiplier < normal.enemyDamageMultiplier &&
+        normal.enemyDamageMultiplier < hard.enemyDamageMultiplier &&
+        hard.enemyDamageMultiplier < expert.enemyDamageMultiplier
+    )
+    assert.ok(
+      easy.enemySpeedMultiplier < normal.enemySpeedMultiplier &&
+        normal.enemySpeedMultiplier < hard.enemySpeedMultiplier &&
+        hard.enemySpeedMultiplier < expert.enemySpeedMultiplier
+    )
+    assert.ok(
+      easy.spawnRateMultiplier < normal.spawnRateMultiplier &&
+        normal.spawnRateMultiplier < hard.spawnRateMultiplier &&
+        hard.spawnRateMultiplier < expert.spawnRateMultiplier
+    )
+
+    // 3. Exact coin payouts over 100 1-coin pickups using fractional carry (0 bonusCoinChance)
+    const simulate100Coins = (diffId: 'easy' | 'normal' | 'hard' | 'expert') => {
+      let total = 0
+      let carry = 0
+      for (let i = 0; i < 100; i++) {
+        const res = computeDifficultyCoinPayout({
+          baseCoinValue: 1,
+          difficultyId: diffId,
+          bonusCoinChance: 0,
+          carry
+        })
+        total += res.coinsAwarded
+        carry = res.nextCarry
+      }
+      return total
+    }
+
+    assert.equal(simulate100Coins('easy'), 75) // -25%
+    assert.equal(simulate100Coins('normal'), 100) // Standard
+    assert.equal(simulate100Coins('hard'), 125) // +25%
+    assert.equal(simulate100Coins('expert'), 250) // +150%
+  })
+
+  it('supports single towering Grim Reaper attack scaling, Solar Flail apex fire AoE metadata, and full Crit system + red swaying "!" text', () => {
+    // 1. Towering Grim Reaper throws enlarged scythes & upgrades scale attack volume instead of count
+    const reaperLv1Cfg = getGrimReaperWeaponConfig(88, 1, 'hero_01')
+    const reaperLv5Cfg = getGrimReaperWeaponConfig(88, 5, 'hero_01')
+    assert.equal(reaperLv1Cfg.reaperCount, 1)
+    assert.equal(reaperLv5Cfg.reaperCount, 1)
+    assert.ok(reaperLv5Cfg.scytheCount > reaperLv1Cfg.scytheCount)
+    assert.ok(reaperLv5Cfg.siphonTargets > reaperLv1Cfg.siphonTargets)
+    assert.ok(reaperLv5Cfg.cooldownScale < reaperLv1Cfg.cooldownScale)
+    assert.ok(reaperLv5Cfg.damage > reaperLv1Cfg.damage * 1.5)
+
+    const engHero = heroes.find((h) => h.id === 'hero_03') || heroes[0]
+    const engPlayer = new Player({ x: 300, y: 300, hero: engHero })
+    const reaperTarget = new Enemy({
+      x: 420,
+      y: 300,
+      enemyData: enemies[0],
+      target: engPlayer
+    })
+    reaperTarget.isSpawning = false
+    const bigReaper = new Summon({
+      kind: 'grim_reaper',
+      upgradeId: 'wpn_grim_reaper',
+      x: 340,
+      y: 300,
+      damage: reaperLv5Cfg.damage,
+      cooldown: 0.4,
+      level: 5,
+      isPairedHero: true,
+      scytheCount: reaperLv5Cfg.scytheCount,
+      siphonTargetCount: reaperLv5Cfg.siphonTargets,
+      healPerTarget: reaperLv5Cfg.healPerTarget
+    })
+    bigReaper.cooldownTimer = 0.01
+    const bigShot = bigReaper.update(0.05, engPlayer, [reaperTarget], [])
+    assert.ok((bigShot?.projectile?.width ?? 0) >= 42)
+
+    // 2. Solar Flare Flail notes full-extension apex fire AoE behavior
+    const solarFlail = getShopWeaponById('wpn_solar_flail')!
+    assert.ok(solarFlail.function_desc.toLowerCase().includes('full extension'))
+
+    // 3. Crit Weapons, Crit Accessories & Passive Crit Upgrades
+    const crimsonEdge = getShopWeaponById('wpn_crimson_railblade')!
+    const phantomSniper = getShopWeaponById('wpn_phantom_sniper')!
+    assert.equal(crimsonEdge.rarity, 'rare')
+    assert.equal(phantomSniper.rarity, 'epic')
+    assert.ok(getWeaponCritProfile('wpn_crimson_railblade').critChanceBonus >= 0.2)
+    assert.ok(getWeaponCritProfile('wpn_phantom_sniper').critChanceBonus >= 0.3)
+    assert.ok(getWeaponCritProfile('wpn_muramasa').critChanceBonus >= 0.15)
+    assert.ok(getWeaponCritProfile('wpn_grim_reaper').critChanceBonus >= 0.15)
+
+    const visor = getShopAccessoryById('acc_targeting_visor')!
+    const core = getShopAccessoryById('acc_assassin_core')!
+    const heart = getShopAccessoryById('acc_calamity_heart')!
+    assert.ok((visor.bonuses.critChance ?? 0) > 0)
+    assert.ok((core.bonuses.critChance ?? 0) > 0 && (core.bonuses.critDamageMultiplier ?? 0) > 0)
+    assert.ok((heart.bonuses.critChance ?? 0) > 0)
+
+    const accCritBonuses = computeEquippedAccessoryBonuses(
+      ['acc_targeting_visor', 'acc_assassin_core', 'acc_calamity_heart'],
+      { acc_assassin_core: 2 }
+    )
+    assert.ok(accCritBonuses.critChance > 0.5)
+    assert.ok(accCritBonuses.critDamageBonus >= 0.5)
+
+    // Passive crit upgrades are available in all areas + Codex + Lv 1-5 hints
+    const carbonUpgs = getAvailableRunUpgrades({ areaId: 'carbon_sector', wave15Cleared: false })
+    for (const critUpg of UNIVERSAL_CRIT_UPGRADES) {
+      assert.ok(carbonUpgs.some((u) => u.id === critUpg.id))
+      assert.ok(getUpgradeLevelPerkHint(critUpg.id, 1).length > 0)
+      assert.ok(getUpgradeOverdriveHint(critUpg.id).includes('LV 5 OVERDRIVE'))
+    }
+    const passiveBonuses = getPassiveCritUpgradeBonuses({ upg_crit_01: 5, upg_crit_02: 5 })
+    assert.ok(passiveBonuses.critChanceBonus >= 0.45)
+    assert.ok(passiveBonuses.critDamageBonus >= 0.8)
+    assert.ok(passiveBonuses.weaponDamageMultiplierBonus >= 0.3)
+
+    // 4. Critical Hit rolling, Projectile crit propagation, and burn non-crit enforcement
+    const critHit = rollCriticalHit({
+      baseDamage: 100,
+      accessoryCritChance: accCritBonuses.critChance,
+      upgradeCritChance: passiveBonuses.critChanceBonus,
+      weaponCritChance: getWeaponCritProfile('wpn_phantom_sniper').critChanceBonus,
+      accessoryCritDamageBonus: accCritBonuses.critDamageBonus,
+      upgradeCritDamageBonus: passiveBonuses.critDamageBonus,
+      weaponCritDamageBonus: getWeaponCritProfile('wpn_phantom_sniper').critDamageBonus,
+      rng: () => 0.1
+    })
+    assert.equal(critHit.isCrit, true)
+    assert.equal(critHit.critChance, CRIT_CONFIG.MAX_CRIT_CHANCE)
+    assert.ok(critHit.damage >= 300)
+
+    const nonCritBurn = rollCriticalHit({
+      baseDamage: 100,
+      accessoryCritChance: 0.7,
+      canCrit: false,
+      rng: () => 0.0
+    })
+    assert.equal(nonCritBurn.isCrit, false)
+    assert.equal(nonCritBurn.damage, 100)
+
+    const critProj = new Projectile({
+      x: 0,
+      y: 0,
+      damage: 70,
+      critChanceBonus: 0.34,
+      critDamageBonus: 0.5
+    })
+    assert.equal(critProj.critChanceBonus, 0.34)
+    assert.equal(critProj.critDamageBonus, 0.5)
+
+    // 5. Crit floating text: ends with "!", red (#FF2E43), lingers longer, rotates side to side symmetrically
+    assert.equal(formatDamageFloatingText(critHit.damage, true), `${critHit.damage}!`)
+    assert.equal(formatDamageFloatingText(100, false), '100')
+    assert.equal(CRIT_CONFIG.CRIT_TEXT_COLOR, '#FF2E43')
+    assert.ok(CRIT_CONFIG.CRIT_TEXT_DURATION > CRIT_CONFIG.NORMAL_TEXT_DURATION * 2)
+
+    const swayLeft = computeCritTextSwayAngle(Math.PI / (2 * CRIT_CONFIG.CRIT_TEXT_SWAY_SPEED), 0)
+    const swayRight = computeCritTextSwayAngle((3 * Math.PI) / (2 * CRIT_CONFIG.CRIT_TEXT_SWAY_SPEED), 0)
+    assert.ok(swayLeft > 0.2 && swayRight < -0.2)
+    assert.ok(Math.abs(swayLeft + swayRight) < 1e-6)
+  })
+
+  it('weakens Outpost Ranger base homing and supports coin-purchasable 5-tier signature upgrades for all 6 heroes', () => {
+    // 1. Outpost Ranger starts with weak subtle homing that scales dramatically with coin upgrades
+    assert.ok(HERO_ABILITY_CONSTANTS.RANGER_HOMING_STRENGTH <= 3.0)
+    const lv0Homing = getRangerHomingConfig(0)
+    const lv5Homing = getRangerHomingConfig(5)
+    assert.equal(lv0Homing.homingStrength, HERO_ABILITY_CONSTANTS.RANGER_HOMING_STRENGTH)
+    assert.ok(lv5Homing.homingStrength >= lv0Homing.homingStrength * 4)
+    assert.ok(lv5Homing.lockRange > lv0Homing.lockRange)
+
+    const baseBullet = new Projectile({
+      x: 100,
+      y: 100,
+      direction: { x: 1, y: 0 },
+      speed: 400,
+      damage: 25,
+      type: 'Basic',
+      homingTarget: { x: 100, y: 260 },
+      homingStrength: lv0Homing.homingStrength
+    })
+    const upgradedBullet = new Projectile({
+      x: 100,
+      y: 100,
+      direction: { x: 1, y: 0 },
+      speed: 400,
+      damage: 25,
+      type: 'Basic',
+      homingTarget: { x: 100, y: 260 },
+      homingStrength: lv5Homing.homingStrength
+    })
+    baseBullet.update(0.1)
+    upgradedBullet.update(0.1)
+    assert.ok(
+      upgradedBullet.direction.y > baseBullet.direction.y * 2.5,
+      'Upgraded Lv.5 Outpost Ranger homing must curve sharply stronger than Lv.0 base homing'
+    )
+
+    // 2. Coin purchase transactions: insufficient balance rejection, incremental deduction, Lv.5 cap
+    const upgradeTestUser = `hero_upg_tester_${Date.now()}`
+    assert.equal(getHeroUpgradeLevel(upgradeTestUser, 'hero_02'), 0)
+
+    const failInsufficient = purchaseHeroSignatureUpgrade(upgradeTestUser, 'hero_02')
+    assert.equal(failInsufficient.success, false)
+    assert.equal(failInsufficient.newLevel, 0)
+
+    const totalAllFiveCost = HERO_UPGRADE_COSTS.reduce((sum, c) => sum + c, 0)
+    creditShopCoins(upgradeTestUser, totalAllFiveCost + 500)
+
+    for (let expectedLv = 1; expectedLv <= MAX_HERO_UPGRADE_LEVEL; expectedLv++) {
+      const expectedCost = getHeroUpgradeCost(expectedLv - 1)
+      const res = purchaseHeroSignatureUpgrade(upgradeTestUser, 'hero_02')
+      assert.equal(res.success, true)
+      assert.equal(res.previousLevel, expectedLv - 1)
+      assert.equal(res.newLevel, expectedLv)
+      assert.equal(res.costPaid, expectedCost)
+    }
+
+    assert.equal(getHeroUpgradeLevel(upgradeTestUser, 'hero_02'), 5)
+    assert.equal(getShopAccountState(upgradeTestUser).balance, 500)
+    assert.equal(getShopAccountState(upgradeTestUser).totalSpent, totalAllFiveCost)
+
+    const capReject = purchaseHeroSignatureUpgrade(upgradeTestUser, 'hero_02')
+    assert.equal(capReject.success, false)
+    assert.equal(capReject.newLevel, 5)
+    assert.equal(getShopAccountState(upgradeTestUser).balance, 500)
+
+    const allLevels = getAllHeroUpgradeLevels(upgradeTestUser)
+    assert.equal(allLevels.hero_02, 5)
+    assert.equal(allLevels.hero_01, 0)
+
+    // 3. Verify signature upgrade scaling across all other 5 heroes
+    const vanLv0 = getArcSlashConfig(50, 1, 'hero_01', 0)
+    const vanLv5 = getArcSlashConfig(50, 1, 'hero_01', 5)
+    assert.ok(vanLv5.radius > vanLv0.radius)
+    assert.ok(vanLv5.damage > vanLv0.damage)
+    assert.ok(vanLv5.cooldownScale < vanLv0.cooldownScale)
+
+    const engLv0 = getEngineerSummonBonuses(0)
+    const engLv5 = getEngineerSummonBonuses(5)
+    assert.ok(engLv5.fireRateMultiplier > engLv0.fireRateMultiplier)
+    assert.ok(engLv5.damageMultiplier > engLv0.damageMultiplier)
+    assert.ok(getSummonCountForUpgrade('upg_01', 1, 'hero_03', 5) > getSummonCountForUpgrade('upg_01', 1, 'hero_03', 0))
+    assert.ok(getSummonCountForUpgrade('upg_20', 1, 'hero_03', 5) > getSummonCountForUpgrade('upg_20', 1, 'hero_03', 0))
+
+    const chronoLv0 = getChronoCloneConfig(0)
+    const chronoLv5 = getChronoCloneConfig(5)
+    assert.ok(chronoLv5.duration > chronoLv0.duration)
+    assert.ok(chronoLv5.damageRatio > chronoLv0.damageRatio)
+    assert.ok(chronoLv5.spawnInterval < chronoLv0.spawnInterval)
+
+    const palLv0 = getPaladinConfig(0)
+    const palLv5 = getPaladinConfig(5)
+    assert.ok(getHeroDamageReduction('hero_05', 5) > getHeroDamageReduction('hero_05', 0))
+    assert.ok(palLv5.dashCooldown < palLv0.dashCooldown)
+    assert.ok(palLv5.bashDamageRatio > palLv0.bashDamageRatio)
+
+    const pyroLv0 = getPyroBurnConfig(0)
+    const pyroLv5 = getPyroBurnConfig(5)
+    assert.ok(pyroLv5.duration > pyroLv0.duration)
+    assert.ok(computeHeroBurnPerTick(100, 5) > computeHeroBurnPerTick(100, 0))
+  })
+
+  it('buffs Area 1 bosses with massive HP multipliers, armored damage reduction, Phase 2 Enrage, and freeze resistance', () => {
+    const w5Buff = getAreaOneBossBuff(5, false)
+    const w10Buff = getAreaOneBossBuff(10, false)
+    const w15Buff = getAreaOneBossBuff(15, true)
+
+    assert.ok(w5Buff.hpMultiplier >= 4.0)
+    assert.ok(w10Buff.hpMultiplier > w5Buff.hpMultiplier)
+    assert.ok(w5Buff.damageReduction > 0.15)
+    assert.ok(w10Buff.damageReduction > w5Buff.damageReduction)
+    assert.ok(w15Buff.damageReduction >= 0.35)
+    assert.equal(w5Buff.enableEnrage, true)
+    assert.equal(w15Buff.enableEnrage, true)
+
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 500, y: 500, hero })
+    const bossTemplate = enemies.find((e) => e.id === 'ene_04')!
+    const buffedW10Boss = new Enemy({
+      x: 780,
+      y: 500,
+      enemyData: bossTemplate,
+      target: player,
+      isBoss: true
+    })
+    buffedW10Boss.isSpawning = false
+    buffedW10Boss.bossTier = 2
+    buffedW10Boss.maxHealth = 10000
+    buffedW10Boss.health = 10000
+    buffedW10Boss.damageReduction = w10Buff.damageReduction
+    buffedW10Boss.enableEnrage = true
+    const preEnrageSpeed = buffedW10Boss.baseSpeed
+    const preEnrageShootCd = buffedW10Boss.shootCooldownMax
+
+    // 1. Armored plating reduces raw incoming damage (30% DR -> 1000 raw deals 700)
+    buffedW10Boss.takeDamage(1000)
+    assert.equal(buffedW10Boss.health, 9300)
+    assert.equal(buffedW10Boss.isEnraged, false)
+
+    // 2. Dropping <= 50% HP triggers Phase 2 Enrage (faster movement & faster attack cooldowns)
+    buffedW10Boss.takeDamage(7000) // 7000 * 0.7 = 4900 -> 4400 HP (<= 5000)
+    assert.equal(buffedW10Boss.isEnraged, true)
+    assert.ok(buffedW10Boss.speed > preEnrageSpeed)
+    assert.ok(buffedW10Boss.shootCooldownMax < preEnrageShootCd)
+
+    // 3. Tier 2 / Enraged bosses fire 12-bullet radial bursts and 5-bolt aimed laser spreads
+    buffedW10Boss.shootCooldown = 0
+    buffedW10Boss.update(0.05, player)
+    assert.equal(buffedW10Boss.projectiles.length, 12)
+    buffedW10Boss.projectiles = []
+    buffedW10Boss.shootCooldown = 0
+    buffedW10Boss.update(0.05, player)
+    assert.equal(buffedW10Boss.projectiles.length, 5)
+
+    // 4. Armored Area 1 bosses resist long frost stunlocks
+    buffedW10Boss.applyFreeze(2.2)
+    assert.ok(buffedW10Boss.freezeTimer <= 0.6)
+    assert.ok(buffedW10Boss.freezeImmuneTimer >= 1.2)
+  })
+
+  it('gives Wave 15 Final Boss massively boosted HP and 2 new combat phases with new attacks', () => {
+    const a1Combat = getWave15BossCombatProfile('carbon_sector')
+    const a2Combat = getWave15BossCombatProfile('astral_citadel')
+    assert.ok(a1Combat.hpMultiplier >= 3.0)
+    assert.ok(a2Combat.hpMultiplier >= 2.5)
+    assert.ok(getWave15FinalBossHp('carbon_sector') * a1Combat.hpMultiplier >= 450000)
+    assert.equal(a1Combat.totalPhases, 3)
+
+    const hero = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 960, y: 820, hero })
+    const w15Boss = new Enemy({
+      x: 960,
+      y: 360,
+      enemyData: getAreaBossTemplateForWave('carbon_sector', 15),
+      target: player,
+      isBoss: true,
+      isStationaryBoss: true,
+      isFinalBoss: true,
+      anchorPos: { x: 960, y: 360 },
+      arenaBounds: { left: 320, top: 140, width: 1280, height: 720 }
+    })
+    w15Boss.isSpawning = false
+    w15Boss.maxHealth = 480000
+    w15Boss.health = 480000
+    w15Boss.damageReduction = a1Combat.damageReduction
+    w15Boss.enableEnrage = true
+    assert.equal(w15Boss.bossPhase, 1)
+
+    // Phase 2 triggers cleanly at <= 66% HP (even against massive spike damage, clamps to phase threshold)
+    w15Boss.takeDamage(500000)
+    assert.equal(w15Boss.bossPhase, 2)
+    assert.equal(w15Boss.health, Math.floor(480000 * 0.66))
+    assert.equal(w15Boss.pendingPhaseAnnouncement, 2)
+    assert.ok(w15Boss.phaseTransitionTimer > 0)
+    assert.equal(w15Boss.telegraphs[0]?.kind, 'rotating_cross_lasers')
+
+    // Rotating cross lasers advance rotation smoothly, have radial dodge gaps >= 150px, and avoid hits inside gaps
+    const crossAtk = w15Boss.telegraphs[0]!
+    const preSpinAngle = crossAtk.angle!
+    crossAtk.hasTriggered = true
+    w15Boss.phaseTransitionTimer = 0
+    w15Boss.update(0.4, player)
+    assert.notEqual(crossAtk.angle, preSpinAngle)
+
+    const crossSegments = getRotatingCrossLaserSegments(crossAtk)
+    assert.ok(crossSegments.length >= 3, 'Spinning cross lasers should be broken into multiple segments')
+    for (let i = 0; i < crossSegments.length - 1; i++) {
+      const gapWidth = crossSegments[i + 1][0] - crossSegments[i][1]
+      assert.ok(gapWidth >= 150, `Expected dodge gap >= 150px, got ${gapWidth}`)
+    }
+    const activeAngle = crossAtk.angle!
+    const segMidDist = (crossSegments[1][0] + crossSegments[1][1]) / 2
+    assert.equal(
+      checkBossTelegraphHit(crossAtk, {
+        x: crossAtk.x + Math.cos(activeAngle) * segMidDist,
+        y: crossAtk.y + Math.sin(activeAngle) * segMidDist,
+        radius: 18
+      }),
+      true
+    )
+    const gapMidDist = (crossSegments[0][1] + crossSegments[1][0]) / 2
+    assert.equal(
+      checkBossTelegraphHit(crossAtk, {
+        x: crossAtk.x + Math.cos(activeAngle) * gapMidDist,
+        y: crossAtk.y + Math.sin(activeAngle) * gapMidDist,
+        radius: 18
+      }),
+      false
+    )
+
+    // Void Meteor Salvo creates 7 blast zones in Phase 2+
+    const salvoAtk = w15Boss.spawnTelegraphedAttack('void_meteor_salvo')!
+    assert.equal(salvoAtk.kind, 'void_meteor_salvo')
+    assert.equal(salvoAtk.subTargets?.length, 7)
+    const firstZone = salvoAtk.subTargets![0]
+    assert.equal(
+      checkBossTelegraphHit(salvoAtk, { x: firstZone.x, y: firstZone.y, radius: 16 }),
+      true
+    )
+
+    // Phase 3 triggers cleanly at <= 33% HP and spawns Singularity Grid + Enraged Overdrive
+    w15Boss.telegraphs = []
+    w15Boss.takeDamage(500000)
+    assert.equal(w15Boss.bossPhase, 3)
+    assert.equal(w15Boss.isEnraged, true)
+    assert.equal(w15Boss.health, Math.floor(480000 * 0.33))
+    assert.equal(w15Boss.pendingPhaseAnnouncement, 3)
+    const gridAtk = w15Boss.telegraphs[0]!
+    assert.equal(gridAtk.kind, 'singularity_grid')
+    assert.equal(gridAtk.gridRects?.length, 4)
+
+    // Singularity Grid hits inside beam corridor and leaves safe cells between lanes
+    const vLane = gridAtk.gridRects![0]
+    assert.equal(
+      checkBossTelegraphHit(gridAtk, {
+        x: vLane.x + vLane.width / 2,
+        y: vLane.y + vLane.height / 2,
+        radius: 16
+      }),
+      true
+    )
+    assert.equal(
+      checkBossTelegraphHit(gridAtk, {
+        x: gridAtk.bounds!.left + 40,
+        y: gridAtk.bounds!.top + 40,
+        radius: 16
+      }),
+      false
+    )
+
+    // Phase 3 escalates shooter volleys to 6 homing seekers
+    w15Boss.projectiles = []
+    w15Boss.attackPatternIndex = 0
+    w15Boss.shootCooldown = 0
+    w15Boss.phaseTransitionTimer = 0
+    w15Boss.update(0.05, player)
+    const p3Seekers = w15Boss.projectiles.filter((p) => (p.homingTurnRate ?? 0) > 0)
+    assert.equal(p3Seekers.length, 6)
+  })
+
+  it('sets base crit chance to 1% and introduces unlockable Storm Assassin hero (hero_07)', async () => {
+    // 1. Base critical chance calibrated to 1%
+    assert.equal(CRIT_CONFIG.BASE_CRIT_CHANCE, 0.01)
+    const missCrit = rollCriticalHit({ baseDamage: 100, rng: () => 0.02 })
+    assert.equal(missCrit.isCrit, false)
+    assert.equal(missCrit.damage, 100)
+    const landCrit = rollCriticalHit({ baseDamage: 100, rng: () => 0.005 })
+    assert.equal(landCrit.isCrit, true)
+    assert.equal(landCrit.damage, 200)
+
+    // 2. Canonical seed remains 6 heroes while full roster & database include Storm Assassin (hero_07)
+    assert.equal(validateSeedData().valid, true)
+    assert.equal(heroes.length, 6)
+    assert.equal(ALL_HEROES.length, 7)
+    const dbHeroes = await getHeroes()
+    assert.equal(dbHeroes.length, 7)
+
+    const stormSpec = getUnlockableHeroSpec('hero_07')!
+    assert.ok(stormSpec)
+    assert.equal(stormSpec.name, 'Storm Assassin')
+    assert.equal(stormSpec.archetype, 'Crit Striker')
+    assert.equal(stormSpec.hp, 115)
+    assert.equal(stormSpec.speed, 1.42)
+    assert.equal(stormSpec.starting_upgrade_id, 'upg_06')
+    assert.equal(stormSpec.unlockWave, 8)
+    assert.equal(stormSpec.unlockCoinCost, 1500)
+    assert.equal(isUnlockableHero('hero_07'), true)
+    assert.equal(isUnlockableHero('hero_01'), false)
+
+    // 3. Storm Assassin entity, buffed passive scaling & 5-tier Hero Mastery
+    const stormPlayer = new Player({ hero: stormSpec })
+    assert.equal(stormPlayer.maxHealth, 115)
+    assert.equal(stormPlayer.speed, 1.42 * GAME_CONFIG.BASE_PLAYER_SPEED)
+    assert.equal(getHeroAbility('hero_07').abilityName, 'Overcharge Execution')
+    assert.equal(HERO_MASTERY_TIERS.hero_07.length, 5)
+
+    const lv0Storm = getStormAssassinConfig(0)
+    const lv5Storm = getStormAssassinConfig(5)
+    assert.ok(lv0Storm.critChanceBonus >= 0.22)
+    assert.ok(lv5Storm.critChanceBonus >= 0.55)
+    assert.ok(lv0Storm.critDamageBonus >= 0.5)
+    assert.ok(lv5Storm.critDamageBonus >= 1.5)
+    assert.ok(lv0Storm.fireRateBonus >= 0.15)
+    assert.ok(lv5Storm.fireRateBonus > lv0Storm.fireRateBonus)
+    assert.ok(lv0Storm.bossStrikeRatio >= 0.55)
+    assert.ok(lv5Storm.stormArcTargets > lv0Storm.stormArcTargets)
+    assert.ok(lv5Storm.stormArcDamageRatio > lv0Storm.stormArcDamageRatio)
+    assert.equal(getHeroCritBonuses('hero_07', 0).critChanceBonus, lv0Storm.critChanceBonus)
+    assert.equal(getHeroCritBonuses('hero_01', 5).critChanceBonus, 0)
+    assert.equal(getHeroFireRateBonus('hero_07', 0), lv0Storm.fireRateBonus)
+    assert.equal(getHeroFireRateBonus('hero_01', 5), 0)
+    assert.ok(getWeaponCritProfile('upg_06').critChanceBonus >= 0.08)
+
+    // 4. Starter heroes unlocked by default; Storm Assassin starts locked & blocks upgrades until unlocked
+    const uidCoins = `test_storm_coins_${Date.now()}`
+    assert.equal(isHeroUnlocked(uidCoins, 'hero_01'), true)
+    assert.equal(isHeroUnlocked(uidCoins, 'hero_07'), false)
+
+    const lockedUpgradeAttempt = purchaseHeroSignatureUpgrade(uidCoins, 'hero_07')
+    assert.equal(lockedUpgradeAttempt.success, false)
+
+    const poorUnlock = unlockHeroWithCoins(uidCoins, 'hero_07')
+    assert.equal(poorUnlock.success, false)
+
+    creditShopCoins(uidCoins, 2000)
+    const coinUnlock = unlockHeroWithCoins(uidCoins, 'hero_07')
+    assert.equal(coinUnlock.success, true)
+    assert.equal(coinUnlock.costPaid, 1500)
+    assert.equal(isHeroUnlocked(uidCoins, 'hero_07'), true)
+    assert.equal(getShopAccountState(uidCoins).balance, 500)
+
+    creditShopCoins(uidCoins, 5000)
+    const sigUpgrade = purchaseHeroSignatureUpgrade(uidCoins, 'hero_07')
+    assert.equal(sigUpgrade.success, true)
+    assert.equal(getHeroUpgradeLevel(uidCoins, 'hero_07'), 1)
+
+    // 5. Wave 8 milestone auto-unlock flow (and dev lock/unlock toggle)
+    const uidWave = `test_storm_wave_${Date.now()}`
+    assert.deepEqual(checkAndSyncMilestoneHeroUnlocks(uidWave, 7), [])
+    assert.equal(isHeroUnlocked(uidWave, 'hero_07'), false)
+    const unlockedByWave = checkAndSyncMilestoneHeroUnlocks(uidWave, 8)
+    assert.equal(unlockedByWave.length, 1)
+    assert.equal(unlockedByWave[0].id, 'hero_07')
+    assert.equal(isHeroUnlocked(uidWave, 'hero_07'), true)
+
+    setHeroUnlockedForDev(uidWave, 'hero_07', false)
+    assert.equal(isHeroUnlocked(uidWave, 'hero_07'), false)
+    setHeroUnlockedForDev(uidWave, 'hero_07', true)
+    assert.equal(isHeroUnlocked(uidWave, 'hero_07'), true)
+
+    // 6. Paired Mythic weapon: Tempest Sphere: Skyfall (pairs with Storm Assassin hero_07)
+    const tempestWpn = getShopWeaponById('wpn_tempest_sphere')!
+    assert.ok(tempestWpn)
+    assert.equal(tempestWpn.rarity, 'mythic')
+    assert.equal(tempestWpn.crateOnly, true)
+    assert.equal(tempestWpn.pairedHeroId, 'hero_07')
+    assert.ok(getWeaponCritProfile('wpn_tempest_sphere').critChanceBonus >= 0.25)
+    assert.ok(getUpgradeLevelPerkHint('wpn_tempest_sphere', 1).length > 0)
+    assert.ok(getUpgradeOverdriveHint('wpn_tempest_sphere').includes('LV 5 OVERDRIVE'))
+
+    const genericSphere = getTempestSphereWeaponConfig(118, 1, 'hero_02')
+    const pairedSphere = getTempestSphereWeaponConfig(118, 1, 'hero_07')
+    const pairedSphereLv5 = getTempestSphereWeaponConfig(118, 5, 'hero_07')
+    assert.equal(genericSphere.isPairedHero, false)
+    assert.equal(pairedSphere.isPairedHero, true)
+    assert.ok(pairedSphere.impactDamage > genericSphere.impactDamage * 1.4)
+    assert.ok(pairedSphere.pulseDamage > genericSphere.pulseDamage * 1.5)
+    assert.ok(pairedSphere.pulseRadius > pairedSphere.impactRadius * 1.4)
+    assert.ok(pairedSphere.pulseRadius > genericSphere.pulseRadius)
+    assert.ok(pairedSphere.sphereCount > genericSphere.sphereCount)
+    assert.ok(pairedSphere.cooldownScale < 1)
+    assert.equal(pairedSphereLv5.sphereCount, 4)
+
+    const tempestLoadout = resolveStartingUpgradeIds({
+      heroStartingUpgradeId: 'upg_06',
+      equippedWeaponId: 'wpn_tempest_sphere'
+    })
+    assert.deepEqual(tempestLoadout, ['upg_06', 'wpn_tempest_sphere'])
+  })
+
+  it('mounts and animates all visible weapons on Player and sorts Armory gear stacks across all sort modes', () => {
+    // 1. Every Shop weapon, canonical active weapon upgrade, and Area 2 weapon resolves a visual behavior
+    for (const w of SHOP_WEAPONS) {
+      const behavior = getWeaponVisualBehavior(w.id)
+      assert.ok(behavior.label.length > 0, `Missing visual label for ${w.id}`)
+      assert.ok(behavior.duration > 0)
+    }
+    for (const u of [...upgrades, ...AREA_TWO_UPGRADES]) {
+      if (['upg_08', 'upg_09', 'upg_11', 'upg_15'].includes(u.id)) continue
+      const behavior = getWeaponVisualBehavior(u.id)
+      assert.ok(behavior.label.length > 0, `Missing visual label for ${u.id}`)
+      assert.ok(behavior.duration > 0)
+    }
+
+    assert.equal(getWeaponVisualBehavior('wpn_muramasa').kind, 'melee_swing')
+    assert.equal(getWeaponVisualBehavior('wpn_solar_flail').kind, 'flail_whip')
+    assert.equal(getWeaponVisualBehavior('wpn_phantom_sniper').kind, 'ranged_recoil')
+    assert.equal(getWeaponVisualBehavior('wpn_chrono_gatling').kind, 'gatling_spin')
+    assert.equal(getWeaponVisualBehavior('upg_a2_03').kind, 'spear_thrust')
+    assert.equal(getWeaponVisualBehavior('wpn_storm_glaive').kind, 'glaive_spin')
+
+    // 2. Player mounts ONLY actual weapons (wpn_* + handheld starters), filtering out upgrades/passives/summons
+    assert.equal(isVisiblePlayerWeaponId('wpn_muramasa'), true)
+    assert.equal(isVisiblePlayerWeaponId('wpn_tempest_sphere'), true)
+    assert.equal(isVisiblePlayerWeaponId('upg_12'), true)
+    assert.equal(isVisiblePlayerWeaponId('upg_13'), true)
+    assert.equal(isVisiblePlayerWeaponId('upg_01'), false)
+    assert.equal(isVisiblePlayerWeaponId('upg_04'), false)
+    assert.equal(isVisiblePlayerWeaponId('upg_14'), false)
+    assert.equal(isVisiblePlayerWeaponId('upg_17'), false)
+    assert.equal(isVisiblePlayerWeaponId('upg_crit_01'), false)
+    assert.equal(isVisiblePlayerWeaponId('upg_a2_04'), false)
+
+    const vanguard = heroes.find((h) => h.id === 'hero_01')!
+    const player = new Player({ x: 500, y: 500, hero: vanguard })
+    assert.equal(player.getActiveWeapons().length, 1)
+    assert.equal(player.getActiveWeapons()[0].id, 'upg_12')
+
+    const engineer = heroes.find((h) => h.id === 'hero_03')!
+    const engineerPlayer = new Player({ x: 500, y: 500, hero: engineer })
+    assert.equal(engineerPlayer.getActiveWeapons().length, 0)
+
+    player.setActiveWeapons([
+      { id: 'wpn_muramasa', level: 3 },
+      { id: 'upg_12', level: 5 },
+      { id: 'upg_crit_01', level: 2 },
+      { id: 'upg_04', level: 3 },
+      { id: 'upg_01', level: 2 },
+      { id: 'upg_17', level: 4 },
+      { id: 'wpn_phantom_sniper', level: 2 },
+      { id: 'wpn_muramasa', level: 4 }
+    ])
+    assert.deepEqual(
+      player.getActiveWeapons().map((w) => w.id),
+      ['wpn_muramasa', 'upg_12', 'wpn_phantom_sniper']
+    )
+
+    player.triggerWeaponAction('wpn_muramasa', Math.PI / 4)
+    const firstSwing = player.getWeaponActionState('wpn_muramasa')!
+    assert.ok(firstSwing)
+    assert.equal(firstSwing.aimAngle, Math.PI / 4)
+    assert.equal(firstSwing.swingParity, 1)
+    assert.ok(firstSwing.timer > 0)
+
+    player.update({ x: 0, y: 0 }, 0.1)
+    const decayedSwing = player.getWeaponActionState('wpn_muramasa')!
+    assert.ok(decayedSwing.timer < firstSwing.timer)
+
+    // Re-triggering alternates swingParity for melee sweep arcs
+    player.triggerWeaponAction('wpn_muramasa', 0)
+    const secondSwing = player.getWeaponActionState('wpn_muramasa')!
+    assert.equal(secondSwing.swingParity, -1)
+
+    // 3. Armory sortGearStacks supports equipped, rarity_desc/asc, stars_desc, count_desc, power_desc, and name_asc
+    const sortUser = `sort_armory_${Date.now()}`
+    creditShopCoins(sortUser, 50000)
+    const openDeterministic = (crateId: Parameters<typeof openSupplyCrate>[1], seq: number[]) => {
+      let i = 0
+      return openSupplyCrate(sortUser, crateId, () => seq[i++] ?? 0)
+    }
+    // Tactical: 0.65 (uncommon), 0.01 (wpn_plasma_lance) x3 -> fuse 2 to 1★, keep 1x 0★
+    openDeterministic('crate_tactical', [0.65, 0.01])
+    openDeterministic('crate_tactical', [0.65, 0.01])
+    openDeterministic('crate_tactical', [0.65, 0.01])
+    fuseGearStacks(sortUser, 'wpn_plasma_lance', 0)
+    // Salvage: 0.05 (scrap), 0.01 (first scrap item) x2 so count=2
+    openDeterministic('crate_salvage', [0.05, 0.01])
+    openDeterministic('crate_salvage', [0.05, 0.01])
+    // Mythic crate: 0.995 (mythic), 0.01 (wpn_muramasa)
+    openDeterministic('crate_mythic', [0.995, 0.01])
+
+    // Equip 0★ Plasma Lance so it tests equipped-first vs 1★ / mythic
+    assert.equal(equipShopWeapon(sortUser, 'wpn_plasma_lance', 0).success, true)
+    const state = getShopAccountState(sortUser)
+    const stacks = getInventoryStacks(state)
+    assert.ok(stacks.length >= 4)
+
+    const byEquipped = sortGearStacks(stacks, 'equipped', state)
+    assert.equal(byEquipped[0].itemId, 'wpn_plasma_lance')
+    assert.equal(byEquipped[0].stars, 0)
+
+    const byRarityDesc = sortGearStacks(stacks, 'rarity_desc', state)
+    assert.equal(byRarityDesc[0].item.rarity, 'mythic')
+    assert.equal(byRarityDesc[byRarityDesc.length - 1].item.rarity, 'scrap')
+
+    const byRarityAsc = sortGearStacks(stacks, 'rarity_asc', state)
+    assert.equal(byRarityAsc[0].item.rarity, 'scrap')
+    assert.equal(byRarityAsc[byRarityAsc.length - 1].item.rarity, 'mythic')
+
+    const byStarsDesc = sortGearStacks(stacks, 'stars_desc', state)
+    assert.equal(byStarsDesc[0].stars, 1)
+
+    const byCountDesc = sortGearStacks(stacks, 'count_desc', state)
+    assert.equal(byCountDesc[0].count, 2)
+
+    const byNameAsc = sortGearStacks(stacks, 'name_asc', state)
+    for (let i = 1; i < byNameAsc.length; i++) {
+      assert.ok(byNameAsc[i - 1].item.name.localeCompare(byNameAsc[i].item.name) <= 0)
+    }
+
+    const byPowerDesc = sortGearStacks(stacks, 'power_desc', state)
+    assert.equal(byPowerDesc[0].itemId, 'wpn_muramasa')
+  })
+
+  it('computes detailed post-game summary metrics including DPS, crit rate, survival clock, and upgrade ordering', () => {
+    assert.equal(formatSurvivalClock(0), '00:00')
+    assert.equal(formatSurvivalClock(125), '02:05')
+    assert.equal(formatSurvivalClock(3665), '1:01:05')
+
+    const metrics = computePostGameMetrics({
+      survivalSeconds: 300,
+      coinsCollected: 120,
+      enemiesDefeated: 450,
+      totalDamageDealt: 180000,
+      totalDamageTaken: 420,
+      damageBlocked: 195,
+      bossesDefeated: 3,
+      totalHits: 1000,
+      criticalHits: 125,
+      highestHit: 2450,
+      levelReached: 14,
+      damageFreeWaveStreak: 6,
+      heroName: 'Storm Assassin',
+      areaName: 'Carbon Sector',
+      upgrades: [
+        { id: 'upg_12', name: 'Arc Slash', category: 'Melee Weapon', level: 5, isMaxLevel: true },
+        { id: 'upg_04', name: 'Orbiting Pulse', category: 'AoE Weapon', level: 3, isMaxLevel: false },
+        {
+          id: 'wpn_tempest_sphere',
+          name: 'Tempest Sphere',
+          category: 'Shop Weapon',
+          level: 4,
+          isMaxLevel: false,
+          isEquippedWeapon: true
+        }
+      ]
+    })
+
+    assert.equal(metrics.formattedTime, '05:00')
+    assert.equal(metrics.averageDps, 600)
+    assert.equal(metrics.killsPerMinute, 90)
+    assert.equal(metrics.critRatePercent, 12.5)
+    assert.equal(metrics.calculatedScore, 10 * 300 + 25 * 120)
+    assert.equal(metrics.bossesDefeated, 3)
+    assert.equal(metrics.totalDamageTaken, 420)
+    assert.equal(metrics.damageBlocked, 195)
+    assert.equal(metrics.highestHit, 2450)
+    assert.equal(metrics.levelReached, 14)
+    assert.equal(metrics.damageFreeWaveStreak, 6)
+    assert.deepEqual(
+      metrics.sortedUpgrades.map((u) => u.id),
+      ['wpn_tempest_sphere', 'upg_12', 'upg_04']
+    )
+
+    // Zero-duration and empty optional telemetry safe defaults
+    const zeroMetrics = computePostGameMetrics({
+      survivalSeconds: 0,
+      coinsCollected: 0,
+      enemiesDefeated: 0
+    })
+    assert.equal(zeroMetrics.formattedTime, '00:00')
+    assert.equal(zeroMetrics.averageDps, 0)
+    assert.equal(zeroMetrics.killsPerMinute, 0)
+    assert.equal(zeroMetrics.critRatePercent, 0)
+    assert.equal(zeroMetrics.levelReached, 1)
+    assert.equal(zeroMetrics.sortedUpgrades.length, 0)
+  })
 })
+
+
+
 
 
 

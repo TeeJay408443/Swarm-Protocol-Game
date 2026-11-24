@@ -5,6 +5,7 @@
 
 import type { UpgradesRow } from '../types/database'
 import { upgrades as seedUpgrades } from '../db/seedData'
+import { UNIVERSAL_CRIT_UPGRADES } from './critSystem'
 
 export const AREA_TWO_UPGRADES: UpgradesRow[] = [
   {
@@ -87,7 +88,7 @@ export function getAvailableRunUpgrades(options: {
   wave15Cleared?: boolean | null
 }): UpgradesRow[] {
   if (isAreaTwoUpgradesUnlocked(options)) {
-    return [...seedUpgrades, ...AREA_TWO_UPGRADES]
+    return [...seedUpgrades, ...UNIVERSAL_CRIT_UPGRADES, ...AREA_TWO_UPGRADES]
   }
-  return [...seedUpgrades]
+  return [...seedUpgrades, ...UNIVERSAL_CRIT_UPGRADES]
 }

@@ -188,6 +188,118 @@ export function getWave15FinalBossHp(areaId: ArenaId): number {
   return Math.round(WAVE_15_FINAL_BOSS_BASE_HP * area.enemyHpMultiplier)
 }
 
+export interface AreaOneBossBuffProfile {
+  hpMultiplier: number
+  damageMultiplier: number
+  speedMultiplier: number
+  damageReduction: number
+  shootCooldownScale: number
+  specialCooldownScale: number
+  coinMultiplier: number
+  enableEnrage: boolean
+}
+
+export interface Wave15BossCombatProfile {
+  hpMultiplier: number
+  damageMultiplier: number
+  damageReduction: number
+  shootCooldownScale: number
+  specialCooldownScale: number
+  coinMultiplier: number
+  totalPhases: 3
+}
+
+/**
+ * Buffs Area 1 (Carbon Sector) bosses so Wave 5, Wave 10, Endless, and Wave 15 Omega Overlord
+ * cannot be burst down in seconds by mid/late-game player builds.
+ */
+export function getAreaOneBossBuff(
+  waveNumber: number,
+  isWave15FinalBoss: boolean = false
+): AreaOneBossBuffProfile {
+  if (isWave15FinalBoss) {
+    return {
+      hpMultiplier: 3.2, // Raises Area 1 Omega Overlord to 480,000 raw HP (~827k effective HP with 42% Armor DR)
+      damageMultiplier: 1.38,
+      speedMultiplier: 1.0,
+      damageReduction: 0.42,
+      shootCooldownScale: 0.76,
+      specialCooldownScale: 0.78,
+      coinMultiplier: 1.35,
+      enableEnrage: true
+    }
+  }
+
+  const tier = Math.max(1, Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL))
+  if (tier === 1) {
+    // Wave 5 Aegis Commander
+    return {
+      hpMultiplier: 4.5,
+      damageMultiplier: 1.3,
+      speedMultiplier: 1.12,
+      damageReduction: 0.22,
+      shootCooldownScale: 0.82,
+      specialCooldownScale: 0.82,
+      coinMultiplier: 1.5,
+      enableEnrage: true
+    }
+  }
+  if (tier === 2) {
+    // Wave 10 Crimson Vanguard
+    return {
+      hpMultiplier: 6.2,
+      damageMultiplier: 1.45,
+      speedMultiplier: 1.18,
+      damageReduction: 0.3,
+      shootCooldownScale: 0.75,
+      specialCooldownScale: 0.78,
+      coinMultiplier: 1.75,
+      enableEnrage: true
+    }
+  }
+
+  // Wave 20+ Endless Area 1 Bosses
+  return {
+    hpMultiplier: 7.5,
+    damageMultiplier: 1.55,
+    speedMultiplier: 1.22,
+    damageReduction: 0.35,
+    shootCooldownScale: 0.72,
+    specialCooldownScale: 0.74,
+    coinMultiplier: 2.0,
+    enableEnrage: true
+  }
+}
+
+/**
+ * Unified Wave 15 Final Boss combat profile for both Carbon Sector and Astral Citadel
+ * ensuring high durability across 3 full phases (Phase 1 -> Phase 2 @ 66% -> Phase 3 @ 33%).
+ */
+export function getWave15BossCombatProfile(areaId: ArenaId): Wave15BossCombatProfile {
+  if (areaId === 'astral_citadel') {
+    return {
+      hpMultiplier: 2.8, // 187,500 * 2.8 = 525,000 raw HP (~875k effective HP with 40% Armor DR)
+      damageMultiplier: 1.25,
+      damageReduction: 0.4,
+      shootCooldownScale: 0.78,
+      specialCooldownScale: 0.8,
+      coinMultiplier: 1.35,
+      totalPhases: 3
+    }
+  }
+
+  const a1 = getAreaOneBossBuff(WAVE_CONFIG.MAX_WAVE, true)
+  return {
+    hpMultiplier: a1.hpMultiplier,
+    damageMultiplier: a1.damageMultiplier,
+    damageReduction: a1.damageReduction,
+    shootCooldownScale: a1.shootCooldownScale,
+    specialCooldownScale: a1.specialCooldownScale,
+    coinMultiplier: a1.coinMultiplier,
+    totalPhases: 3
+  }
+}
+
 export function shouldSpawnRegularEnemiesInWave(
   waveNumber: number,
   isEndlessMode: boolean = false

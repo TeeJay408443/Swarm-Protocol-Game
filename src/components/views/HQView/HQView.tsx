@@ -8,6 +8,14 @@ import {
 } from '../../../services/scores'
 import { useShopState } from '../../../services/shop'
 import { ArenaId, GAME_AREAS, getAreaById, isAreaUnlocked } from '../../../config/arenas'
+import {
+  DifficultyId,
+  formatDifficultyCoinLabel,
+  GAME_DIFFICULTIES,
+  getDifficultyById,
+  getStoredDifficultyId,
+  saveDifficultyId
+} from '../../../config/difficulties'
 import { ARENA_PREVIEW_IMAGES } from './arenaAssets'
 
 interface SideScreenTab {
@@ -34,6 +42,9 @@ export function HQView() {
   const [telemetry, setTelemetry] = useState<LocalPlayerTelemetry | null>(null)
   const [operativeName, setOperativeName] = useState('Guest Operative')
   const [selectedAreaId, setSelectedAreaId] = useState<ArenaId>('carbon_sector')
+  const [selectedDifficultyId, setSelectedDifficultyId] = useState<DifficultyId>(() =>
+    getStoredDifficultyId()
+  )
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [transitioning, setTransitioning] = useState(false)
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -79,6 +90,7 @@ export function HQView() {
   const wave15Cleared = Boolean(telemetry?.wave_15_cleared)
   const highestWave = telemetry?.highest_wave ?? 0
   const selectedArea = getAreaById(selectedAreaId)
+  const selectedDifficulty = getDifficultyById(selectedDifficultyId)
 
   const transitionToRoute = (to: string, tabId?: string) => {
     if (transitioning) return
@@ -88,6 +100,11 @@ export function HQView() {
     window.setTimeout(() => {
       navigate(to)
     }, 150)
+  }
+
+  const handleSelectDifficulty = (difficultyId: DifficultyId) => {
+    setSelectedDifficultyId(difficultyId)
+    saveDifficultyId(difficultyId)
   }
 
   const handleSelectCenterArea = (areaId: ArenaId) => {
@@ -109,7 +126,7 @@ export function HQView() {
       )
       return
     }
-    transitionToRoute(`/play?area=${areaId}`)
+    transitionToRoute(`/play?area=${areaId}&difficulty=${selectedDifficultyId}`)
   }
 
   return (
@@ -282,6 +299,60 @@ export function HQView() {
               {lockMessage}
             </p>
           )}
+
+          {/* Compact Run Difficulty Selector */}
+          <div className="mt-5 w-full max-w-4xl">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              {GAME_DIFFICULTIES.map((diff) => {
+                const active = selectedDifficultyId === diff.id
+                return (
+                  <button
+                    key={diff.id}
+                    type="button"
+                    onClick={() => handleSelectDifficulty(diff.id)}
+                    aria-pressed={active}
+                    className={`rounded-2xl px-3.5 py-2.5 border text-left transition-all cursor-pointer ${
+                      active
+                        ? 'bg-[#1D2C58] border-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)] -translate-y-0.5'
+                        : 'bg-[#162244]/85 border-white/10 hover:border-white/30'
+                    }`}
+                    style={
+                      active
+                        ? {
+                            borderColor: diff.accentColor,
+                            boxShadow: `0 0 18px ${diff.accentColor}30`
+                          }
+                        : undefined
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className="font-display font-extrabold text-sm tracking-wide"
+                        style={{ color: diff.accentColor }}
+                      >
+                        {diff.name}
+                      </span>
+                      <span
+                        className={`text-[11px] font-bold tabular-nums ${
+                          diff.coinBonusPercent > 0
+                            ? 'text-amber-300'
+                            : diff.coinBonusPercent < 0
+                              ? 'text-rose-300'
+                              : 'text-slate-300'
+                        }`}
+                      >
+                        {formatDifficultyCoinLabel(diff)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300/80 mt-0.5 truncate tabular-nums">
+                      HP {Math.round(diff.enemyHpMultiplier * 100)}% · DMG{' '}
+                      {Math.round(diff.enemyDamageMultiplier * 100)}%
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </section>
       </div>
 
@@ -352,8 +423,8 @@ export function HQView() {
               <span className="block font-display font-black text-2xl sm:text-3xl tracking-wide">
                 PLAY
               </span>
-              <span className="block text-xs font-bold text-slate-900/80 mt-0.5 whitespace-nowrap">
-                {selectedArea.name}
+              <span className="block text-xs font-bold text-slate-900/85 mt-0.5 whitespace-nowrap">
+                {selectedArea.name} · {selectedDifficulty.name} ({formatDifficultyCoinLabel(selectedDifficulty)})
               </span>
             </span>
           </button>

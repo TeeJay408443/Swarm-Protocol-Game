@@ -1429,7 +1429,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
 
     w15Seraph.specialCooldown = 0.02
     w15Seraph.update(0.05, player)
-    assert.equal(w15Seraph.telegraphs[0]?.kind, 'closing_side_lasers')
+    assert.equal(w15Seraph.telegraphs[0]?.kind, 'pursuit_beam')
   })
 
   it('restricts Dev Panel exclusively to 408443@guhsd.net and supports coins, damage multipliers, health, and wave skips', () => {
@@ -2574,7 +2574,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(phaseTwoTheme.line1, "IT'S NOT OVER YET")
   })
 
-  it('gives Astral Scourge a stationary random grid, aimed lasers, and aggressive phase-two movement', () => {
+  it('locks Astral Scourge into a formed circle and keeps weighted grids stationary', () => {
     const scourge = new Enemy({
       x: 500,
       y: 500,
@@ -2587,6 +2587,12 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     scourge.bossPhase = 2
     scourge.specialCooldown = 100
     scourge.update(0.01, player)
+    const startingHead = scourge.getCenter()
+    scourge.dogSegments = Array.from({ length: ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT }, (_, index) => ({
+      x: startingHead.x,
+      y: startingHead.y - (index + 1) * 2,
+      angle: Math.PI / 2
+    }))
 
     const grid = scourge.spawnTelegraphedAttack('astral_orbital_grid')
     assert.ok(grid)
@@ -2601,8 +2607,13 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(grid?.laserDuration, 1.8)
     assert.equal(grid?.escapeDuration, 1.35)
     assert.ok(Math.abs((grid?.activeDuration ?? 0) - 3.15) < 0.001)
+    const firstGridLine = grid!.gridLines![0]
     assert.equal(
-      checkBossTelegraphHit(grid!, { x: grid!.x, y: grid!.y, radius: 10 }),
+      checkBossTelegraphHit(grid!, {
+        x: (firstGridLine.x1 + firstGridLine.x2) / 2,
+        y: (firstGridLine.y1 + firstGridLine.y2) / 2,
+        radius: 10
+      }),
       true
     )
 
@@ -2626,15 +2637,22 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(grid!.orbitCenterY, fixedOrbitCenter.y)
     assert.deepEqual(grid!.gridLines, fixedGridLines, 'The grid must not track player movement')
 
-    grid!.chargeTimer = grid!.chargeDuration - 0.1
-    scourge.slowMultiplier = 0.55
-    scourge.update(0.1, player)
+    for (let step = 0; step < 50; step++) {
+      scourge.update(0.1, player)
+    }
     assert.equal(grid!.hasTriggered, true)
     assert.equal(grid!.ringLocked, true)
     assert.equal(grid!.ringLockedSegments?.length, ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT)
     const lockedSegments = grid!.ringLockedSegments!.map((segment) => ({ ...segment }))
     const lockedLines = grid!.gridLines!.map((line) => ({ ...line }))
     const lockedHead = { x: grid!.ringLockedHeadX!, y: grid!.ringLockedHeadY! }
+    const lockedRadii = lockedSegments.map((segment) =>
+      Math.hypot(segment.x - fixedOrbitCenter.x, segment.y - fixedOrbitCenter.y)
+    )
+    assert.ok(
+      lockedRadii.every((radius) => Math.abs(radius - grid!.orbitRadius!) < 5),
+      'All segments should be on the completed circle when the grid begins'
+    )
 
     player.x += 110
     scourge.slowMultiplier = 0.55

@@ -154,6 +154,8 @@ export interface BossTelegraphAttack {
   angle?: number
   turnRate?: number
   orbitAngle?: number
+  orbitStartAngle?: number
+  orbitElapsed?: number
   orbitRadius?: number
   orbitCenterX?: number
   orbitCenterY?: number
@@ -988,6 +990,7 @@ export class Enemy {
     const safeDelta = Math.max(deltaTime, 0.001)
     const movementScale = Math.max(0.15, this.slowMultiplier)
     attack.orbitAngle = nextAngle
+    attack.orbitElapsed = (attack.orbitElapsed ?? 0) + deltaTime
     this.velocity = {
       x: (nextCenter.x - currentCenter.x) / (safeDelta * movementScale),
       y: (nextCenter.y - currentCenter.y) / (safeDelta * movementScale)
@@ -1001,6 +1004,54 @@ export class Enemy {
    */
   private updateDogSegments(spacing = 24, forcedHeadCenter?: Vector2): void {
     if (this.dogSegments.length === 0) return
+
+    const formingAstralRing =
+      this.isAstralScourge && this.bossPhase >= 2
+        ? this.telegraphs.find(
+            (attack) =>
+              attack.kind === 'astral_orbital_grid' &&
+              !attack.ringLocked &&
+              !attack.isEscaping
+          )
+        : undefined
+    if (formingAstralRing) {
+      const radius = formingAstralRing.orbitRadius ?? 320
+      const centerX = formingAstralRing.orbitCenterX ?? this.getCenter().x
+      const centerY = formingAstralRing.orbitCenterY ?? this.getCenter().y
+      const startAngle = formingAstralRing.orbitStartAngle ?? formingAstralRing.orbitAngle ?? 0
+      const currentAngle = formingAstralRing.orbitAngle ?? startAngle
+      const turnSign = Math.sign(formingAstralRing.turnRate ?? 3) || 1
+      const distanceTravelled =
+        (formingAstralRing.orbitElapsed ?? 0) *
+        Math.abs(formingAstralRing.turnRate ?? 3) *
+        radius
+      const startPoint = {
+        x: centerX + Math.cos(startAngle) * radius,
+        y: centerY + Math.sin(startAngle) * radius
+      }
+      const startTangent = {
+        x: -Math.sin(startAngle) * turnSign,
+        y: Math.cos(startAngle) * turnSign
+      }
+
+      this.dogSegments.forEach((segment, index) => {
+        const segmentDistance = (index + 1) * spacing
+        if (segmentDistance <= distanceTravelled) {
+          const angle = currentAngle - turnSign * (segmentDistance / radius)
+          segment.x = centerX + Math.cos(angle) * radius
+          segment.y = centerY + Math.sin(angle) * radius
+          segment.angle = angle + turnSign * (Math.PI / 2)
+          return
+        }
+
+        const remainingDistance = segmentDistance - distanceTravelled
+        segment.x = startPoint.x - startTangent.x * remainingDistance
+        segment.y = startPoint.y - startTangent.y * remainingDistance
+        segment.angle = startAngle + turnSign * (Math.PI / 2)
+      })
+      return
+    }
+
     let leader = forcedHeadCenter ?? this.getCenter()
     for (let i = 0; i < this.dogSegments.length; i++) {
       const seg = this.dogSegments[i]
@@ -1633,6 +1684,7 @@ export class Enemy {
       )
       const laserDuration = 1.8
       const escapeDuration = 1.35
+      const orbitStartAngle = Math.atan2(bossCenter.y - targetCenter.y, bossCenter.x - targetCenter.x)
       telegraph = {
         id,
         kind,
@@ -1642,7 +1694,9 @@ export class Enemy {
         gridAnchorY: targetCenter.y,
         angle: randomAngle,
         turnRate: this.specialAttackCounter % 2 === 0 ? 3.1 : -3.1,
-        orbitAngle: Math.atan2(bossCenter.y - targetCenter.y, bossCenter.x - targetCenter.x),
+        orbitAngle: orbitStartAngle,
+        orbitStartAngle,
+        orbitElapsed: 0,
         orbitRadius: ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS,
         radius: 5,
         gridOffsets,

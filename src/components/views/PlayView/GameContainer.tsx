@@ -2132,7 +2132,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               scaling.speedMultiplier *
               areaMeta.enemySpeedMultiplier *
               diffMeta.enemySpeedMultiplier *
-              (bossBuff ? bossBuff.speedMultiplier : 1)
+              (bossBuff && 'speedMultiplier' in bossBuff ? bossBuff.speedMultiplier : 1)
             spawned.speed = spawned.baseSpeed
             spawned.damage = Math.max(
               1,
@@ -2166,7 +2166,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
           if (bossBuff) {
             spawned.damageReduction = bossBuff.damageReduction
-            spawned.enableEnrage = bossBuff.enableEnrage
+            if ('enableEnrage' in bossBuff) {
+              spawned.enableEnrage = bossBuff.enableEnrage
+            }
             spawned.shootCooldownMax = Math.max(
               0.85,
               spawned.shootCooldownMax * bossBuff.shootCooldownScale

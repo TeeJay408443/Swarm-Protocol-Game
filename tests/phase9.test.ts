@@ -1415,16 +1415,18 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       target: player,
       isBoss: true,
       isStationaryBoss: true,
-      isFinalBoss: true,
+      isWave15SpecialBoss: true,
       anchorPos: { x: 960, y: 360 },
       arenaBounds: { left: 320, top: 160, width: 1280, height: 720 }
     })
     w15Seraph.isSpawning = false
     assert.equal(w15Seraph.isBoss, true)
-    assert.equal(w15Seraph.isFinalBoss, true)
+    assert.equal(w15Seraph.isFinalBoss, false)
+    assert.equal(w15Seraph.isWave15SpecialBoss, true)
     assert.equal(w15Seraph.isStationaryBoss, true)
     assert.equal(w15Seraph.launchesAoeProjectiles, true)
     assert.equal(w15Seraph.maxHealth, 150000)
+    assert.equal(w15Seraph.spawnDelay, 6.2)
     assert.ok(w15Seraph.damage < 100, 'W15 Seraph contact damage must remain balanced (not 20% of 150k HP)')
 
     w15Seraph.specialCooldown = 0.02
@@ -2486,7 +2488,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       target: player,
       isBoss: true,
       isStationaryBoss: true,
-      isFinalBoss: true,
+      isWave15SpecialBoss: true,
       anchorPos: { x: 900, y: 360 },
       arenaBounds: { left: 260, top: 140, width: 1280, height: 720 }
     })
@@ -2498,9 +2500,16 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(opening?.warningLabel, 'SERAPH SUNLANCE — BREAK THE LOCK!')
 
     seraph.telegraphs = []
-    seraph.bossPhase = 3
-    seraph.phaseThreeAttackIndex = 0
-    const crownLattice = seraph.spawnTelegraphedAttack()
+    seraph.takeDamage(55_000)
+    assert.equal(seraph.bossPhase, 2)
+    assert.equal(seraph.telegraphs[0]?.kind, 'pursuit_beam')
+
+    seraph.telegraphs = []
+    for (let hit = 0; hit < 8 && seraph.bossPhase < 3; hit++) {
+      seraph.takeDamage(50_000)
+    }
+    assert.equal(seraph.bossPhase, 3)
+    const crownLattice = seraph.telegraphs[0]
     assert.equal(crownLattice?.kind, 'cosmic_laser_walls')
     assert.equal(crownLattice?.warningLabel, '⚠ SERAPH CROWN LATTICE — WEAVE GAPS!')
     assert.ok(crownLattice?.gridLines?.some((line) => line.color === '#FACC15'))
@@ -2597,14 +2606,14 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const grid = scourge.spawnTelegraphedAttack('astral_orbital_grid')
     assert.ok(grid)
     assert.equal(grid?.kind, 'astral_orbital_grid')
-    assert.ok(grid?.gridLines?.length === 6 || grid?.gridLines?.length === 8)
+    assert.ok([6, 8, 10].includes(grid?.gridLines?.length ?? 0))
     assert.ok((grid?.gridLines?.filter((line) => line.aimMode === 'random').length ?? 0) >= 3)
     assert.ok(grid?.gridLines?.every((line) => line.aimMode === 'random'))
     assert.ok(grid?.gridLines?.every((line) => line.width <= 6))
-    assert.ok(grid?.gridOffsets?.length === 3 || grid?.gridOffsets?.length === 4)
+    assert.ok([3, 4, 5].includes(grid?.gridOffsets?.length ?? 0))
     assert.equal(grid?.orbitRadius, ASTRAL_SCOURGE_PHASE_TWO_ORBIT_RADIUS)
     assert.equal(grid?.chargeDuration, 5)
-    assert.equal(grid?.laserDuration, 1.8)
+    assert.equal(grid?.laserDuration, 1.8, 'The firing window expands to multiple volleys after ring lock')
     assert.equal(grid?.escapeDuration, 1.35)
     assert.ok(Math.abs((grid?.activeDuration ?? 0) - 3.15) < 0.001)
     const firstGridLine = grid!.gridLines![0]
@@ -2614,7 +2623,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
         y: (firstGridLine.y1 + firstGridLine.y2) / 2,
         radius: 10
       }),
-      true
+      false
     )
 
     const fixedOrbitCenter = { x: grid!.orbitCenterX!, y: grid!.orbitCenterY! }
@@ -2643,6 +2652,17 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(grid!.hasTriggered, true)
     assert.equal(grid!.ringLocked, true)
     assert.equal(grid!.ringLockedSegments?.length, ASTRAL_SCOURGE_PHASE_TWO_SEGMENT_COUNT)
+    assert.ok(grid!.gridPulseCount === 3 || grid!.gridPulseCount === 4)
+    assert.equal(grid!.gridPulseIndex, 0)
+    assert.equal(grid!.gridPulseFiring, false)
+    assert.equal(grid!.gridPulseWarningDuration, 0.48)
+    assert.equal(grid!.gridPulseFireDuration, 0.34)
+    assert.equal(grid!.gridPulseGapDuration, 0.22)
+    const expectedLaserDuration =
+      grid!.gridPulseCount! * (grid!.gridPulseWarningDuration! + grid!.gridPulseFireDuration!) +
+      (grid!.gridPulseCount! - 1) * grid!.gridPulseGapDuration!
+    assert.ok(Math.abs(grid!.laserDuration! - expectedLaserDuration) < 0.001)
+    assert.ok(Math.abs(grid!.activeDuration - (expectedLaserDuration + 1.35)) < 0.001)
     const lockedSegments = grid!.ringLockedSegments!.map((segment) => ({ ...segment }))
     const lockedLines = grid!.gridLines!.map((line) => ({ ...line }))
     const lockedHead = { x: grid!.ringLockedHeadX!, y: grid!.ringLockedHeadY! }
@@ -2660,6 +2680,25 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.deepEqual(scourge.dogSegments, lockedSegments, 'Tail segments should remain frozen after the circle forms')
     assert.deepEqual(scourge.getCenter(), lockedHead, 'The head should remain fixed during the grid firing window')
     assert.deepEqual(grid!.gridLines, lockedLines, 'The grid should stay at its original world position')
+
+    scourge.update(0.25, player)
+    assert.equal(grid!.gridPulseFiring, true, 'Each grid pulse warns before its damage window')
+    const firstPulseLines = grid!.gridLines!.map((line) => ({ ...line }))
+    const pulsePoint = firstPulseLines[0]
+    assert.equal(
+      checkBossTelegraphHit(grid!, {
+        x: (pulsePoint.x1 + pulsePoint.x2) / 2,
+        y: (pulsePoint.y1 + pulsePoint.y2) / 2,
+        radius: 10
+      }),
+      true
+    )
+    while (grid!.gridPulseIndex === 0) scourge.update(0.1, player)
+    assert.equal(grid!.gridPulseIndex, 1)
+    assert.equal(grid!.gridPulseFiring, false)
+    assert.notDeepEqual(grid!.gridLines, firstPulseLines, 'Each volley should roll a fresh grid orientation')
+    assert.deepEqual(scourge.dogSegments, lockedSegments)
+    assert.deepEqual(scourge.getCenter(), lockedHead)
 
     grid!.activeTimer = grid!.laserDuration!
     const distanceBeforeEscape = Math.hypot(

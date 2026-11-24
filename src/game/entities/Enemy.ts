@@ -54,6 +54,7 @@ export interface EnemyOptions {
   isBoss?: boolean
   isStationaryBoss?: boolean
   isFinalBoss?: boolean
+  isWave15SpecialBoss?: boolean
   anchorPos?: Vector2 | null
   arenaBounds?: BossArenaBounds | null
 }
@@ -175,6 +176,13 @@ export interface BossTelegraphAttack {
   safeRect?: { x: number; y: number; width: number; height: number }
   gridRects?: Array<{ x: number; y: number; width: number; height: number }>
   gridLines?: CosmicLaserWallLine[]
+  gridPulseCount?: number
+  gridPulseIndex?: number
+  gridPulseTimer?: number
+  gridPulseWarningDuration?: number
+  gridPulseFireDuration?: number
+  gridPulseGapDuration?: number
+  gridPulseFiring?: boolean
   gridOffsets?: number[]
   isDiagonalGrid?: boolean
   beamCount?: number
@@ -244,6 +252,7 @@ export class Enemy {
   isBoss: boolean = false
   isStationaryBoss: boolean = false
   isFinalBoss: boolean = false
+  isWave15SpecialBoss: boolean = false
   anchorPos: Vector2 | null = null
   arenaBounds: BossArenaBounds | null = null
   
@@ -353,9 +362,15 @@ export class Enemy {
     this.coinValue = options.coinValue || 1
     this.enemyData = options.enemyData || null
     this.target = options.target || null
-    this.isBoss = options.isBoss || options.isStationaryBoss || options.isFinalBoss || false
+    this.isBoss =
+      options.isBoss ||
+      options.isStationaryBoss ||
+      options.isFinalBoss ||
+      options.isWave15SpecialBoss ||
+      false
     this.isStationaryBoss = options.isStationaryBoss || false
     this.isFinalBoss = options.isFinalBoss || false
+    this.isWave15SpecialBoss = options.isWave15SpecialBoss || false
     this.anchorPos = options.anchorPos ? { ...options.anchorPos } : null
     this.arenaBounds = options.arenaBounds ? { ...options.arenaBounds } : null
     
@@ -578,7 +593,11 @@ export class Enemy {
       this.attackRange = 1600
       this.specialCooldown = 1.2
       this.specialCooldownMax = 3.4
-      if (this.isFinalBoss && !this.isDevourerOfGods && !this.isAstralScourge) {
+      if (
+        (this.isFinalBoss || this.isWave15SpecialBoss) &&
+        !this.isDevourerOfGods &&
+        !this.isAstralScourge
+      ) {
         const cutsceneDuration =
           getWave15CutsceneTheme(this.enemyId === 'boss_a2_15' ? 'astral_citadel' : 'carbon_sector')
             .durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
@@ -589,7 +608,11 @@ export class Enemy {
         this.x = this.anchorPos.x - this.width / 2
         this.y = this.anchorPos.y - this.height / 2
       }
-    } else if (this.isFinalBoss && !this.isDevourerOfGods && !this.isAstralScourge) {
+    } else if (
+      (this.isFinalBoss || this.isWave15SpecialBoss) &&
+      !this.isDevourerOfGods &&
+      !this.isAstralScourge
+    ) {
       const cutsceneDuration =
         getWave15CutsceneTheme(this.enemyId === 'boss_a2_15' ? 'astral_citadel' : 'carbon_sector')
           .durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
@@ -1622,7 +1645,10 @@ export class Enemy {
             ]
         kind = wormCycle[(this.specialAttackCounter - 1) % wormCycle.length]
       }
-    } else if (this.isStationaryBoss && this.isFinalBoss) {
+    } else if (
+      this.isStationaryBoss &&
+      (this.isFinalBoss || this.isWave15SpecialBoss)
+    ) {
       const identity: Wave15BossIdentity = isSolarArchon
         ? 'solar_archon_seraph'
         : 'omega_overlord'
@@ -2261,6 +2287,23 @@ export class Enemy {
     return telegraph
   }
 
+  private randomizeAstralGridPulse(attack: BossTelegraphAttack): void {
+    const center = {
+      x: attack.gridAnchorX ?? attack.x,
+      y: attack.gridAnchorY ?? attack.y
+    }
+    const angle = Math.random() * Math.PI
+    const lineCount = 3 + Math.floor(Math.random() * 3)
+    const spacing = 90 + Math.random() * 90
+    const offsets = Array.from(
+      { length: lineCount },
+      (_, index) => (index - (lineCount - 1) / 2) * spacing
+    )
+    attack.angle = angle
+    attack.gridOffsets = offsets
+    attack.gridLines = getAstralOrbitalGridLines(center, angle, offsets)
+  }
+
   /**
    * Advances telegraph windup timers, tracking mechanics, bullet hell curtains, and active sweeps
    */
@@ -2375,6 +2418,19 @@ export class Enemy {
             t.ringLockedSegments = this.dogSegments.map((segment) => ({ ...segment }))
             t.x = t.gridAnchorX ?? t.x
             t.y = t.gridAnchorY ?? t.y
+            t.gridPulseCount = 3 + Math.floor(Math.random() * 2)
+            t.gridPulseIndex = 0
+            t.gridPulseTimer = 0
+            t.gridPulseWarningDuration = 0.48
+            t.gridPulseFireDuration = 0.34
+            t.gridPulseGapDuration = 0.22
+            t.gridPulseFiring = false
+            t.laserDuration =
+              t.gridPulseCount *
+                ((t.gridPulseWarningDuration ?? 0) + (t.gridPulseFireDuration ?? 0)) +
+              (t.gridPulseCount - 1) * (t.gridPulseGapDuration ?? 0)
+            t.activeDuration = t.laserDuration + (t.escapeDuration ?? 1.35)
+            this.randomizeAstralGridPulse(t)
           }
           t.hasTriggered = true
           t.activeTimer = 0
@@ -2430,7 +2486,27 @@ export class Enemy {
       } else {
         t.activeTimer += deltaTime
 
-        if (t.kind === 'cosmic_orb_barrage') {
+        if (t.kind === 'astral_orbital_grid') {
+          const pulseCount = t.gridPulseCount ?? 1
+          const warningDuration = t.gridPulseWarningDuration ?? 0.48
+          const fireDuration = t.gridPulseFireDuration ?? 0.34
+          const gapDuration = t.gridPulseGapDuration ?? 0.22
+          const pulseCycleDuration = warningDuration + fireDuration + gapDuration
+          const nextPulseIndex = Math.min(
+            pulseCount - 1,
+            Math.floor(t.activeTimer / pulseCycleDuration)
+          )
+          if (nextPulseIndex > (t.gridPulseIndex ?? 0)) {
+            t.gridPulseIndex = nextPulseIndex
+            this.randomizeAstralGridPulse(t)
+          }
+          t.gridPulseTimer =
+            t.activeTimer - (t.gridPulseIndex ?? 0) * pulseCycleDuration
+          t.gridPulseFiring =
+            (t.gridPulseTimer ?? 0) >= warningDuration &&
+            (t.gridPulseTimer ?? 0) < warningDuration + fireDuration
+          t.warningLabel = `ASTRAL GRID VOLLEY ${Math.min(pulseCount, (t.gridPulseIndex ?? 0) + 1)}/${pulseCount}`
+        } else if (t.kind === 'cosmic_orb_barrage') {
           t.x = bossCenter.x
           t.y = bossCenter.y
           t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
@@ -2702,7 +2778,7 @@ export class Enemy {
     }
 
     // Area Final Boss 3-Phase Progression (Phase 2 @ 66% HP, Phase 3 @ 33% HP)
-    if (this.isFinalBoss && !this.isAstralScourge) {
+    if ((this.isFinalBoss || this.isWave15SpecialBoss) && !this.isAstralScourge) {
       const phase2Threshold = Math.floor(this.maxHealth * 0.66)
       const phase3Threshold = Math.floor(this.maxHealth * 0.33)
 
@@ -3371,6 +3447,15 @@ export class Enemy {
         !(t.hasTriggered && t.activeTimer >= (t.laserDuration ?? t.activeDuration))
       ) {
         const pulse = 0.68 + 0.32 * Math.sin(this.animTime * 25)
+        const pulseWarning =
+          t.hasTriggered &&
+          !t.gridPulseFiring &&
+          (t.gridPulseIndex ?? 0) < (t.gridPulseCount ?? 0) &&
+          (t.gridPulseTimer ?? 0) < (t.gridPulseWarningDuration ?? 0.48)
+        const pulseFiring = t.hasTriggered && Boolean(t.gridPulseFiring)
+        const pulseImpactProgress =
+          ((t.gridPulseTimer ?? 0) - (t.gridPulseWarningDuration ?? 0.48)) /
+          Math.max(0.01, t.gridPulseFireDuration ?? 0.34)
         ctx.save()
         ctx.lineCap = 'round'
         for (const line of t.gridLines) {
@@ -3380,7 +3465,7 @@ export class Enemy {
           ctx.beginPath()
           ctx.moveTo(p1.x, p1.y)
           ctx.lineTo(p2.x, p2.y)
-          if (!t.hasTriggered) {
+          if (!t.hasTriggered || pulseWarning) {
             ctx.globalAlpha = 0.45 + chargeProgress * 0.35
             ctx.strokeStyle = color
             ctx.lineWidth = Math.max(1.5, line.width * 0.42)
@@ -3390,9 +3475,11 @@ export class Enemy {
             ctx.globalAlpha = 0.7 * pulse
             ctx.lineWidth = 1.2
             ctx.stroke()
-          } else {
+          } else if (pulseFiring) {
             const fadeOut =
-              impactProgress > 0.88 ? Math.max(0.2, 1 - (impactProgress - 0.88) / 0.12) : 1
+              pulseImpactProgress > 0.82
+                ? Math.max(0.2, 1 - (pulseImpactProgress - 0.82) / 0.18)
+                : 1
             ctx.globalAlpha = fadeOut * 0.44
             ctx.strokeStyle = color
             ctx.lineWidth = line.width * 1.8
@@ -3412,7 +3499,13 @@ export class Enemy {
         }
 
         const marker = camera.worldToScreen(t.x, t.y)
-        ctx.globalAlpha = t.hasTriggered ? 0.82 : 0.45 + chargeProgress * 0.45
+        ctx.globalAlpha = !t.hasTriggered
+          ? 0.45 + chargeProgress * 0.45
+          : pulseWarning
+            ? 0.82
+            : pulseFiring
+              ? 0.45
+              : 0.2
         ctx.strokeStyle = '#F8FAFC'
         ctx.lineWidth = 1.5
         ctx.setLineDash([5, 4])
@@ -3437,6 +3530,17 @@ export class Enemy {
           ctx.textAlign = 'center'
           const rem = Math.max(0, t.chargeDuration - t.chargeTimer).toFixed(1)
           ctx.fillText(`${t.warningLabel ?? 'ASTRAL ORBITAL GRID'} (${rem}s)`, marker.x, marker.y + 60)
+          ctx.restore()
+        } else if (pulseWarning) {
+          ctx.save()
+          ctx.fillStyle = '#FEF08A'
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(
+            `GRID VOLLEY ${(t.gridPulseIndex ?? 0) + 1}/${t.gridPulseCount ?? 0} — DODGE!`,
+            marker.x,
+            marker.y + 60
+          )
           ctx.restore()
         }
       } else if (t.kind === 'astral_targeted_lasers' && t.gridLines) {
@@ -4561,7 +4665,8 @@ export class Enemy {
 
     // Boss / Mini-Boss Nameplate (suppressed briefly during initial boss cutscene emergence)
     const showBossLabel =
-      !(this.isWormBoss || this.isFinalBoss) || this.cutsceneDelayTimer <= 1.4
+      !(this.isWormBoss || this.isFinalBoss || this.isWave15SpecialBoss) ||
+      this.cutsceneDelayTimer <= 1.4
     if (this.isBoss && showBossLabel) {
       ctx.fillStyle = this.isDevourerOfGods
         ? '#22D3EE'
@@ -4904,6 +5009,12 @@ export function checkBossTelegraphHit(
     telegraph.activeTimer >= (telegraph.laserDuration ?? telegraph.activeDuration)
   ) {
     return false // The boss is retreating; the laser grid is no longer active.
+  }
+  if (
+    telegraph.kind === 'astral_orbital_grid' &&
+    (!telegraph.hasTriggered || !telegraph.gridPulseFiring)
+  ) {
+    return false // Grid indicators are safe until their randomized pulse fires.
   }
 
   if (telegraph.kind === 'closing_side_lasers') {

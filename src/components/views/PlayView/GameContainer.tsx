@@ -62,6 +62,7 @@ import {
   getAreaTwoBossBuff,
   getAstralScourgePhaseTwoCutsceneTheme,
   getDevSpawnableEnemyById,
+  getWave15CutsceneTheme,
   SECRET_DEVOURER_OF_GODS_ID,
   SECRET_DEVOURER_OF_GODS_TEMPLATE,
   selectAreaEnemyTemplateForWave,
@@ -1411,16 +1412,18 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const areaMeta = areaRef.current
       const isAreaTwo = areaMeta.id === 'astral_citadel'
       const areaMaxWave = getAreaMaxWave(areaMeta.id)
-      const isFinalAreaBoss = forceBoss && waveNumber === areaMaxWave && !endlessModeRef.current
       const bossTemplate = forceBoss ? getAreaBossTemplateForWave(areaMeta.id, waveNumber) : null
+      const isWave15AreaTwoBoss =
+        isAreaTwo && forceBoss && waveNumber === 15 && bossTemplate?.id === 'boss_a2_15'
+      const isFinalAreaBoss = forceBoss && waveNumber === areaMaxWave && !endlessModeRef.current
       const isWormBoss = bossTemplate?.id === ASTRAL_SCOURGE_BOSS_ID
-      const isStationaryFinalBoss = isFinalAreaBoss && !isWormBoss
+      const isStationaryArenaBoss = (isFinalAreaBoss || isWave15AreaTwoBoss) && !isWormBoss
       const bossArena = bossArenaRef.current
       const playerCenter = player.getCenter()
 
       let spawnX: number
       let spawnY: number
-      if (isStationaryFinalBoss && bossArena) {
+      if (isStationaryArenaBoss && bossArena) {
         spawnX = bossArena.left + bossArena.width / 2 - 46
         spawnY = bossArena.top + 195 - 46
       } else if (isFinalAreaBoss && isWormBoss) {
@@ -1487,7 +1490,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
       }
 
       const anchorPos =
-        isStationaryFinalBoss && bossArena
+        isStationaryArenaBoss && bossArena
           ? {
               x: bossArena.left + bossArena.width / 2,
               y: bossArena.top + Math.max(210, Math.round(bossArena.height * 0.27))
@@ -1500,11 +1503,69 @@ const GameContainer: React.FC<GameContainerProps> = ({
         enemyData: template,
         target: player,
         isBoss: forceBoss,
-        isStationaryBoss: isStationaryFinalBoss,
+        isStationaryBoss: isStationaryArenaBoss,
         isFinalBoss: isFinalAreaBoss,
+        isWave15SpecialBoss: isWave15AreaTwoBoss,
         anchorPos,
-        arenaBounds: isStationaryFinalBoss ? bossArena : null
+        arenaBounds: isStationaryArenaBoss ? bossArena : null
       })
+
+      const beginAreaBossCutscene = (theme: BossCutsceneTheme) => {
+        if (dogBossActiveRef.current) return
+        const duration = theme.durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
+        const focusPos = anchorPos || enemy.getCenter()
+        enemy.isSpawning = true
+        enemy.spawnTime = 0
+        enemy.spawnDelay = duration
+        enemy.cutsceneDelayTimer = duration
+        player.isInvulnerable = true
+        player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, duration + 0.5)
+        dogCutsceneRef.current = {
+          active: true,
+          kind: theme.kind,
+          theme,
+          elapsed: 0,
+          wallElapsed: 0,
+          duration,
+          line2Delay: theme.revealDelaySeconds ?? 1.6,
+          portalX: focusPos.x,
+          portalY: focusPos.y,
+          triggeredPhase2Sound: false,
+          lastOpacityStep: 100,
+          particleAccumulator: 0,
+          pulseStep: 0
+        }
+        dogPostDropRef.current = null
+        dogCutsceneParticlesRef.current = []
+        dogGroundCracksRef.current = createDogGroundCracks(
+          focusPos.x,
+          focusPos.y,
+          8,
+          220,
+          duration + 1.8,
+          [theme.primaryColor, theme.secondaryColor]
+        )
+        if (theme.kind === 'w15_seraph') {
+          pushSeraphSolarBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, 0.9)
+        } else {
+          pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, {
+            flames: 32,
+            embers: 28,
+            speedScale: 0.95,
+            palette: theme.palette,
+            coreColor: theme.coreColor,
+            shockwaves: [
+              { maxRadius: 230, color: theme.primaryColor, lineWidth: 4.5, duration: 0.65 }
+            ]
+          })
+        }
+        setDogCutsceneUi({
+          active: true,
+          showSecondLine: false,
+          opacity: 1,
+          theme
+        })
+      }
 
       // Overtime, wave, area & difficulty progression scaling
       const scaling = getEnemyScaling(waveNumber, timeSurvivedRef.current)
@@ -1549,63 +1610,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
             ? 'ASTRAL SCOURGE — FINAL BOSS (W20)'
             : 'OMEGA OVERLORD — FINAL BOSS (W15)'
 
-        if (!dogBossActiveRef.current) {
-          const finalTheme = getAreaFinalBossCutsceneTheme(areaMeta.id)
-          const finalDur = finalTheme.durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
-          const finalLine2Delay = finalTheme.revealDelaySeconds ?? 1.6
-          const focusPos = anchorPos || enemy.getCenter()
-          enemy.isSpawning = true
-          enemy.spawnTime = 0
-          enemy.spawnDelay = finalDur
-          enemy.cutsceneDelayTimer = finalDur
-          player.isInvulnerable = true
-          player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, finalDur + 0.5)
-          dogCutsceneRef.current = {
-            active: true,
-            kind: finalTheme.kind,
-            theme: finalTheme,
-            elapsed: 0,
-            wallElapsed: 0,
-            duration: finalDur,
-            line2Delay: finalLine2Delay,
-            portalX: focusPos.x,
-            portalY: focusPos.y,
-            triggeredPhase2Sound: false,
-            lastOpacityStep: 100,
-            particleAccumulator: 0,
-            pulseStep: 0
-          }
-          dogPostDropRef.current = null
-          dogCutsceneParticlesRef.current = []
-          dogGroundCracksRef.current = createDogGroundCracks(
-            focusPos.x,
-            focusPos.y,
-            8,
-            220,
-            finalDur + 1.8,
-            [finalTheme.primaryColor, finalTheme.secondaryColor]
-          )
-          if (finalTheme.kind === 'w15_seraph') {
-            pushSeraphSolarBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, 0.9)
-          } else {
-            pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, {
-              flames: 32,
-              embers: 28,
-              speedScale: 0.95,
-              palette: finalTheme.palette,
-              coreColor: finalTheme.coreColor,
-              shockwaves: [
-                { maxRadius: 230, color: finalTheme.primaryColor, lineWidth: 4.5, duration: 0.65 }
-              ]
-            })
-          }
-          setDogCutsceneUi({
-            active: true,
-            showSecondLine: false,
-            opacity: 1,
-            theme: finalTheme
-          })
-        }
+        beginAreaBossCutscene(getAreaFinalBossCutsceneTheme(areaMeta.id))
       } else {
         const bossBuff = forceBoss
           ? isAreaTwo
@@ -1679,6 +1684,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
               : tier === 2
                 ? `OMEGA DREADNOUGHT (W${waveNumber})`
                 : `AEGIS COMMANDER (W${waveNumber})`
+        }
+
+        if (isWave15AreaTwoBoss) {
+          enemy.bossTitle = 'SOLAR ARCHON SERAPH — WAVE 15 APEX'
+          beginAreaBossCutscene(getWave15CutsceneTheme('astral_citadel'))
         }
       }
 
@@ -4389,7 +4399,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
         if (dogCutsceneRef.current?.active && gameStateRef.current !== 'playing') {
           const cs = dogCutsceneRef.current
           const liveCutsceneBoss = enemiesRef.current.find(
-            (e) => (cs.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss) && e.isAlive
+            (e) =>
+              (cs.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss || e.isWave15SpecialBoss) &&
+              e.isAlive
           )
           const camFrame = computeDevourerCutsceneCameraFrame({
             elapsed: cs.elapsed,
@@ -4434,7 +4446,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
             const remainingCutscene = Math.max(0, activeCutscene.duration - activeCutscene.elapsed)
             for (const e of enemiesRef.current) {
-              if (e.isAlive && (activeCutscene.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss)) {
+              if (
+                e.isAlive &&
+                (activeCutscene.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss || e.isWave15SpecialBoss)
+              ) {
                 e.cutsceneDelayTimer = Math.max(0.02, remainingCutscene)
               }
             }
@@ -4518,7 +4533,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const buildupRatio = Math.min(1, activeCutscene.elapsed / activeCutscene.duration)
             activeCutscene.particleAccumulator += deltaTime * (16 + buildupRatio * 34)
             const liveBossHead = enemiesRef.current.find(
-              (e) => (activeCutscene.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss) && e.isAlive
+              (e) =>
+                (activeCutscene.kind === 'dog'
+                  ? e.isDevourerOfGods
+                  : e.isFinalBoss || e.isWave15SpecialBoss) && e.isAlive
             )
             const burstOrigin = liveBossHead
               ? liveBossHead.getCenter()
@@ -4743,7 +4761,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
             if (activeCutscene.elapsed >= activeCutscene.duration) {
               for (const e of enemiesRef.current) {
-                if (e.isAlive && (activeCutscene.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss)) {
+                if (
+                  e.isAlive &&
+                  (activeCutscene.kind === 'dog'
+                    ? e.isDevourerOfGods
+                    : e.isFinalBoss || e.isWave15SpecialBoss)
+                ) {
                   e.cutsceneDelayTimer = 0
                   e.spawnTime = Math.max(e.spawnTime, e.spawnDelay)
                   e.isSpawning = false
@@ -4913,7 +4936,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
           if (activeCutsceneCamera?.active) {
             const liveFocusBoss = enemiesRef.current.find(
               (e) =>
-                (activeCutsceneCamera.kind === 'dog' ? e.isDevourerOfGods : e.isFinalBoss) && e.isAlive
+                (activeCutsceneCamera.kind === 'dog'
+                  ? e.isDevourerOfGods
+                  : e.isFinalBoss || e.isWave15SpecialBoss) && e.isAlive
             )
             const bossFocus = liveFocusBoss
               ? liveFocusBoss.getCenter()
@@ -5849,17 +5874,33 @@ const GameContainer: React.FC<GameContainerProps> = ({
               const phaseNum = enemy.pendingPhaseAnnouncement
               enemy.pendingPhaseAnnouncement = null
               playSoundRef.current('wave')
-              if (enemy.isFinalBoss) {
-                const phaseMsg =
-                  phaseNum === 2
+              if (enemy.isFinalBoss || enemy.isWave15SpecialBoss) {
+                const solarSeraph = enemy.isWave15SpecialBoss && enemy.enemyId === 'boss_a2_15'
+                const phaseMsg = solarSeraph
+                  ? phaseNum === 2
+                    ? 'PHASE 2: SERAPH SUNLANCE — THE PRISM OPENS!'
+                    : 'PHASE 3: CROWN LATTICE — SUNFALL!'
+                  : phaseNum === 2
                     ? 'PHASE 2 UNLOCKED: ROTATING X-BEAMS & VOID METEOR SALVO!'
                     : 'FINAL PHASE 3: APOCALYPSE LASER GRID & OVERDRIVE!'
                 toast.warning(`${enemy.bossTitle} — ${phaseMsg}`)
                 floatingTextsRef.current.push({
                   x: ec.x,
                   y: enemy.y - 24,
-                  text: phaseNum === 2 ? 'PHASE 2: CROSSFIRE!' : 'PHASE 3: OVERDRIVE!',
-                  color: phaseNum === 2 ? '#38BDF8' : '#FF0055',
+                  text: solarSeraph
+                    ? phaseNum === 2
+                      ? 'SERAPH: SUNLANCE!'
+                      : 'SERAPH: CROWN LATTICE!'
+                    : phaseNum === 2
+                      ? 'PHASE 2: CROSSFIRE!'
+                      : 'PHASE 3: OVERDRIVE!',
+                  color: solarSeraph
+                    ? phaseNum === 2
+                      ? '#FACC15'
+                      : '#34D399'
+                    : phaseNum === 2
+                      ? '#38BDF8'
+                      : '#FF0055',
                   timer: 1.8
                 })
               } else if (enemy.isDevourerOfGods) {
@@ -6252,14 +6293,14 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 phase: liveBoss.bossPhase,
                 totalPhases: liveBoss.isAstralScourge
                   ? 2
-                  : liveBoss.isFinalBoss
+                  : liveBoss.isFinalBoss || liveBoss.isWave15SpecialBoss
                     ? 3
                     : liveBoss.enableEnrage
                       ? 2
                       : 1,
                 damageReduction: liveBoss.damageReduction,
                 isEnraged: liveBoss.isEnraged,
-                isFinalBoss: liveBoss.isFinalBoss
+                isFinalBoss: liveBoss.isFinalBoss || liveBoss.isWave15SpecialBoss
               })
             } else {
               setActiveBossHud((prev) => (prev === null ? prev : null))

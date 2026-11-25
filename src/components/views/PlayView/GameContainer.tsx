@@ -927,6 +927,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const [activeUpgradeNames, setActiveUpgradeNames] = useState<string[]>([])
   const [shieldActive, setShieldActive] = useState<boolean>(false)
   const [activeBossHud, setActiveBossHud] = useState<ActiveBossHudState | null>(null)
+  const [inferoDesperationFade, setInferoDesperationFade] = useState<'white' | 'fade-out' | null>(null)
   const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[]>([])
   const [finalScore, setFinalScore] = useState<number>(0)
   const [isVictory, setIsVictory] = useState<boolean>(false)
@@ -961,6 +962,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const cameraRef = useRef<Camera | null>(null)
   const inputRef = useRef<InputManager | null>(null)
   const enemiesRef = useRef<Enemy[]>([])
+  const inferoVictoryFinalizeTimerRef = useRef<number | null>(null)
+  const inferoVictoryFinalizeScheduledRef = useRef(false)
   const playerProjectilesRef = useRef<Projectile[]>([])
   const coinsRef = useRef<Coin[]>([])
   const summonsRef = useRef<Summon[]>([])
@@ -1184,6 +1187,14 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const triggerEndGame = useCallback(
     (victory = false) => {
       if (gameStateRef.current === 'gameover') return
+      if (!victory) {
+        setInferoDesperationFade(null)
+        if (inferoVictoryFinalizeTimerRef.current) {
+          clearTimeout(inferoVictoryFinalizeTimerRef.current)
+          inferoVictoryFinalizeTimerRef.current = null
+        }
+        inferoVictoryFinalizeScheduledRef.current = false
+      }
 
       flushBankedCoins()
       dogBossActiveRef.current = false
@@ -1809,6 +1820,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
   )
 
   const initRun = useCallback(() => {
+    if (inferoVictoryFinalizeTimerRef.current) {
+      clearTimeout(inferoVictoryFinalizeTimerRef.current)
+      inferoVictoryFinalizeTimerRef.current = null
+    }
+    inferoVictoryFinalizeScheduledRef.current = false
+    setInferoDesperationFade(null)
+
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -2673,7 +2691,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         canCrit?: boolean
       }
     ) => {
-      if (!enemy.isAlive) return
+      if (!enemy.isAlive || enemy.isInferoDesperationPhase) return
       const devMult = isDevUserRef.current ? devSettingsRef.current.damageMultiplier : 1
       const baseScaledDamage = Math.max(1, Math.round(amount * devMult))
       const passiveCrit = getPassiveCritUpgradeBonuses(upgradeLevelsRef.current)
@@ -2701,7 +2719,22 @@ const GameContainer: React.FC<GameContainerProps> = ({
           ? Math.max(1, Math.round(displayedDamage * 0.15))
           : displayedDamage
       const wasSpawningBeforeHit = enemy.isSpawning
+      const wasInferoDesperate = enemy.isInferoDesperationPhase
       const wasKilled = enemy.takeDamage(finalDamage)
+      if (!wasInferoDesperate && enemy.isInferoDesperationPhase) {
+        setInferoDesperationFade('white')
+        playSoundRef.current('wave')
+        floatingTextsRef.current.push({
+          x: enemy.getCenter().x,
+          y: enemy.y - 38,
+          text: 'FINAL BREACH',
+          color: '#FDE047',
+          timer: 1.4,
+          maxTimer: 1.4,
+          isCrit: false,
+          swayPhase: 0
+        })
+      }
       if (enemy.pendingAstralScourgePhaseOneDeath) {
         enemy.pendingAstralScourgePhaseOneDeath = false
         const focus = enemy.getCenter()
@@ -2984,7 +3017,20 @@ const GameContainer: React.FC<GameContainerProps> = ({
           }
           if (areaRef.current.id !== 'carbon_sector') {
             playSoundRef.current('levelup')
-            setEngineState('victory_choice')
+            if (enemy.isInferoChampion) {
+              inferoVictoryFinalizeTimerRef.current = window.setTimeout(() => {
+                inferoVictoryFinalizeTimerRef.current = null
+                inferoVictoryFinalizeScheduledRef.current = false
+                if (gameStateRef.current !== 'playing') {
+                  setInferoDesperationFade(null)
+                  return
+                }
+                setInferoDesperationFade(null)
+                setEngineState('victory_choice')
+              }, 420)
+            } else {
+              setEngineState('victory_choice')
+            }
           } else {
             triggerEndGame(true)
           }
@@ -6237,6 +6283,24 @@ const GameContainer: React.FC<GameContainerProps> = ({
               enemy.setVisibleWorldBounds(cameraRef.current?.getWorldBounds() ?? null)
             }
             enemy.update(deltaTime, player)
+            if (
+              enemy.isInferoChampion &&
+              enemy.pendingInferoDesperationCompletion &&
+              !inferoVictoryFinalizeScheduledRef.current
+            ) {
+              enemy.pendingInferoDesperationCompletion = false
+              inferoVictoryFinalizeScheduledRef.current = true
+              setInferoDesperationFade('fade-out')
+              enemy.isInferoDesperationPhase = false
+              enemy.hasCompletedInferoDesperation = true
+              enemy.health = 1
+              const player = playerRef.current
+              if (player) {
+                player.isInvulnerable = true
+                player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, 0.8)
+              }
+              damageEnemy(enemy, 1, undefined, { canCrit: false, color: '#FDE047' })
+            }
             if (enemy.pendingAstralPhaseTwoCutscene) {
               startAstralScourgePhaseTwoCutscene(enemy)
             }
@@ -8536,7 +8600,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
     }
 
     rafId = requestAnimationFrame(frame)
-    return () => cancelAnimationFrame(rafId)
+    return () => {
+      cancelAnimationFrame(rafId)
+      if (inferoVictoryFinalizeTimerRef.current) {
+        clearTimeout(inferoVictoryFinalizeTimerRef.current)
+        inferoVictoryFinalizeTimerRef.current = null
+      }
+    }
   }, [pickLevelUpOptions, setEngineState, spawnEnemyForWave, toast, triggerEndGame])
 
   const handleLevelUpSelect = useCallback(
@@ -8688,6 +8758,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
   const handlePauseToggle = useCallback(() => {
     if (gameStateRef.current === 'playing') {
+      if (inferoVictoryFinalizeScheduledRef.current) return
       pauseMusicRef.current()
       setEngineState('paused')
     } else if (gameStateRef.current === 'paused') {
@@ -8775,6 +8846,17 @@ const GameContainer: React.FC<GameContainerProps> = ({
     >
       <GameCanvas ref={canvasRef} />
       <YouTubeBossMusicPlayer />
+      {inferoDesperationFade && (
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 z-[100] bg-white ${
+            inferoDesperationFade === 'white'
+              ? 'infero-desperation-white'
+              : 'infero-desperation-fade-back'
+          }`}
+          style={{ animationPlayState: gameState === 'paused' ? 'paused' : 'running' }}
+        />
+      )}
 
       {gameState === 'menu' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 z-30 p-6 text-center">

@@ -1956,6 +1956,41 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }
   })
 
+  it('starts Infero’s ten-second portal ram desperation after its final health is depleted', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.bossPhase = 2
+    boss.health = 1
+    boss.setVisibleWorldBounds({ left: 500, right: 1500, top: 500, bottom: 1500 })
+
+    assert.equal(boss.takeDamage(1), false, 'lethal damage begins the finale instead of ending the fight')
+    assert.equal(boss.isAlive, true)
+    assert.equal(boss.isInferoDesperationPhase, true)
+    assert.equal(boss.health, 0)
+    assert.ok(boss.inferoDesperationPortalPosition)
+
+    const initialX = boss.getCenter().x
+    for (let frame = 0; frame < 24; frame++) boss.update(0.05, player)
+    assert.notEqual(boss.getCenter().x, initialX, 'Infero repeatedly rams from each portal')
+    assert.equal(boss.takeDamage(500), false, 'the finale cannot be interrupted by more damage')
+
+    for (let frame = 0; frame < 220 && !boss.pendingInferoDesperationCompletion; frame++) {
+      boss.update(0.05, player)
+    }
+    assert.equal(boss.inferoDesperationTimer, 10)
+    assert.equal(boss.pendingInferoDesperationCompletion, true)
+    assert.equal(boss.isAlive, true, 'the game waits for the white fade before showing victory')
+  })
+
   it('rotates Infero’s phase-two laser spokes slowly before extending and firing', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })

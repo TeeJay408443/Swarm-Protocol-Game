@@ -29,3 +29,29 @@
     }
   }
 }
+
+@keyframes infero-desperation-white {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes infero-desperation-fade-back {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.infero-desperation-white {
+  animation: infero-desperation-white 10s linear forwards;
+}
+
+.infero-desperation-fade-back {
+  animation: infero-desperation-fade-back 420ms ease-out forwards;
+}

@@ -23,6 +23,11 @@ import { EnemiesRow } from '../../types/database'
 import { Player } from './Player'
 
 export const ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS = 20
+const INFERO_DESPERATION_DURATION_SECONDS = 10
+const INFERO_DESPERATION_PORTAL_SECONDS = 0.3
+const INFERO_DESPERATION_RAM_SECONDS = 0.62
+const INFERO_DESPERATION_RECOVERY_SECONDS = 0.18
+const INFERO_DESPERATION_RAM_SPEED = 1120
 
 export type EnemyType =
   | 'Swarm'
@@ -438,6 +443,14 @@ export class Enemy {
   private inferoHoverRetargetTimer: number = 0
   private inferoSunEmerged: boolean = false
   private inferoSunAttackIndex: number = 0
+  isInferoDesperationPhase: boolean = false
+  pendingInferoDesperationCompletion: boolean = false
+  hasCompletedInferoDesperation: boolean = false
+  inferoDesperationTimer: number = 0
+  inferoDesperationPortalPosition: Vector2 | null = null
+  private inferoDesperationCycleMode: 'portal' | 'ram' | 'recover' = 'portal'
+  private inferoDesperationCycleTimer: number = 0
+  private inferoDesperationDirection: Vector2 = { x: 1, y: 0 }
   private visibleWorldBounds: { left: number; right: number; top: number; bottom: number } | null = null
 
   get isInferoChampion(): boolean {
@@ -836,6 +849,11 @@ export class Enemy {
       if (this.astralPhaseTwoActivationTimer <= 0) {
         this.activateAstralScourgePhaseTwo()
       }
+      return
+    }
+
+    if (this.isInferoDesperationPhase) {
+      this.updateInferoDesperationPhase(deltaTime)
       return
     }
 
@@ -1356,6 +1374,77 @@ export class Enemy {
       const safeCenter = this.clampInferoCenter(this.getCenter())
       this.x = safeCenter.x - this.width / 2
       this.y = safeCenter.y - this.height / 2
+    }
+  }
+
+  private updateInferoDesperationPhase(deltaTime: number): void {
+    this.inferoDesperationTimer = Math.min(
+      INFERO_DESPERATION_DURATION_SECONDS,
+      this.inferoDesperationTimer + deltaTime
+    )
+    if (this.inferoDesperationTimer >= INFERO_DESPERATION_DURATION_SECONDS) {
+      this.velocity = Vector2.zero()
+      this.pendingInferoDesperationCompletion = true
+      return
+    }
+
+    this.inferoDesperationCycleTimer += deltaTime
+    const center = this.getCenter()
+
+    if (this.inferoDesperationCycleMode === 'portal') {
+      this.velocity = Vector2.zero()
+      if (!this.inferoDesperationPortalPosition) {
+        this.inferoDesperationPortalPosition = { ...center }
+      }
+
+      const targetCenter = this.target?.isAlive ? this.target.getCenter() : null
+      if (targetCenter) {
+        this.facingAngle = Math.atan2(targetCenter.y - center.y, targetCenter.x - center.x)
+      }
+
+      if (this.inferoDesperationCycleTimer >= INFERO_DESPERATION_PORTAL_SECONDS) {
+        if (targetCenter) {
+          const dx = targetCenter.x - center.x
+          const dy = targetCenter.y - center.y
+          const distance = Math.hypot(dx, dy) || 1
+          this.inferoDesperationDirection = { x: dx / distance, y: dy / distance }
+        }
+        this.facingAngle = Math.atan2(
+          this.inferoDesperationDirection.y,
+          this.inferoDesperationDirection.x
+        )
+        this.inferoDesperationPortalPosition = { ...center }
+        this.inferoDesperationCycleMode = 'ram'
+        this.inferoDesperationCycleTimer = 0
+        this.velocity = {
+          x: this.inferoDesperationDirection.x * INFERO_DESPERATION_RAM_SPEED,
+          y: this.inferoDesperationDirection.y * INFERO_DESPERATION_RAM_SPEED
+        }
+      }
+      return
+    }
+
+    if (this.inferoDesperationCycleMode === 'ram') {
+      this.x += this.velocity.x * deltaTime
+      this.y += this.velocity.y * deltaTime
+      const clampedCenter = this.clampInferoCenter(this.getCenter())
+      this.x = clampedCenter.x - this.width / 2
+      this.y = clampedCenter.y - this.height / 2
+
+      if (this.inferoDesperationCycleTimer >= INFERO_DESPERATION_RAM_SECONDS) {
+        this.velocity = Vector2.zero()
+        this.inferoDesperationCycleMode = 'recover'
+        this.inferoDesperationCycleTimer = 0
+        this.inferoDesperationPortalPosition = null
+      }
+      return
+    }
+
+    this.velocity = Vector2.zero()
+    if (this.inferoDesperationCycleTimer >= INFERO_DESPERATION_RECOVERY_SECONDS) {
+      this.inferoDesperationCycleMode = 'portal'
+      this.inferoDesperationCycleTimer = 0
+      this.inferoDesperationPortalPosition = { ...center }
     }
   }
 
@@ -4658,6 +4747,7 @@ export class Enemy {
    */
   takeDamage(amount: number): boolean {
     if (!this.isAlive || this.isSpawning) return false
+    if (this.isInferoDesperationPhase) return false
 
     let effectiveDamage =
       this.damageReduction > 0
@@ -4778,6 +4868,25 @@ export class Enemy {
 
     // Check if dead
     if (this.health <= 0) {
+      if (
+        this.isInferoChampion &&
+        this.isFinalBoss &&
+        this.bossPhase >= 2 &&
+        !this.hasCompletedInferoDesperation
+      ) {
+        this.health = 0
+        this.isInferoDesperationPhase = true
+        this.pendingInferoDesperationCompletion = false
+        this.inferoDesperationTimer = 0
+        this.inferoDesperationCycleMode = 'portal'
+        this.inferoDesperationCycleTimer = 0
+        this.inferoDesperationPortalPosition = { ...this.getCenter() }
+        this.telegraphs = []
+        this.projectiles = []
+        this.aoeProjectiles = []
+        this.velocity = Vector2.zero()
+        return false
+      }
       this.isAlive = false
       this.isDying = true
       this.deathTimer = 0
@@ -6682,6 +6791,36 @@ export class Enemy {
     if (this.isSpawning) {
       const spawnProgress = Math.min(1, this.spawnTime / this.spawnDelay)
       ctx.globalAlpha = 0.4 + 0.6 * spawnProgress
+    }
+
+    if (this.isInferoDesperationPhase && this.inferoDesperationPortalPosition) {
+      const portal = camera.worldToScreen(
+        this.inferoDesperationPortalPosition.x,
+        this.inferoDesperationPortalPosition.y
+      )
+      const pulse = 0.82 + Math.sin(this.animTime * 18) * 0.14
+      ctx.save()
+      ctx.translate(portal.x, portal.y)
+      ctx.rotate(this.animTime * 1.6)
+      ctx.globalAlpha = pulse
+      ctx.shadowColor = '#F97316'
+      ctx.shadowBlur = 32
+      ctx.fillStyle = 'rgba(67, 20, 7, 0.92)'
+      ctx.beginPath()
+      ctx.ellipse(0, 0, 25, 48, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.shadowBlur = 0
+      ctx.strokeStyle = '#FDBA74'
+      ctx.lineWidth = 5
+      ctx.beginPath()
+      ctx.ellipse(0, 0, 34, 58, 0, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.strokeStyle = '#FDE047'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.ellipse(0, 0, 17, 40, 0, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
     }
 
     // Segmented Worm Bosses (Devourer of Gods / Astral Scourge) trailing body segments

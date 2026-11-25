@@ -84,7 +84,7 @@ export interface EnemyProjectile {
   isCosmicStar?: boolean
   isBlazingSpear?: boolean
   isInferoFireball?: boolean
-  inferoLancePhase?: 'outbound' | 'paused' | 'aiming' | 'launched'
+  inferoLancePhase?: 'orbiting' | 'outbound' | 'paused' | 'aiming' | 'launched'
   inferoLancePhaseTimer?: number
   inferoLanceBrakeDuration?: number
   inferoLancePauseDuration?: number
@@ -93,6 +93,10 @@ export interface EnemyProjectile {
   inferoLanceLaunchSpeed?: number
   inferoLanceTargetX?: number
   inferoLanceTargetY?: number
+  inferoOrbitAngle?: number
+  inferoOrbitRadius?: number
+  inferoOrbitSpeed?: number
+  inferoOrbitDuration?: number
   trailTimer?: number
   trailParticles?: Array<{
     x: number
@@ -151,6 +155,7 @@ export type BossAttackKind =
   | 'infero_underflame_swoops'
   | 'infero_aimed_ram'
   | 'infero_rebound_lances'
+  | 'infero_orbiting_lances'
 
 export type Wave15BossIdentity =
   | 'omega_overlord'
@@ -255,6 +260,7 @@ export interface BossTelegraphAttack {
   lanceMoveTargetX?: number
   lanceMoveTargetY?: number
   lanceMoveDuration?: number
+  orbitDuration?: number
   swoopCount?: number
   swoopIndex?: number
   swoopEndX?: number
@@ -1046,6 +1052,7 @@ export class Enemy {
             t.kind === 'astral_targeted_lasers' ||
             t.kind === 'inferno_spear_volley' ||
             t.kind === 'infero_spinning_lattice' ||
+            t.kind === 'infero_orbiting_lances' ||
             t.kind === 'infero_underflame_swoops' ||
             t.kind === 'cosmic_portal_lunge' ||
             t.kind === 'cosmic_orb_barrage'
@@ -2171,8 +2178,9 @@ export class Enemy {
       if (this.bossPhase >= 2 && this.inferoSunEmerged) {
         const emergedCycle: BossAttackKind[] = [
           'infero_aimed_ram',
+          'infero_rebound_lances',
           'infero_aimed_ram',
-          'infero_rebound_lances'
+          'infero_orbiting_lances'
         ]
         kind = emergedCycle[this.inferoSunAttackIndex++ % emergedCycle.length]
       } else {
@@ -2571,6 +2579,27 @@ export class Enemy {
         activeDuration,
         damage: Math.round(28 * Math.max(1, this.damageScale)),
         warningLabel: `EMBER LANCE FAN // ROUND 1/${roundCount}`,
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'infero_orbiting_lances' && this.isInferoChampion) {
+      const orbitDuration = 2.05
+      const aimDuration = 0.72
+      telegraph = {
+        id,
+        kind,
+        x: targetCenter.x,
+        y: targetCenter.y,
+        projectileCount: 8,
+        orbitRadius: 205,
+        orbitDuration,
+        radius: 205,
+        chargeTimer: 0,
+        chargeDuration: 0.9,
+        activeTimer: 0,
+        activeDuration: orbitDuration + aimDuration + 0.25,
+        damage: Math.round(34 * Math.max(1, this.damageScale)),
+        warningLabel: 'EMBER ORBIT // LANCES LOCK IN',
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -3255,7 +3284,8 @@ export class Enemy {
         infero_solar_core: 'SUN CORE // DODGE THE CENTRAL LASER BURST',
         infero_underflame_swoops: 'UNDERFLAME DIVE // WATCH FOR THE FIRE COLUMN',
         infero_aimed_ram: 'INFERNO RAM // DODGE THE LOCKED LINE',
-        infero_rebound_lances: 'EMBER LANCE FAN // WATCH FOR THE RE-THROW'
+        infero_rebound_lances: 'EMBER LANCE FAN // WATCH FOR THE RE-THROW',
+        infero_orbiting_lances: 'EMBER ORBIT // DODGE WHEN THE LANCES LOCK'
       }
       telegraph.warningLabel =
         kind === 'inferno_spear_volley'
@@ -3489,6 +3519,52 @@ export class Enemy {
     }
   }
 
+  private launchInferoOrbitingLances(
+    attack: BossTelegraphAttack,
+    targetCenter: Vector2
+  ): void {
+    const lanceCount = attack.projectileCount ?? 8
+    const baseAngle = Math.random() * Math.PI * 2
+    const view = this.getInferoViewportBounds()
+    for (let index = 0; index < lanceCount; index++) {
+      const angle = baseAngle + (index / lanceCount) * Math.PI * 2
+      const radius = attack.orbitRadius ?? 205
+      const x = Math.max(
+        view.left + 18,
+        Math.min(view.right - 18, targetCenter.x + Math.cos(angle) * radius)
+      )
+      const y = Math.max(
+        view.top + 18,
+        Math.min(view.bottom - 18, targetCenter.y + Math.sin(angle) * radius)
+      )
+      this.projectiles.push({
+        x,
+        y,
+        width: 30,
+        height: 11,
+        speed: 0,
+        direction: { x: -Math.sin(angle), y: Math.cos(angle) },
+        damage: attack.damage,
+        color: index % 2 === 0 ? '#FB923C' : '#FDE047',
+        lifetime: 0,
+        maxLifetime: 8,
+        isBlazingSpear: true,
+        inferoLancePhase: 'orbiting',
+        inferoLancePhaseTimer: 0,
+        inferoOrbitAngle: angle,
+        inferoOrbitRadius: radius,
+        inferoOrbitSpeed: 2.65,
+        inferoOrbitDuration: attack.orbitDuration ?? 2.05,
+        inferoLanceTargetX: targetCenter.x,
+        inferoLanceTargetY: targetCenter.y,
+        inferoLanceAimDuration: 0.72,
+        inferoLanceLaunchSpeed: this.bossPhase >= 2 ? 860 : 780,
+        trailTimer: 0,
+        trailParticles: []
+      })
+    }
+  }
+
   private updateInferoReboundLance(
     projectile: EnemyProjectile,
     deltaTime: number,
@@ -3497,7 +3573,44 @@ export class Enemy {
     const phase = projectile.inferoLancePhase
     let phaseTimer = (projectile.inferoLancePhaseTimer ?? 0) + deltaTime
 
-    if (phase === 'outbound') {
+    if (phase === 'orbiting') {
+      const orbitCenter = targetCenter ?? {
+        x: projectile.inferoLanceTargetX ?? projectile.x,
+        y: projectile.inferoLanceTargetY ?? projectile.y
+      }
+      const orbitAngle =
+        (projectile.inferoOrbitAngle ?? 0) +
+        (projectile.inferoOrbitSpeed ?? 2.65) * deltaTime
+      projectile.inferoOrbitAngle = orbitAngle
+      const radius = projectile.inferoOrbitRadius ?? 205
+      const view = this.getInferoViewportBounds()
+      projectile.x = Math.max(
+        view.left + projectile.width / 2,
+        Math.min(view.right - projectile.width / 2, orbitCenter.x + Math.cos(orbitAngle) * radius)
+      )
+      projectile.y = Math.max(
+        view.top + projectile.height / 2,
+        Math.min(view.bottom - projectile.height / 2, orbitCenter.y + Math.sin(orbitAngle) * radius)
+      )
+      projectile.direction = {
+        x: -Math.sin(orbitAngle),
+        y: Math.cos(orbitAngle)
+      }
+      if (phaseTimer >= (projectile.inferoOrbitDuration ?? 2.05)) {
+        if (targetCenter) {
+          projectile.inferoLanceTargetX = targetCenter.x
+          projectile.inferoLanceTargetY = targetCenter.y
+          const aim = Vector2.normalize({
+            x: targetCenter.x - projectile.x,
+            y: targetCenter.y - projectile.y
+          })
+          if (Math.hypot(aim.x, aim.y) > 0) projectile.direction = aim
+        }
+        projectile.inferoLancePhase = 'aiming'
+        phaseTimer = 0
+        projectile.speed = 0
+      }
+    } else if (phase === 'outbound') {
       const brakeDuration = Math.max(0.001, projectile.inferoLanceBrakeDuration ?? 0.7)
       const outboundSpeed = projectile.inferoLanceOutboundSpeed ?? projectile.speed
       const previousProgress = Math.min(
@@ -3582,6 +3695,9 @@ export class Enemy {
           firstColumn.topY = view.top
           firstColumn.height = Math.max(0, view.bottom - view.top)
         }
+      } else if (t.kind === 'infero_orbiting_lances' && targetCenter) {
+        t.x = targetCenter.x
+        t.y = targetCenter.y
       } else if (t.kind === 'infero_spinning_lattice') {
         t.x = t.inferoLaunchX ?? bossCenter.x
         t.y = t.inferoLaunchY ?? bossCenter.y
@@ -3756,6 +3872,8 @@ export class Enemy {
             t.lanceRoundTimer = 0
             t.warningLabel = `EMBER LANCE FAN // ROUND 1/${t.lanceRoundCount ?? 2}`
             this.launchInferoReboundLances(t, this.getCenter())
+          } else if (t.kind === 'infero_orbiting_lances' && targetCenter) {
+            this.launchInferoOrbitingLances(t, targetCenter)
           } else if (t.kind === 'infero_underflame_swoops') {
             t.swoopIndex = 0
             const positionAtDiveStart = this.getCenter()
@@ -3995,6 +4113,16 @@ export class Enemy {
               t.warningLabel = `EMBER LANCE FAN // MOVE TO ROUND ${nextIndex + 1}/${t.lanceRoundCount ?? 2}`
             }
           }
+        } else if (t.kind === 'infero_orbiting_lances') {
+          if (targetCenter) {
+            t.x = targetCenter.x
+            t.y = targetCenter.y
+          }
+          const orbitDuration = t.orbitDuration ?? 2.05
+          t.warningLabel =
+            t.activeTimer < orbitDuration
+              ? 'EMBER ORBIT // CIRCLING THE PLAYER'
+              : 'EMBER ORBIT // LANCES LOCKED — DODGE'
         } else if (t.kind === 'infero_aimed_ram') {
           const ramDuration = Math.max(0.001, t.ramDuration ?? 0.6)
           const progress = Math.max(0, Math.min(1, t.activeTimer / ramDuration))
@@ -4772,6 +4900,56 @@ export class Enemy {
             labelY
           )
         }
+        ctx.restore()
+      } else if (t.kind === 'infero_orbiting_lances') {
+        const center = camera.worldToScreen(t.x, t.y)
+        const ringRadius = (t.orbitRadius ?? 205) * camera.zoom
+        const pulse = 0.72 + Math.sin(this.animTime * 12) * 0.12
+        ctx.save()
+        ctx.globalAlpha = t.hasTriggered ? 0.72 : 0.9
+        ctx.strokeStyle = t.hasTriggered ? '#FB923C' : '#FDE047'
+        ctx.lineWidth = t.hasTriggered ? 2.5 : 2
+        ctx.shadowColor = '#F97316'
+        ctx.shadowBlur = 12
+        ctx.setLineDash([11, 8])
+        ctx.beginPath()
+        ctx.arc(center.x, center.y, ringRadius, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.setLineDash([])
+        for (let index = 0; index < (t.projectileCount ?? 8); index++) {
+          const angle =
+            this.animTime * (t.hasTriggered ? 2.65 : 0.24) +
+            (index / (t.projectileCount ?? 8)) * Math.PI * 2
+          const markerX = center.x + Math.cos(angle) * ringRadius
+          const markerY = center.y + Math.sin(angle) * ringRadius
+          ctx.globalAlpha = (t.hasTriggered ? 0.8 : 0.55) * pulse
+          ctx.fillStyle = index % 2 === 0 ? '#FFF7ED' : '#FDE047'
+          ctx.beginPath()
+          ctx.arc(markerX, markerY, (t.hasTriggered ? 5 : 4) * camera.zoom, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.strokeStyle = '#F97316'
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.moveTo(markerX - 7 * camera.zoom, markerY)
+          ctx.lineTo(markerX + 7 * camera.zoom, markerY)
+          ctx.moveTo(markerX, markerY - 7 * camera.zoom)
+          ctx.lineTo(markerX, markerY + 7 * camera.zoom)
+          ctx.stroke()
+        }
+        ctx.globalAlpha = 1
+        ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
+        ctx.fillRect(center.x - 168, center.y - ringRadius - 34, 336, 24)
+        ctx.fillStyle = t.hasTriggered ? '#FEF08A' : '#FDBA74'
+        ctx.font = 'bold 11px monospace'
+        ctx.textAlign = 'center'
+        const remaining = t.hasTriggered
+          ? Math.max(0, (t.orbitDuration ?? 2.05) - t.activeTimer)
+          : Math.max(0, t.chargeDuration - t.chargeTimer)
+        ctx.fillText(
+          `${t.warningLabel ?? 'EMBER ORBIT'} • ${remaining.toFixed(1)}s`,
+          center.x,
+          center.y - ringRadius - 18
+        )
         ctx.restore()
       } else if (t.kind === 'infero_rebound_lances') {
         const showMoveTarget = !t.hasTriggered || t.lanceRoundPhase === 'moving'
@@ -7842,7 +8020,8 @@ export function getInferoChampionAttackKind(phase: number, cycleIndex: number): 
       'inferno_spear_volley',
       'infero_underflame_swoops',
       'infero_rebound_lances',
-      'infero_aimed_ram'
+      'infero_aimed_ram',
+      'infero_orbiting_lances'
     ]
   }
   const safePhase = Math.max(1, Math.min(2, Math.floor(phase)))

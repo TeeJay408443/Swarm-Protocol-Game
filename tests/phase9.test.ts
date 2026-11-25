@@ -1491,7 +1491,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getInferoChampionAttackKind(2, 3), 'inferno_spear_volley')
     assert.equal(getInferoChampionAttackKind(3, 3), getInferoChampionAttackKind(2, 3))
     for (const phase of [1, 2]) {
-      const cycle = Array.from({ length: 7 }, (_, index) =>
+      const cycle = Array.from({ length: phase === 2 ? 8 : 7 }, (_, index) =>
         getInferoChampionAttackKind(phase, index)
       )
       assert.deepEqual(
@@ -1502,7 +1502,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
           'infero_spinning_lattice',
           'infero_underflame_swoops',
           'infero_aimed_ram',
-          'infero_rebound_lances'
+          'infero_rebound_lances',
+          ...(phase === 2 ? ['infero_orbiting_lances'] : [])
         ])
       )
       assert.equal(cycle.filter((kind) => kind === 'infero_aimed_ram').length, 2)
@@ -1707,6 +1708,73 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
         `Infero should reach the next arena location before round ${round + 1}`
       )
     }
+  })
+
+  it('orbits Infero’s phase-two lances around the player before locking and launching', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.bossPhase = 2
+    boss.specialCooldown = 100
+    boss.shootCooldown = 100
+    boss.setVisibleWorldBounds({ left: 0, right: 2400, top: 0, bottom: 1800 })
+
+    const attack = boss.spawnTelegraphedAttack('infero_orbiting_lances')!
+    assert.equal(attack.projectileCount, 8)
+    assert.equal(attack.orbitDuration, 2.05)
+    assert.equal(attack.hasTriggered, false)
+    for (let frame = 0; frame < 30 && !attack.hasTriggered; frame++) boss.update(0.05, player)
+    assert.equal(attack.hasTriggered, true)
+    assert.equal(boss.projectiles.length, 8)
+    assert.ok(boss.projectiles.every((projectile) =>
+      projectile.inferoLancePhase === 'orbiting' && projectile.isBlazingSpear
+    ))
+
+    player.x += 45
+    player.y -= 30
+    boss.update(0.1, player)
+    const orbitCenter = player.getCenter()
+    const orbitingLance = boss.projectiles[0]
+    assert.ok(Math.abs(
+      Math.hypot(orbitingLance.x - orbitCenter.x, orbitingLance.y - orbitCenter.y) -
+        (attack.orbitRadius ?? 205)
+    ) < 2, 'the lance ring follows the player at a readable radius')
+
+    for (let frame = 0; frame < 50 && orbitingLance.inferoLancePhase === 'orbiting'; frame++) {
+      boss.update(0.05, player)
+    }
+    assert.ok(boss.projectiles.every((projectile) => projectile.inferoLancePhase === 'aiming'))
+    assert.ok(boss.projectiles.every((projectile) => projectile.speed === 0))
+    const lockedTarget = {
+      x: orbitingLance.inferoLanceTargetX,
+      y: orbitingLance.inferoLanceTargetY
+    }
+    const lockedDirection = { ...orbitingLance.direction }
+    assert.deepEqual(lockedTarget, player.getCenter())
+
+    player.x += 180
+    player.y += 120
+    boss.update(0.05, player)
+    assert.deepEqual(
+      { x: orbitingLance.inferoLanceTargetX, y: orbitingLance.inferoLanceTargetY },
+      lockedTarget,
+      'the aim telegraph stays locked even if the player moves'
+    )
+    assert.deepEqual(orbitingLance.direction, lockedDirection)
+
+    for (let frame = 0; frame < 20 && orbitingLance.inferoLancePhase !== 'launched'; frame++) {
+      boss.update(0.05, player)
+    }
+    assert.equal(orbitingLance.inferoLancePhase, 'launched')
+    assert.ok(orbitingLance.speed >= 860)
   })
 
   it('keeps Infero’s original spinning lances and curved fire grid in Phase 1', () => {
@@ -1927,8 +1995,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(sun!.gridPulseFiring, true, 'the sun continues firing independently of the boss')
 
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
-    assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_rebound_lances')
+    assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
+    assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_orbiting_lances')
   })
 
   it('swoops Infero under the player three or four times with dodgeable fire columns', () => {

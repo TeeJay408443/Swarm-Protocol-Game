@@ -1476,8 +1476,14 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(inferoCutscene.durationSeconds, 8.2)
     assert.equal(inferoCutscene.warningCriticalText, 'THE FIRST FIRE TAKES FLIGHT')
     assert.equal(getInferoChampionAttackKind(1, 0), 'inferno_spear_volley')
-    assert.equal(getInferoChampionAttackKind(2, 3), 'singularity_grid')
-    assert.equal(getInferoChampionAttackKind(3, 3), 'bullet_hell')
+    assert.equal(getInferoChampionAttackKind(2, 3), 'tracking_strikes')
+    assert.equal(getInferoChampionAttackKind(3, 3), 'infero_spinning_lattice')
+    for (const phase of [1, 2, 3]) {
+      assert.deepEqual(
+        new Set(Array.from({ length: 18 }, (_, index) => getInferoChampionAttackKind(phase, index))),
+        new Set(['tracking_strikes', 'inferno_spear_volley', 'infero_spinning_lattice'])
+      )
+    }
     assert.equal(getAreaThreeBossBuff(15).damageReduction, 0.42)
     assert.equal(shouldSpawnRegularEnemiesInWave(15, false, false, 'molten_starforge'), false)
     assert.equal(shouldSpawnRegularEnemiesInWave(20, false, false, 'molten_starforge'), false)
@@ -1538,6 +1544,58 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }
     assert.ok(boss.projectiles.every((projectile) => projectile.isBlazingSpear))
     assert.ok(boss.projectiles.some((projectile) => (projectile.trailParticles?.length ?? 0) > 0))
+  })
+
+  it('keeps Infero visible when camera bounds change and uses rotating, damaging lasers with curved fire grids', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1320, y: 900, enemyData: AREA_THREE_BOSSES[3],
+      target: player, isBoss: true, isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.cutsceneDelayTimer = 0
+    boss.shootCooldown = 0
+    boss.specialCooldown = 100
+    const view = { left: 600, right: 1400, top: 500, bottom: 1300 }
+    boss.setVisibleWorldBounds(view)
+    boss.update(0.05, player)
+    assert.equal(boss.projectiles.length, 0, 'generic projectile fans must be disabled')
+    const attack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
+    assert.equal(attack.beamCount, 2)
+    assert.equal(attack.gridLines?.length, 2)
+    assert.equal(checkBossTelegraphHit(attack, { x: attack.x, y: attack.y, radius: 12 }), false)
+    for (let frame = 0; frame < 240 && !attack.hasTriggered; frame++) boss.update(0.05, player)
+    assert.equal(attack.hasTriggered, true)
+    assert.ok(Math.abs(boss.getCenter().x - attack.inferoLaunchX!) < 50)
+    const startAngle = attack.angle!
+    boss.update(0.1, player)
+    assert.ok(attack.angle! > startAngle)
+    const line = attack.gridLines![0]
+    assert.equal(checkBossTelegraphHit(attack, {
+      x: (line.x1 + line.x2) / 2, y: (line.y1 + line.y2) / 2, radius: 12
+    }), true)
+    assert.equal(checkBossTelegraphHit(attack, {
+      x: attack.x + Math.cos(attack.angle! + Math.PI / 4) * 150,
+      y: attack.y + Math.sin(attack.angle! + Math.PI / 4) * 150, radius: 12
+    }), false)
+    for (let frame = 0; frame < 14; frame++) boss.update(0.05, player)
+    const fireballs = boss.projectiles.filter((projectile) => projectile.isInferoFireball)
+    assert.ok(fireballs.length >= 6)
+    assert.ok(fireballs.some((projectile) => projectile.curveTurnRate! > 0))
+    assert.ok(fireballs.some((projectile) => projectile.curveTurnRate! < 0))
+    assert.ok(fireballs.some((projectile) => projectile.trailParticles!.length > 0))
+    for (const nextView of [view, { left: 400, right: 1200, top: 350, bottom: 1150 }]) {
+      boss.setVisibleWorldBounds(nextView)
+      for (let frame = 0; frame < 120; frame++) {
+        boss.update(0.05, player)
+        const center = boss.getCenter()
+        assert.ok(center.x - boss.width / 2 >= nextView.left)
+        assert.ok(center.x + boss.width / 2 <= nextView.right)
+        assert.ok(center.y - boss.height / 2 >= nextView.top)
+        assert.ok(center.y + boss.height / 2 <= nextView.bottom)
+      }
+    }
   })
 
   it('keeps Infero Champion at a stable side distance without body contact', () => {

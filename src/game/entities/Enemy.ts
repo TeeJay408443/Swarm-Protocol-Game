@@ -74,6 +74,7 @@ export interface EnemyProjectile {
   maxLifetime: number
   homingTurnRate?: number
   homingRemaining?: number
+  curveTurnRate?: number
   splitAfter?: number
   splitCount?: number
   splitSpeed?: number
@@ -206,7 +207,6 @@ export interface BossTelegraphAttack {
   projectileCount?: number
   inferoLaunchX?: number
   inferoLaunchY?: number
-  laserParticleSeed?: number
   gridPulseCount?: number
   gridPulseIndex?: number
   gridPulseTimer?: number
@@ -1128,7 +1128,7 @@ export class Enemy {
   }
 
   /**
-   * Infero Champion circles the player in wide, reversing aerial sweeps.
+   * Infero Champion travels between fixed arena waypoints and gently hovers.
    * Its separation correction prevents body contact even if the player closes in.
    */
   private updateInferoChampionMovement(deltaTime: number, applyPosition = false): void {
@@ -1227,7 +1227,8 @@ export class Enemy {
       arenaMax: number,
       size: number
     ) => {
-      const margin = size / 2 + 32
+      // Include the wide wings and flame crown, not only the body hitbox.
+      const margin = size * 0.85 + 32
       const min = Math.max(margin, visibleMin + margin)
       const max = Math.min(arenaMax - margin, visibleMax - margin)
       if (min <= max) return { min, max }
@@ -1268,6 +1269,9 @@ export class Enemy {
   }
 
   private keepInferoSafeDistanceFromPlayer(): void {
+    const visibleCenter = this.clampInferoCenter(this.getCenter())
+    this.x = visibleCenter.x - this.width / 2
+    this.y = visibleCenter.y - this.height / 2
     if (!this.target || !this.target.isAlive) return
 
     const targetCenter = this.target.getCenter()
@@ -2144,9 +2148,12 @@ export class Enemy {
           angle,
           laserLength
         ),
-        laserParticleSeed: this.specialAttackCounter * 17,
         chargeTimer: 0,
-        chargeDuration: 1.65,
+        chargeDuration: Math.max(
+          1.65,
+          Math.hypot(bossCenter.x - inferoLaunchX, bossCenter.y - inferoLaunchY) /
+            Math.max(1, this.baseSpeed) + 0.4
+        ),
         activeTimer: 0,
         activeDuration: 4.8,
         damage: Math.round(24 * Math.max(1, this.damageScale)),
@@ -2896,8 +2903,7 @@ export class Enemy {
         color: index % 2 === 0 ? '#FB923C' : '#FDE047',
         lifetime: 0,
         maxLifetime: 6,
-        homingTurnRate: 0.46,
-        homingRemaining: 2.4,
+        curveTurnRate: index % 2 === 0 ? 0.38 : -0.38,
         isInferoFireball: true,
         trailTimer: 0,
         trailParticles: []
@@ -3311,6 +3317,10 @@ export class Enemy {
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const proj = this.projectiles[i]
+      if (proj.curveTurnRate) {
+        const angle = Math.atan2(proj.direction.y, proj.direction.x) + proj.curveTurnRate * deltaTime
+        proj.direction = { x: Math.cos(angle), y: Math.sin(angle) }
+      }
       if (proj.homingTurnRate && proj.homingRemaining && proj.homingRemaining > 0 && targetCenter) {
         proj.homingRemaining -= deltaTime
         const currentAngle = Math.atan2(proj.direction.y, proj.direction.x)
@@ -3328,7 +3338,7 @@ export class Enemy {
       proj.y += proj.direction.y * proj.speed * deltaTime
       proj.lifetime += deltaTime
 
-      if (proj.isBlazingSpear) {
+      if (proj.isBlazingSpear || proj.isInferoFireball) {
         const trail = (proj.trailParticles ??= [])
         for (let particleIndex = trail.length - 1; particleIndex >= 0; particleIndex--) {
           const particle = trail[particleIndex]
@@ -6010,7 +6020,7 @@ export class Enemy {
     // Enemy Laser / Arcane / Cosmic Nebula Star Projectiles
     for (const proj of this.projectiles) {
       const { x: projX, y: projY } = camera.worldToScreen(proj.x, proj.y)
-      if (proj.isBlazingSpear && proj.trailParticles) {
+      if ((proj.isBlazingSpear || proj.isInferoFireball) && proj.trailParticles) {
         for (const particle of proj.trailParticles) {
           const particleScreen = camera.worldToScreen(particle.x, particle.y)
           const alpha = Math.max(0, 1 - particle.lifetime / particle.maxLifetime)
@@ -6049,6 +6059,21 @@ export class Enemy {
         ctx.fillStyle = '#FFFFFF'
         ctx.beginPath()
         ctx.arc(0, 0, starR * 0.34, 0, Math.PI * 2)
+        ctx.fill()
+      } else if (proj.isInferoFireball) {
+        ctx.shadowColor = '#F97316'
+        ctx.shadowBlur = 16
+        ctx.fillStyle = '#EA580C'
+        ctx.beginPath()
+        ctx.ellipse(-3, 0, 12, 7, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#FDE047'
+        ctx.beginPath()
+        ctx.arc(0, 0, 5.5, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#FFF7ED'
+        ctx.beginPath()
+        ctx.arc(1, 0, 2.5, 0, Math.PI * 2)
         ctx.fill()
       } else if (proj.isBlazingSpear) {
         const halfLength = proj.width * 0.62
@@ -6454,6 +6479,7 @@ export function checkBossTelegraphHit(
   }
 
   if (telegraph.kind === 'infero_spinning_lattice' && telegraph.gridLines) {
+    if (!telegraph.hasTriggered || telegraph.activeTimer >= telegraph.activeDuration) return false
     for (const line of telegraph.gridLines) {
       const dx = line.x2 - line.x1
       const dy = line.y2 - line.y1

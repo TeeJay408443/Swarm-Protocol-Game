@@ -276,7 +276,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
   it('keeps regular hits moderately stronger while preserving the current boss damage reduction', () => {
     assert.equal(ENEMY_DAMAGE_MULTIPLIER, 0.7)
     assert.equal(REGULAR_ENEMY_DAMAGE_MULTIPLIER, 0.8)
-    assert.equal(REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO, 0.4)
+    assert.equal(REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO, 0.6)
     const regularTemplates = [...enemies, ...AREA_TWO_ENEMIES, ...AREA_THREE_ENEMIES]
       .filter((template) => template.category !== 'Boss' && template.category !== 'Mini-Boss')
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
@@ -307,8 +307,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }
     assert.equal(getEnemyHitDamage(new Enemy({ damage: 100 }).damage), 80)
     assert.equal(getEnemyHitDamage(new Enemy({ damage: 100 }).damage, true), 70)
-    assert.equal(getEnemyHitDamage(1000, false, 100), 40, 'a regular hit cannot one-shot a full-health player')
-    assert.equal(getEnemyHitDamage(1000, false, 10), 4, 'the cap follows player maximum health')
+    assert.equal(getEnemyHitDamage(1000, false, 100), 60, 'a regular hit is capped at 60% of max health')
+    assert.equal(getEnemyHitDamage(1000, false, 10), 6, 'the cap follows player maximum health')
     assert.equal(getEnemyHitDamage(new Enemy({ damage: 1 }).damage), 1)
     assert.equal(getEnemyHitDamage(new Enemy({ damage: 100, isBoss: true }).damage, true), 140)
     const champion = new Enemy({

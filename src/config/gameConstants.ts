@@ -29,7 +29,7 @@ export const GAME_CONFIG = {
 // Applied once at the enemy-to-player hit boundary, before player defenses.
 export const ENEMY_DAMAGE_MULTIPLIER = 0.7
 export const REGULAR_ENEMY_DAMAGE_MULTIPLIER = 0.8
-export const REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO = 0.4
+export const REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO = 0.6
 
 export function getEnemyHitDamage(
   damage: number,

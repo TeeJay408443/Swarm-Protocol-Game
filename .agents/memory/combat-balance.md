@@ -3,7 +3,7 @@ name: Enemy damage survivability
 description: Shared damage reduction across normal enemies and boss encounters.
 ---
 
-Regular enemies deal about 80% of their original hit damage, capped at 40% of player maximum health per hit. Bosses and mini-bosses retain the existing 70% hit-damage factor. Regular enemy wave growth is slightly stronger than boss scaling; boss health and damage curves remain on the gentler existing settings.
+Regular enemies deal about 80% of their original hit damage, capped at 60% of player maximum health per hit. Bosses and mini-bosses retain the existing 70% hit-damage factor. Regular enemy wave growth is slightly stronger than boss scaling; boss health and damage curves remain on the gentler existing settings.
 
 **Why:** The user most recently asked for regular enemies to ramp up somewhat faster and hit harder, while explicitly keeping boss health and damage unchanged.
 

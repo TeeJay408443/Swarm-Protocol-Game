@@ -169,9 +169,11 @@ export interface TrackingBlastNode {
 export interface InferoFireColumn {
   x: number
   y: number
+  topY: number
   width: number
   height: number
   elapsed: number
+  holdDuration: number
   windup: number
   active: number
   hasIgnited: boolean
@@ -226,6 +228,10 @@ export interface BossTelegraphAttack {
   swoopIndex?: number
   swoopEndX?: number
   swoopY?: number
+  swoopStartX?: number
+  swoopStartY?: number
+  swoopTargetX?: number
+  swoopTargetY?: number
   swoopDuration?: number
   swoopInterval?: number
   fireColumns?: InferoFireColumn[]
@@ -2170,10 +2176,9 @@ export class Enemy {
 
     if (kind === 'infero_underflame_swoops' && this.isInferoChampion) {
       const limits = this.getInferoCenterLimits()
-      const startsLeft = bossCenter.x <= targetCenter.x
-      const startX = startsLeft ? limits.x.min : limits.x.max
-      const endX = startsLeft ? limits.x.max : limits.x.min
+      const view = this.getInferoViewportBounds()
       const swoopCount = 3 + Math.floor(Math.random() * 2)
+      const targetX = Math.max(limits.x.min, Math.min(limits.x.max, targetCenter.x))
       const swoopY = Math.max(
         limits.y.min,
         Math.min(
@@ -2182,13 +2187,15 @@ export class Enemy {
         )
       )
       const column: InferoFireColumn = {
-        x: targetCenter.x,
+        x: targetX,
         y: swoopY,
+        topY: view.top,
         width: 104,
-        height: 230,
+        height: Math.max(0, swoopY - view.top),
         elapsed: 0,
-        windup: 0.48,
-        active: 0.56,
+        holdDuration: 0.42,
+        windup: 0.62,
+        active: 0.48,
         hasIgnited: false,
         hasDamagedPlayer: false,
         number: 1
@@ -2196,32 +2203,33 @@ export class Enemy {
       telegraph = {
         id,
         kind,
-        x: targetCenter.x,
+        x: targetX,
         y: swoopY,
-        sideMode: startsLeft ? 'left' : 'right',
-        inferoLaunchX: startX,
+        inferoLaunchX: targetX,
         inferoLaunchY: swoopY,
         swoopCount,
         swoopIndex: 0,
-        swoopEndX: endX,
+        swoopStartX: targetX,
+        swoopStartY: swoopY,
+        swoopTargetX: targetX,
+        swoopTargetY: swoopY,
         swoopY,
-        swoopDuration: 0.84,
-        swoopInterval: 1.12,
+        swoopDuration: 0.5,
+        swoopInterval: 2.1,
         fireColumns: [column],
         radius: 52,
         chargeTimer: 0,
         chargeDuration:
-          Math.hypot(bossCenter.x - startX, bossCenter.y - swoopY) /
-            Math.max(1, this.baseSpeed) +
-          0.45,
+          Math.hypot(bossCenter.x - targetX, bossCenter.y - swoopY) /
+            Math.max(1, this.baseSpeed) + 0.4,
         activeTimer: 0,
-        activeDuration: swoopCount * 1.12 + 0.15,
+        activeDuration: swoopCount * 2.1 + 0.12,
         damage: Math.round(32 * Math.max(1, this.damageScale)),
         warningLabel: `UNDERFLAME DIVE // ${swoopCount} PASSES`,
         hasTriggered: false,
         hasDamagedPlayer: false
       }
-      this.inferoHoverTarget = { x: startX, y: swoopY }
+      this.inferoHoverTarget = { x: targetX, y: swoopY }
       this.inferoHoverRetargetTimer = telegraph.chargeDuration + telegraph.activeDuration
     } else if (kind === 'infero_spinning_lattice' && this.isInferoChampion) {
       const view = this.getInferoViewportBounds()
@@ -3032,23 +3040,28 @@ export class Enemy {
 
       if (t.kind === 'infero_underflame_swoops' && !t.hasTriggered && targetCenter) {
         const limits = this.getInferoCenterLimits()
-        const startsLeft = t.sideMode === 'left'
-        t.inferoLaunchX = startsLeft ? limits.x.min : limits.x.max
-        t.swoopEndX = startsLeft ? limits.x.max : limits.x.min
-        t.swoopY = Math.max(
+        const view = this.getInferoViewportBounds()
+        const targetX = Math.max(limits.x.min, Math.min(limits.x.max, targetCenter.x))
+        const targetY = Math.max(
           limits.y.min,
           Math.min(
             limits.y.max,
             targetCenter.y + this.getInferoMinimumPlayerDistance() + 35
           )
         )
-        t.inferoLaunchY = t.swoopY
-        t.x = targetCenter.x
-        t.y = t.swoopY
+        t.inferoLaunchX = targetX
+        t.inferoLaunchY = targetY
+        t.swoopY = targetY
+        t.swoopTargetX = targetX
+        t.swoopTargetY = targetY
+        t.x = targetX
+        t.y = targetY
         const firstColumn = t.fireColumns?.[0]
         if (firstColumn) {
-          firstColumn.x = targetCenter.x
-          firstColumn.y = t.swoopY
+          firstColumn.x = targetX
+          firstColumn.y = targetY
+          firstColumn.topY = view.top
+          firstColumn.height = Math.max(0, targetY - view.top)
         }
       } else if (t.kind === 'infero_spinning_lattice') {
         t.x = bossCenter.x
@@ -3161,7 +3174,13 @@ export class Enemy {
 
       if (!t.hasTriggered) {
         t.chargeTimer += deltaTime
-        if (t.chargeTimer >= t.chargeDuration) {
+        const inferoHasReachedUnderPlayer =
+          t.kind !== 'infero_underflame_swoops' ||
+          Math.hypot(
+            bossCenter.x - (t.inferoLaunchX ?? t.x),
+            bossCenter.y - (t.inferoLaunchY ?? t.y)
+          ) <= 46
+        if (t.chargeTimer >= t.chargeDuration && inferoHasReachedUnderPlayer) {
           t.chargeTimer = t.chargeDuration
           if (t.kind === 'astral_orbital_grid' && this.isAstralScourge && this.bossPhase >= 2) {
             const lockedHead = this.getCenter()
@@ -3196,6 +3215,11 @@ export class Enemy {
             t.pulseCount = 0
           } else if (t.kind === 'infero_underflame_swoops') {
             t.swoopIndex = 0
+            const positionAtDiveStart = this.getCenter()
+            t.swoopStartX = positionAtDiveStart.x
+            t.swoopStartY = positionAtDiveStart.y
+            t.swoopTargetX = t.inferoLaunchX ?? positionAtDiveStart.x
+            t.swoopTargetY = t.inferoLaunchY ?? positionAtDiveStart.y
             for (const column of t.fireColumns ?? []) {
               column.elapsed = 0
               column.hasIgnited = false
@@ -3266,28 +3290,41 @@ export class Enemy {
 
         if (t.kind === 'infero_underflame_swoops') {
           const swoopCount = t.swoopCount ?? 3
-          const interval = t.swoopInterval ?? 1.12
+          const interval = t.swoopInterval ?? 2.1
           const passIndex = Math.floor(t.activeTimer / interval)
           const limits = this.getInferoCenterLimits()
           if (passIndex < swoopCount) {
             if (passIndex !== (t.swoopIndex ?? -1)) {
               t.swoopIndex = passIndex
-              const nextSwoopY = Math.max(
+              const previousCenter = this.getCenter()
+              const nextTargetX = Math.max(
+                limits.x.min,
+                Math.min(limits.x.max, targetCenter?.x ?? previousCenter.x)
+              )
+              const nextTargetY = Math.max(
                 limits.y.min,
                 Math.min(
                   limits.y.max,
-                  (targetCenter?.y ?? bossCenter.y) + this.getInferoMinimumPlayerDistance() + 35
+                  (targetCenter?.y ?? previousCenter.y) +
+                    this.getInferoMinimumPlayerDistance() +
+                    35
                 )
               )
-              t.swoopY = nextSwoopY
+              t.swoopStartX = previousCenter.x
+              t.swoopStartY = previousCenter.y
+              t.swoopTargetX = nextTargetX
+              t.swoopTargetY = nextTargetY
+              t.swoopY = nextTargetY
               const nextColumn: InferoFireColumn = {
-                x: targetCenter?.x ?? bossCenter.x,
-                y: nextSwoopY,
+                x: nextTargetX,
+                y: nextTargetY,
+                topY: this.getInferoViewportBounds().top,
                 width: 104,
-                height: 230,
+                height: Math.max(0, nextTargetY - this.getInferoViewportBounds().top),
                 elapsed: 0,
-                windup: 0.48,
-                active: 0.56,
+                holdDuration: 0.42,
+                windup: 0.62,
+                active: 0.48,
                 hasIgnited: false,
                 hasDamagedPlayer: false,
                 number: passIndex + 1
@@ -3296,19 +3333,22 @@ export class Enemy {
               t.fireColumns.push(nextColumn)
             }
 
-            const firstX = t.inferoLaunchX ?? limits.x.min
-            const otherX = t.swoopEndX ?? limits.x.max
-            const startX = passIndex % 2 === 0 ? firstX : otherX
-            const endX = passIndex % 2 === 0 ? otherX : firstX
             const passStartTime = passIndex * interval
             const progress = Math.max(
               0,
-              Math.min(1, (t.activeTimer - passStartTime) / (t.swoopDuration ?? 0.84))
+              Math.min(1, (t.activeTimer - passStartTime) / (t.swoopDuration ?? 0.5))
             )
             const previousCenter = this.getCenter()
             const nextCenter = this.clampInferoCenter({
-              x: startX + (endX - startX) * progress,
-              y: (t.swoopY ?? bossCenter.y) + Math.sin(progress * Math.PI) * 16
+              x:
+                (t.swoopStartX ?? previousCenter.x) +
+                ((t.swoopTargetX ?? previousCenter.x) - (t.swoopStartX ?? previousCenter.x)) *
+                  progress,
+              y:
+                (t.swoopStartY ?? previousCenter.y) +
+                ((t.swoopTargetY ?? previousCenter.y) - (t.swoopStartY ?? previousCenter.y)) *
+                  progress +
+                Math.sin(progress * Math.PI) * 8
             })
             this.x = nextCenter.x - this.width / 2
             this.y = nextCenter.y - this.height / 2
@@ -3316,15 +3356,27 @@ export class Enemy {
               x: (nextCenter.x - previousCenter.x) / Math.max(deltaTime, 0.001),
               y: (nextCenter.y - previousCenter.y) / Math.max(deltaTime, 0.001)
             }
-            this.facingAngle = endX >= startX ? 0 : Math.PI
+            this.facingAngle = Math.atan2(
+              (t.swoopTargetY ?? nextCenter.y) - (t.swoopStartY ?? nextCenter.y),
+              (t.swoopTargetX ?? nextCenter.x) - (t.swoopStartX ?? nextCenter.x)
+            )
+            t.x = nextCenter.x
+            t.y = nextCenter.y
           }
 
           for (const column of t.fireColumns ?? []) {
-            column.elapsed += deltaTime
-            if (column.elapsed >= column.windup) column.hasIgnited = true
+            const columnPassStart = (column.number - 1) * interval
+            column.elapsed = Math.max(
+              0,
+              t.activeTimer - columnPassStart - (t.swoopDuration ?? 0.5)
+            )
+            column.topY = this.getInferoViewportBounds().top
+            column.height = Math.max(0, column.y - column.topY)
+            column.hasIgnited = column.elapsed >= column.holdDuration + column.windup
           }
           t.fireColumns = (t.fireColumns ?? []).filter(
-            (column) => column.elapsed < column.windup + column.active
+            (column) =>
+              column.elapsed < column.holdDuration + column.windup + column.active
           )
           const completedPasses = Math.min(swoopCount, passIndex + 1)
           t.warningLabel = `UNDERFLAME DIVE // PASS ${completedPasses}/${swoopCount}`
@@ -4043,30 +4095,26 @@ export class Enemy {
       } else if (t.kind === 'infero_underflame_swoops' && t.fireColumns) {
         ctx.save()
         ctx.lineCap = 'round'
-        const flightY = t.swoopY ?? t.y
-        if (t.inferoLaunchX !== undefined && t.swoopEndX !== undefined) {
-          const pathStart = camera.worldToScreen(t.inferoLaunchX, flightY)
-          const pathEnd = camera.worldToScreen(t.swoopEndX, flightY)
-          ctx.strokeStyle = `rgba(251, 146, 60, ${t.hasTriggered ? 0.42 : 0.22 + chargeProgress * 0.32})`
-          ctx.lineWidth = 2
-          ctx.setLineDash([8, 10])
-          ctx.beginPath()
-          ctx.moveTo(pathStart.x, pathStart.y)
-          ctx.lineTo(pathEnd.x, pathEnd.y)
-          ctx.stroke()
-          ctx.setLineDash([])
-        }
-
         for (const column of t.fireColumns) {
+          if (!t.hasTriggered || column.elapsed < column.holdDuration) continue
+          const warningComplete = column.holdDuration + column.windup
+          const isWarning = column.elapsed < warningComplete
+          const extensionProgress = Math.max(
+            0,
+            Math.min(1, (column.elapsed - warningComplete) / 0.18)
+          )
+          const beamTopY = isWarning
+            ? column.topY
+            : column.y - (column.y - column.topY) * extensionProgress
           const topLeft = camera.worldToScreen(
             column.x - column.width / 2,
-            column.y - column.height / 2
+            beamTopY
           )
           const screenWidth = column.width * camera.zoom
-          const screenHeight = column.height * camera.zoom
+          const screenHeight = Math.max(1, (column.y - beamTopY) * camera.zoom)
           const centerX = topLeft.x + screenWidth / 2
-          const warningRemaining = Math.max(0, column.windup - column.elapsed)
-          if (!column.hasIgnited) {
+          const warningRemaining = Math.max(0, warningComplete - column.elapsed)
+          if (isWarning) {
             const pulse = 0.7 + Math.sin(this.animTime * 15) * 0.22
             ctx.fillStyle = `rgba(249, 115, 22, ${0.12 + pulse * 0.12})`
             ctx.fillRect(topLeft.x, topLeft.y, screenWidth, screenHeight)
@@ -4089,9 +4137,7 @@ export class Enemy {
             ctx.font = 'bold 11px monospace'
             ctx.textAlign = 'center'
             ctx.fillText(
-              t.hasTriggered
-                ? `FIRE COLUMN ${column.number}/${t.swoopCount ?? 3} • ${warningRemaining.toFixed(1)}s`
-                : `FIRE COLUMN ${column.number}/${t.swoopCount ?? 3} • DIVE IN ${(t.chargeDuration - t.chargeTimer).toFixed(1)}s`,
+              `FIRE COLUMN ${column.number}/${t.swoopCount ?? 3} • ${warningRemaining.toFixed(1)}s`,
               centerX,
               topLeft.y - 13
             )
@@ -4105,26 +4151,21 @@ export class Enemy {
             columnGradient.addColorStop(0, 'rgba(254, 240, 138, 0.76)')
             columnGradient.addColorStop(0.42, 'rgba(249, 115, 22, 0.82)')
             columnGradient.addColorStop(1, 'rgba(127, 29, 29, 0.28)')
-            ctx.globalAlpha = Math.max(
-              0.18,
-              1 - Math.max(0, column.elapsed - column.windup) / column.active
-            )
+            ctx.globalAlpha = Math.max(0.18, 1 - (column.elapsed - warningComplete) / column.active)
+            ctx.shadowColor = '#F97316'
+            ctx.shadowBlur = 30
             ctx.fillStyle = columnGradient
             ctx.fillRect(topLeft.x, topLeft.y, screenWidth, screenHeight)
+            ctx.shadowBlur = 0
+            ctx.fillStyle = 'rgba(254, 240, 138, 0.78)'
+            ctx.fillRect(centerX - 7, topLeft.y, 14, screenHeight)
             ctx.strokeStyle = '#FDE047'
-            ctx.lineWidth = 3
+            ctx.lineWidth = 4
             ctx.strokeRect(topLeft.x + 2, topLeft.y, screenWidth - 4, screenHeight)
-            for (let flame = 0; flame < 5; flame++) {
-              const flameX = topLeft.x + ((flame + 0.5) / 5) * screenWidth
-              const flameHeight = 18 + (Math.sin(this.animTime * 18 + flame * 1.7) + 1) * 12
-              ctx.fillStyle = flame % 2 === 0 ? '#FEF08A' : '#FDBA74'
-              ctx.beginPath()
-              ctx.moveTo(flameX - 8, topLeft.y + flameHeight)
-              ctx.lineTo(flameX, topLeft.y - flameHeight * 0.45)
-              ctx.lineTo(flameX + 8, topLeft.y + flameHeight)
-              ctx.closePath()
-              ctx.fill()
-            }
+            ctx.fillStyle = '#FFF7ED'
+            ctx.beginPath()
+            ctx.arc(centerX, topLeft.y + screenHeight, 11 + Math.sin(this.animTime * 20) * 3, 0, Math.PI * 2)
+            ctx.fill()
             ctx.globalAlpha = 1
           }
         }
@@ -7149,11 +7190,24 @@ export function checkInferoFireColumnHit(
   column: InferoFireColumn,
   targetCircle: { x: number; y: number; radius: number }
 ): boolean {
-  if (!column.hasIgnited || column.elapsed >= column.windup + column.active) return false
+  const warningComplete = column.holdDuration + column.windup
+  if (
+    !column.hasIgnited ||
+    column.elapsed < warningComplete ||
+    column.elapsed >= warningComplete + column.active
+  ) {
+    return false
+  }
+  const beamProgress = Math.max(
+    0,
+    Math.min(1, (column.elapsed - warningComplete) / 0.18)
+  )
+  const beamTop = column.y - (column.y - column.topY) * beamProgress
   const left = column.x - column.width / 2
-  const top = column.y - column.height / 2
+  const top = beamTop
   const closestX = Math.max(left, Math.min(targetCircle.x, left + column.width))
-  const closestY = Math.max(top, Math.min(targetCircle.y, top + column.height))
+  const beamHeight = column.y - beamTop
+  const closestY = Math.max(top, Math.min(targetCircle.y, top + beamHeight))
   const dx = targetCircle.x - closestX
   const dy = targetCircle.y - closestY
   return dx * dx + dy * dy <= targetCircle.radius * targetCircle.radius

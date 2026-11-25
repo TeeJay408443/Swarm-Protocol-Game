@@ -1648,8 +1648,21 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }), false, 'the indicator remains safe during its warning')
 
     for (let frame = 0; frame < 180 && !attack.hasTriggered; frame++) boss.update(0.05, player)
+    console.log('UNDERFLAME DEBUG', attack.chargeDuration, attack.chargeTimer, boss.getCenter(), player.getCenter(), attack.inferoLaunchX, attack.inferoLaunchY, boss.baseSpeed, boss.velocity)
     assert.equal(attack.hasTriggered, true)
     for (let frame = 0; frame < 12; frame++) boss.update(0.05, player)
+    assert.ok(firstColumn.elapsed < firstColumn.holdDuration)
+    assert.equal(firstColumn.hasIgnited, false, 'the boss waits under the player before warning')
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x, y: firstColumn.y, radius: 20
+    }), false)
+    for (let frame = 0; frame < 10; frame++) boss.update(0.05, player)
+    assert.ok(firstColumn.elapsed >= firstColumn.holdDuration)
+    assert.equal(firstColumn.hasIgnited, false, 'the full-arena indicator gets a separate warning')
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x, y: firstColumn.y, radius: 20
+    }), false)
+    for (let frame = 0; frame < 40 && !firstColumn.hasIgnited; frame++) boss.update(0.05, player)
     assert.equal(firstColumn.hasIgnited, true)
     assert.equal(checkInferoFireColumnHit(firstColumn, {
       x: firstColumn.x, y: firstColumn.y, radius: 20
@@ -1660,7 +1673,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     assert.ok(separation >= 120, 'Infero should pass below rather than touch the player')
 
-    const remainingPasses = (attack.swoopCount ?? 3) * (attack.swoopInterval ?? 1.12)
+    const remainingPasses = (attack.swoopCount ?? 3) * (attack.swoopInterval ?? 2.1)
     for (let frame = 0; frame < Math.ceil(remainingPasses / 0.05); frame++) {
       if (!boss.telegraphs.includes(attack)) break
       boss.update(0.05, player)

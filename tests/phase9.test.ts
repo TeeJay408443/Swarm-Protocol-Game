@@ -145,6 +145,7 @@ import {
   ClosingSideLaserMode,
   ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS,
   checkBossTelegraphHit,
+  checkInferoFireColumnHit,
   checkAstralScourgeTailHit,
   checkDevourerSegmentHit,
   checkEnemyAoeHit,
@@ -1478,12 +1479,17 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(inferoCutscene.durationSeconds, 8.2)
     assert.equal(inferoCutscene.warningCriticalText, 'THE FIRST FIRE TAKES FLIGHT')
     assert.equal(getInferoChampionAttackKind(1, 0), 'inferno_spear_volley')
-    assert.equal(getInferoChampionAttackKind(2, 3), 'tracking_strikes')
-    assert.equal(getInferoChampionAttackKind(3, 3), 'infero_spinning_lattice')
+    assert.equal(getInferoChampionAttackKind(2, 3), 'inferno_spear_volley')
+    assert.equal(getInferoChampionAttackKind(3, 3), 'infero_underflame_swoops')
     for (const phase of [1, 2, 3]) {
       assert.deepEqual(
         new Set(Array.from({ length: 18 }, (_, index) => getInferoChampionAttackKind(phase, index))),
-        new Set(['tracking_strikes', 'inferno_spear_volley', 'infero_spinning_lattice'])
+        new Set([
+          'tracking_strikes',
+          'inferno_spear_volley',
+          'infero_spinning_lattice',
+          'infero_underflame_swoops'
+        ])
       )
     }
     assert.equal(getAreaThreeBossBuff(15).damageReduction, 0.42)
@@ -1613,6 +1619,53 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
         assert.ok(center.y + boss.height / 2 <= nextView.bottom)
       }
     }
+  })
+
+  it('swoops Infero under the player three or four times with dodgeable fire columns', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 820, hero })
+    const boss = new Enemy({
+      x: 1080,
+      y: 650,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.cutsceneDelayTimer = 0
+    boss.shootCooldown = 100
+    boss.specialCooldown = 100
+    boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1450 })
+
+    const attack = boss.spawnTelegraphedAttack('infero_underflame_swoops')!
+    assert.ok(attack.swoopCount === 3 || attack.swoopCount === 4)
+    assert.equal(attack.fireColumns?.length, 1)
+    const firstColumn = attack.fireColumns![0]
+    assert.equal(firstColumn.hasIgnited, false)
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x, y: firstColumn.y, radius: 20
+    }), false, 'the indicator remains safe during its warning')
+
+    for (let frame = 0; frame < 180 && !attack.hasTriggered; frame++) boss.update(0.05, player)
+    assert.equal(attack.hasTriggered, true)
+    for (let frame = 0; frame < 12; frame++) boss.update(0.05, player)
+    assert.equal(firstColumn.hasIgnited, true)
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x, y: firstColumn.y, radius: 20
+    }), true, 'the fire column becomes damaging only after its warning')
+    const separation = Math.hypot(
+      boss.getCenter().x - player.getCenter().x,
+      boss.getCenter().y - player.getCenter().y
+    )
+    assert.ok(separation >= 120, 'Infero should pass below rather than touch the player')
+
+    const remainingPasses = (attack.swoopCount ?? 3) * (attack.swoopInterval ?? 1.12)
+    for (let frame = 0; frame < Math.ceil(remainingPasses / 0.05); frame++) {
+      if (!boss.telegraphs.includes(attack)) break
+      boss.update(0.05, player)
+    }
+    assert.equal(attack.swoopIndex, (attack.swoopCount ?? 3) - 1)
   })
 
   it('keeps Infero Champion at a stable side distance without body contact', () => {

@@ -13,6 +13,7 @@ import { isVisiblePlayerWeaponId, Player } from '../../../game/entities/Player'
 import {
   BossArenaBounds,
   checkBossTelegraphHit,
+  checkInferoFireColumnHit,
   checkAstralScourgeTailHit,
   checkDevourerSegmentHit,
   checkEnemyAoeHit,
@@ -6350,6 +6351,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'astral_orbital_grid' ||
                   telegraph.kind === 'astral_targeted_lasers' ||
                   telegraph.kind === 'infero_spinning_lattice' ||
+                  telegraph.kind === 'infero_underflame_swoops' ||
                   telegraph.kind === 'cosmic_portal_lunge' ||
                   telegraph.kind === 'cosmic_orb_barrage'
 
@@ -6364,7 +6366,20 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
                 if (!telegraph.hasTriggered) continue
 
-                if (telegraph.kind === 'tracking_strikes' && telegraph.trackingBlasts) {
+                if (
+                  telegraph.kind === 'infero_underflame_swoops' &&
+                  telegraph.fireColumns
+                ) {
+                  for (const column of telegraph.fireColumns) {
+                    if (
+                      !column.hasDamagedPlayer &&
+                      checkInferoFireColumnHit(column, playerCircle)
+                    ) {
+                      column.hasDamagedPlayer = true
+                      damagePlayer(telegraph.damage, { x: column.x, y: column.y })
+                    }
+                  }
+                } else if (telegraph.kind === 'tracking_strikes' && telegraph.trackingBlasts) {
                   // Evaluate each sequential target-lock blast independently when it detonates
                   for (const blast of telegraph.trackingBlasts) {
                     if (blast.hasDetonated && !blast.hasDamagedPlayer) {

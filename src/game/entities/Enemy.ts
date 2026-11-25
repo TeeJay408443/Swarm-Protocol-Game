@@ -22,6 +22,7 @@ import {
 import { EnemiesRow } from '../../types/database'
 import { Player } from './Player'
 import { InfernoRamTrail } from './InfernoRamTrail'
+import { drawInfernoSpawnEffect } from './InfernoSpawnEffect'
 
 export const ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS = 20
 export const INFERO_DESPERATION_DURATION_SECONDS = 10
@@ -885,7 +886,8 @@ export class Enemy {
           this.phaseTwoRushEnd = null
         }
       } else if (this.isInferoChampion) {
-        this.updateInferoChampionMovement(deltaTime, true)
+        // Entrance effects animate around the boss; only combat may move its body.
+        this.velocity = Vector2.zero()
       } else if (this.isWormBoss) {
         const defaultDelay = this.isDevourerOfGods
           ? DEVOURER_CUTSCENE_DURATION_SECONDS
@@ -2521,7 +2523,7 @@ export class Enemy {
       if (phaseTwo) {
         const shotCount = 2
         const laserCount = 9 + Math.floor(Math.random() * 2)
-        const rotationDuration = 0.75
+        const rotationDuration = 1.25
         const extensionDuration = 0.2 // Stationary lock-on hold after rotation.
         const fireDuration = 0.46
         const gapDuration = 0.36
@@ -3680,7 +3682,7 @@ export class Enemy {
     const center = this.getInferoArenaCenter()
     const view = this.getInferoViewportBounds()
     const volleyCount = 2 + Math.floor(Math.random() * 2)
-    const rotationDuration = 0.62
+    const rotationDuration = 1.25
     const extensionDuration = 0.2 // Stationary lock-on hold after rotation.
     const fireDuration = 0.46
     const gapDuration = 0.2
@@ -3721,7 +3723,7 @@ export class Enemy {
 
   private updateInferoFurnaceVolley(attack: BossTelegraphAttack, center: Vector2): void {
     const pulseCount = attack.gridPulseCount ?? 1
-    const rotationDuration = attack.gridPulseWarningDuration ?? 0.75
+    const rotationDuration = attack.gridPulseWarningDuration ?? 1.25
     const extensionDuration = attack.gridPulseExtensionDuration ?? 0.2
     const fireDuration = attack.gridPulseFireDuration ?? 0.46
     const gapDuration = attack.gridPulseGapDuration ?? 0.36
@@ -3739,7 +3741,8 @@ export class Enemy {
     const isFiring =
       pulseElapsed >= rotationDuration + extensionDuration &&
       pulseElapsed < rotationDuration + extensionDuration + fireDuration
-    const rotationAngle = pulseElapsed < rotationDuration ? rotationProgress * Math.PI * 2 : 0
+    // Sine ease-out keeps the initial speed modest and decelerates continuously to zero.
+    const rotationAngle = Math.sin(rotationProgress * Math.PI / 2) * Math.PI * 2
     attack.gridPulseFiring = isFiring
     attack.gridLines = getInferoRotatingSpreadLines(
       center,
@@ -5787,7 +5790,7 @@ export class Enemy {
           ctx.textAlign = 'center'
           ctx.fillText(`CURVED FIRE PATHS • NEXT VOLLEY ${secondsToVolley.toFixed(1)}s`, center.x, center.y + 52)
         } else if (t.spinMode === 'furnace_volley' && t.hasTriggered && t.activeTimer < t.activeDuration) {
-          const rotationDuration = t.gridPulseWarningDuration ?? 0.5
+          const rotationDuration = t.gridPulseWarningDuration ?? 1.25
           const extensionDuration = t.gridPulseExtensionDuration ?? 0.2
           const fireDuration = t.gridPulseFireDuration ?? 0.46
           const gapDuration = t.gridPulseGapDuration ?? 0.36
@@ -6864,6 +6867,13 @@ export class Enemy {
   draw(ctx: CanvasRenderingContext2D, camera: Camera): void {
     if (this.isAstralScourgeIntermission) return
     this.inferoDesperationTrail.draw(ctx, camera)
+    if (this.isInferoChampion && this.isSpawning) {
+      drawInfernoSpawnEffect(
+        ctx, camera, this.getCenter(),
+        Math.min(1, this.spawnTime / Math.max(0.001, this.spawnDelay)),
+        this.spawnTime
+      )
+    }
 
     const { x: screenX, y: screenY } = camera.worldToScreen(this.x, this.y)
     const cx = screenX + this.width / 2
@@ -8797,7 +8807,8 @@ export function resolveEnemyCollisions(
       const acx = a.x + a.width / 2
       const acy = a.y + a.height / 2
       const rA = Math.max(8, a.width / 2)
-      const invMassA = a.isStationaryBoss ? 0 : a.isBoss ? 0.2 : a.isMiniBoss ? 0.35 : 1.0
+      const invMassA = a.isStationaryBoss || (a.isInferoChampion && a.isSpawning)
+        ? 0 : a.isBoss ? 0.2 : a.isMiniBoss ? 0.35 : 1.0
       const gx = Math.floor(acx / cellSize)
       const gy = Math.floor(acy / cellSize)
 
@@ -8836,7 +8847,8 @@ export function resolveEnemyCollisions(
               overlap = minDist - dist
             }
 
-            const invMassB = b.isStationaryBoss ? 0 : b.isBoss ? 0.2 : b.isMiniBoss ? 0.35 : 1.0
+            const invMassB = b.isStationaryBoss || (b.isInferoChampion && b.isSpawning)
+              ? 0 : b.isBoss ? 0.2 : b.isMiniBoss ? 0.35 : 1.0
             const totalInvMass = invMassA + invMassB
             if (totalInvMass <= 0) continue
             const pushA = (overlap * invMassA) / totalInvMass
@@ -8854,7 +8866,7 @@ export function resolveEnemyCollisions(
 
   for (let i = 0; i < n; i++) {
     const e = active[i]
-    if (e.isStationaryBoss) continue
+    if (e.isStationaryBoss || (e.isInferoChampion && e.isSpawning)) continue
     e.x = Math.max(padding, Math.min(e.x, arenaSize - e.width - padding))
     e.y = Math.max(padding, Math.min(e.y, arenaSize - e.height - padding))
   }

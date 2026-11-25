@@ -26,3 +26,9 @@ The phase-two sun attack must show fully extended indicator lines throughout the
 **Why:** The user requested this reaction window to make the attack more dodgeable.
 
 **How to apply:** Keep both the boss-centered sun and the detached sun consistent; the displayed warning must match the damaging beam path.
+
+Inferno Champion must remain stationary throughout his spawn cutscene. Animate the entrance effects, not the boss's position. Sun warning lines should rotate more slowly and ease smoothly to a stop without hiding the dodge indicators.
+
+**Why:** The user requested an immobile entrance and a gentler end to the warning rotation.
+
+**How to apply:** Prevent spawn movement from AI, collision separation, and knockback; retain the stationary 0.2-second warning before sun beams fire.

@@ -1607,8 +1607,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const beginAreaBossCutscene = (theme: BossCutsceneTheme) => {
         if (dogBossActiveRef.current) return
         const duration = theme.durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
-        const focusPos =
-          theme.kind === 'w20_area3' ? player.getCenter() : anchorPos || enemy.getCenter()
+        const focusPos = anchorPos || enemy.getCenter()
         enemy.isSpawning = true
         enemy.spawnTime = 0
         enemy.spawnDelay = duration
@@ -2888,7 +2887,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
         )
       }
 
-      if (knockbackFrom && !enemy.isStationaryBoss && !enemy.isInferoDesperationPhase) {
+      if (
+        knockbackFrom && !enemy.isStationaryBoss && !enemy.isInferoDesperationPhase &&
+        !(enemy.isInferoChampion && enemy.isSpawning)
+      ) {
         const ec = enemy.getCenter()
         const dx = ec.x - knockbackFrom.x
         const dy = ec.y - knockbackFrom.y

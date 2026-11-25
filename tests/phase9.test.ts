@@ -2135,7 +2135,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.specialCooldown = 100
     boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1300 })
     const attack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
-    assert.equal(attack.gridPulseWarningDuration, 0.75)
+    assert.equal(attack.gridPulseWarningDuration, 1.25)
     assert.equal(attack.gridPulseExtensionDuration, 0.2)
     assert.ok(attack.length! > 900)
     assert.ok(attack.gridLines!.every((line) =>
@@ -2155,11 +2155,19 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     let rotationDelta = rotatedAngle - startAngle
     while (rotationDelta > Math.PI) rotationDelta -= Math.PI * 2
     while (rotationDelta < -Math.PI) rotationDelta += Math.PI * 2
-    assert.ok(Math.abs(rotationDelta - (Math.PI * 2) / 3) < 0.25)
+    assert.ok(Math.abs(rotationDelta - Math.sin(0.25 / 1.25 * Math.PI / 2) * Math.PI * 2) < 0.001)
     assert.ok(Math.abs(Math.hypot(rotatedLine.x2 - rotatedLine.x1, rotatedLine.y2 - rotatedLine.y1) - startLength) < 0.001)
 
-    boss.update(0.5, player)
+    const angleAt = (line: typeof rotatedLine) => Math.atan2(line.y2 - line.y1, line.x2 - line.x1)
+    boss.update(0.75, player)
+    const lateLine = { ...attack.gridLines![0] }
+    boss.update(0.25, player)
     const lockedLine = { ...attack.gridLines![0] }
+    const finalRotation = Math.abs(Math.atan2(
+      Math.sin(angleAt(lockedLine) - angleAt(lateLine)),
+      Math.cos(angleAt(lockedLine) - angleAt(lateLine))
+    ))
+    assert.ok(finalRotation < Math.abs(rotationDelta) / 4, 'the last quarter-second eases smoothly to a stop')
     assert.equal(attack.gridPulseFiring, false, 'damage is disabled when the rotation ends')
     boss.update(0.19, player)
     assert.deepEqual(attack.gridLines![0], lockedLine, 'fully extended lines stay fixed during the reaction window')
@@ -2213,7 +2221,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(sun!.y, GAME_ARENA_SIZE / 2)
 
     const bossCenterBefore = boss.getCenter()
-    for (let frame = 0; frame < 25; frame++) boss.update(0.05, player)
+    for (let frame = 0; frame < 31; frame++) boss.update(0.05, player)
     const bossCenterAfter = boss.getCenter()
     assert.ok(Math.hypot(bossCenterAfter.x - sun!.x, bossCenterAfter.y - sun!.y) >
       Math.hypot(bossCenterBefore.x - sun!.x, bossCenterBefore.y - sun!.y))
@@ -2336,6 +2344,35 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(attack.swoopIndex, (attack.swoopCount ?? 3) - 1)
   })
 
+  it('keeps Inferno Champion motionless during its spawn even when enemies overlap it', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1000, y: 650, enemyData: AREA_THREE_BOSSES[3],
+      target: player, isBoss: true, isFinalBoss: true
+    })
+    boss.spawnDelay = 2
+    boss.cutsceneDelayTimer = 2
+    boss.velocity = { x: 500, y: -300 }
+    const spawnPosition = boss.getPosition()
+    const add = new Enemy({ x: 1000, y: 650 })
+    for (let frame = 0; frame < 39; frame++) {
+      player.x += 2
+      boss.update(0.05, player)
+      resolveEnemyCollisions([boss, add])
+      assert.deepEqual(boss.getPosition(), spawnPosition)
+      assert.deepEqual(boss.velocity, { x: 0, y: 0 })
+      assert.equal(boss.isSpawning, true)
+      assert.equal(boss.projectiles.length, 0)
+      assert.equal(boss.telegraphs.length, 0)
+    }
+    boss.update(0.06, player)
+    assert.equal(boss.isSpawning, false)
+    assert.deepEqual(boss.getPosition(), spawnPosition)
+    for (let frame = 0; frame < 10; frame++) boss.update(0.05, player)
+    assert.notDeepEqual(boss.getPosition(), spawnPosition, 'normal movement resumes after the entrance')
+  })
+
   it('keeps Inferno Champion at a stable side distance without body contact', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
@@ -2369,7 +2406,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       boss.update(0.1, player)
       assertSafeOrbit()
     }
-    assert.notDeepEqual(boss.getCenter(), initialPosition)
+    assert.deepEqual(boss.getCenter(), initialPosition, 'the entrance remains stationary')
 
     boss.isSpawning = false
     boss.cutsceneDelayTimer = 0

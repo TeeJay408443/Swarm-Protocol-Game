@@ -121,6 +121,7 @@ export type BossAttackKind =
   | 'cosmic_orb_barrage'
   | 'astral_orbital_grid'
   | 'astral_targeted_lasers'
+  | 'inferno_spear_volley'
 
 export type Wave15BossIdentity =
   | 'omega_overlord'
@@ -181,6 +182,12 @@ export interface BossTelegraphAttack {
   safeRect?: { x: number; y: number; width: number; height: number }
   gridRects?: Array<{ x: number; y: number; width: number; height: number }>
   gridLines?: CosmicLaserWallLine[]
+  projectileLanes?: Array<{
+    x: number
+    y: number
+    directionX: number
+    directionY: number
+  }>
   gridPulseCount?: number
   gridPulseIndex?: number
   gridPulseTimer?: number
@@ -939,6 +946,7 @@ export class Enemy {
             t.kind === 'cosmic_laser_walls' ||
             t.kind === 'astral_orbital_grid' ||
             t.kind === 'astral_targeted_lasers' ||
+            t.kind === 'inferno_spear_volley' ||
             t.kind === 'cosmic_portal_lunge' ||
             t.kind === 'cosmic_orb_barrage'
         )
@@ -1114,12 +1122,12 @@ export class Enemy {
     const turnRate = this.bossPhase >= 3 ? 1.72 : this.bossPhase === 2 ? 1.38 : 1.08
     this.inferoOrbitAngle += direction * turnRate * deltaTime
 
-    const baseRadius = this.bossPhase >= 3 ? 245 : this.bossPhase === 2 ? 278 : 310
-    const orbitRadius = Math.max(baseRadius, this.getInferoMinimumPlayerDistance() + 86)
-    const radius = orbitRadius + Math.sin(this.animTime * 2.1) * 16
+    const horizontalRadius = this.bossPhase >= 3 ? 470 : this.bossPhase === 2 ? 440 : 410
+    const verticalRadius = this.bossPhase >= 3 ? 190 : 165
+    const orbitRadius = Math.max(horizontalRadius, this.getInferoMinimumPlayerDistance() + 86)
     const desiredCenter = {
-      x: targetCenter.x + Math.cos(this.inferoOrbitAngle) * radius,
-      y: targetCenter.y + Math.sin(this.inferoOrbitAngle) * radius
+      x: targetCenter.x + Math.cos(this.inferoOrbitAngle) * orbitRadius,
+      y: targetCenter.y - 58 + Math.sin(this.inferoOrbitAngle) * verticalRadius
     }
     const marginX = this.width / 2 + 36
     const marginY = this.height / 2 + 36
@@ -2006,7 +2014,54 @@ export class Enemy {
 
     let telegraph: BossTelegraphAttack
 
-    if (kind === 'astral_orbital_grid') {
+    if (kind === 'inferno_spear_volley' && this.isInferoChampion) {
+      const sideMode: ClosingSideLaserMode = this.specialAttackCounter % 2 === 0 ? 'left' : 'right'
+      const laneCount = this.bossPhase >= 3 ? 5 : 3
+      const laneSpacing = this.bossPhase >= 2 ? 105 : 130
+      const edgeX = Math.max(
+        70,
+        Math.min(1930, targetCenter.x + (sideMode === 'left' ? -740 : 740))
+      )
+      const passX = Math.max(
+        70,
+        Math.min(1930, targetCenter.x + (sideMode === 'left' ? 185 : -185))
+      )
+      const projectileLanes = Array.from({ length: laneCount }, (_, index) => {
+        const offset = (index - (laneCount - 1) / 2) * laneSpacing
+        const startY = Math.max(80, Math.min(1920, targetCenter.y + offset))
+        const endY = Math.max(80, Math.min(1920, targetCenter.y + offset * 0.2))
+        const direction = Vector2.normalize({ x: passX - edgeX, y: endY - startY })
+        return { x: edgeX, y: startY, directionX: direction.x, directionY: direction.y }
+      })
+      const gridLines = projectileLanes.map((lane) => ({
+        x1: lane.x,
+        y1: lane.y,
+        x2: lane.x + lane.directionX * 980,
+        y2: lane.y + lane.directionY * 980,
+        width: 8,
+        color: '#FB923C'
+      }))
+      telegraph = {
+        id,
+        kind,
+        x: bossCenter.x,
+        y: bossCenter.y,
+        sideMode,
+        radius: 10,
+        projectileLanes,
+        gridLines,
+        chargeTimer: 0,
+        chargeDuration: 1.45,
+        activeTimer: 0,
+        activeDuration: 1.05,
+        damage: Math.round(24 * Math.max(1, this.damageScale)),
+        pulseTimer: 0,
+        pulseCount: 0,
+        warningLabel: 'BLAZING SPEAR // DODGE THE SIDE VOLLEY',
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+    } else if (kind === 'astral_orbital_grid') {
       const randomAngle = Math.random() * Math.PI
       const lineCount = 3 + Math.floor(Math.random() * 2)
       const lineSpacing = 105 + Math.random() * 75
@@ -2597,6 +2652,7 @@ export class Enemy {
 
     if (this.isInferoChampion) {
       const inferoWarningLabels: Partial<Record<BossAttackKind, string>> = {
+        inferno_spear_volley: 'BLAZING SPEAR // SIDE VOLLEY',
         tracking_strikes: 'CINDER TRACK // MOVE BEFORE THE IMPACT',
         rotating_cross_lasers: 'FURNACE CROSS // FIND THE OPEN LANE',
         pursuit_beam: 'RADIANT LANCE // BREAK THE LINE',
@@ -2626,6 +2682,31 @@ export class Enemy {
     attack.angle = angle
     attack.gridOffsets = offsets
     attack.gridLines = getAstralOrbitalGridLines(center, angle, offsets)
+  }
+
+  private launchInferoSpearVolley(attack: BossTelegraphAttack, pulseIndex: number): void {
+    if (!attack.projectileLanes?.length) return
+    const pulseSpread = (pulseIndex - (this.bossPhase >= 3 ? 1 : 0.5)) * 0.045
+
+    for (let index = 0; index < attack.projectileLanes.length; index++) {
+      const lane = attack.projectileLanes[index]
+      const direction = Vector2.normalize({
+        x: lane.directionX,
+        y: lane.directionY + pulseSpread
+      })
+      this.projectiles.push({
+        x: lane.x,
+        y: lane.y,
+        width: this.bossPhase >= 3 ? 21 : 18,
+        height: this.bossPhase >= 3 ? 17 : 14,
+        speed: this.bossPhase >= 3 ? 520 : 465,
+        direction,
+        damage: attack.damage,
+        color: index % 2 === 0 ? '#FB923C' : '#FDE047',
+        lifetime: 0,
+        maxLifetime: 4.5
+      })
+    }
   }
 
   /**
@@ -2762,7 +2843,11 @@ export class Enemy {
           }
           t.hasTriggered = true
           t.activeTimer = 0
-          if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
+          if (t.kind === 'inferno_spear_volley') {
+            t.pulseTimer = 0
+            t.pulseCount = 1
+            this.launchInferoSpearVolley(t, 0)
+          } else if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
             // Warp worm head cleanly into the dimensional rift and unleash blazing jaw lunge
             this.x = t.portalX - this.width / 2
             this.y = t.portalY - this.height / 2
@@ -2817,7 +2902,18 @@ export class Enemy {
       } else {
         t.activeTimer += deltaTime
 
-        if (t.kind === 'astral_orbital_grid') {
+        if (t.kind === 'inferno_spear_volley') {
+          t.x = bossCenter.x
+          t.y = bossCenter.y
+          t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
+          const maxPulses = this.bossPhase >= 3 ? 3 : 2
+          while ((t.pulseCount ?? 1) < maxPulses && (t.pulseTimer ?? 0) >= 0.34) {
+            t.pulseTimer = (t.pulseTimer ?? 0) - 0.34
+            const pulseIndex = t.pulseCount ?? 1
+            t.pulseCount = pulseIndex + 1
+            this.launchInferoSpearVolley(t, pulseIndex)
+          }
+        } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
           const firstWarningDuration = t.gridPulseFirstWarningDuration ?? 0.24
           const followupWarningDuration = t.gridPulseFollowupWarningDuration ?? 0.64
@@ -3414,7 +3510,43 @@ export class Enemy {
         ? Math.max(0, Math.min(1, t.activeTimer / t.activeDuration))
         : 0
 
-      if (t.kind === 'closing_side_lasers' && t.bounds) {
+      if (t.kind === 'inferno_spear_volley' && t.projectileLanes) {
+        const alpha = t.hasTriggered ? Math.max(0.12, 0.72 - impactProgress * 0.6) : 0.28 + chargeProgress * 0.48
+        ctx.save()
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        for (const line of t.gridLines ?? []) {
+          const start = camera.worldToScreen(line.x1, line.y1)
+          const end = camera.worldToScreen(line.x2, line.y2)
+          ctx.strokeStyle = `rgba(251, 146, 60, ${alpha})`
+          ctx.lineWidth = t.hasTriggered ? 5 : 3 + chargeProgress * 3
+          ctx.setLineDash(t.hasTriggered ? [] : [14, 10])
+          ctx.beginPath()
+          ctx.moveTo(start.x, start.y)
+          ctx.lineTo(end.x, end.y)
+          ctx.stroke()
+
+          ctx.setLineDash([])
+          ctx.fillStyle = t.hasTriggered ? '#FDE047' : '#FB923C'
+          ctx.shadowColor = '#F97316'
+          ctx.shadowBlur = 13
+          ctx.beginPath()
+          ctx.arc(start.x, start.y, t.hasTriggered ? 8 : 7 + chargeProgress * 4, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.shadowBlur = 0
+        }
+
+        if (!t.hasTriggered && t.gridLines?.[0]) {
+          const first = camera.worldToScreen(t.gridLines[0].x1, t.gridLines[0].y1)
+          ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
+          ctx.fillRect(first.x - 8, first.y - 40, 280, 24)
+          ctx.fillStyle = '#FEF3C7'
+          ctx.font = 'bold 12px monospace'
+          ctx.textAlign = 'left'
+          ctx.fillText(`${t.warningLabel ?? 'BLAZING SPEAR'} • ${(t.chargeDuration - t.chargeTimer).toFixed(1)}s`, first.x, first.y - 23)
+        }
+        ctx.restore()
+      } else if (t.kind === 'closing_side_lasers' && t.bounds) {
         const b = t.bounds
         const reach = t.closingReachRatio ?? 0.5
         const mode = t.sideMode ?? 'left'
@@ -4371,6 +4503,11 @@ export class Enemy {
 
     switch (this.type) {
       case 'Heavy Swarm': {
+        if (this.enemyId === 'ene_a3_01') {
+          this.drawAreaThreeEnemySprite(ctx, r, isFlashing)
+          break
+        }
+
         // Citadel Golem: slow, chunky sapphirestone carapace with glowing emerald crystal core
         const lumber = Math.sin(this.animTime * 6) * 1.8
         ctx.fillStyle = isFlashing ? '#FFFFFF' : '#1E3A5F'
@@ -4410,6 +4547,11 @@ export class Enemy {
       }
 
       case 'Fast Flanker': {
+        if (this.enemyId === 'ene_a3_02') {
+          this.drawAreaThreeEnemySprite(ctx, r, isFlashing)
+          break
+        }
+
         if (this.enemyId === 'ene_a2_02') {
           // Zephyr Shardling: razor-winged high-speed cyan crystal swarmer
           const flutter = Math.sin(this.animTime * 28) * 3.5
@@ -4475,6 +4617,11 @@ export class Enemy {
       }
 
       case 'Ranged Sniper': {
+        if (this.enemyId === 'ene_a3_03') {
+          this.drawAreaThreeEnemySprite(ctx, r, isFlashing)
+          break
+        }
+
         if (this.enemyId === 'ene_a2_03') {
           // Prism Bolt Weaver: faceted sapphire diamond ranged spire + spinning emerald ring
           ctx.fillStyle = isFlashing ? '#FFFFFF' : '#064E3B'
@@ -4533,6 +4680,11 @@ export class Enemy {
       }
 
       case 'Ranged Caster': {
+        if (this.enemyId === 'ene_a3_04') {
+          this.drawAreaThreeEnemySprite(ctx, r, isFlashing)
+          break
+        }
+
         // Astral Arcanist: hovering violet-gold rune octagon firing 3-orb fans
         ctx.fillStyle = isFlashing ? '#FFFFFF' : '#3B0764'
         ctx.strokeStyle = '#E879F9'
@@ -4566,6 +4718,11 @@ export class Enemy {
       case 'Mini-Boss':
       case 'Boss': {
         if (this.enemyId === 'ene_a3_05' || this.enemyId === 'ene_a3_06') {
+          this.drawAreaThreeEnemySprite(ctx, r, isFlashing)
+          break
+        }
+
+        if (this.enemyId === 'ene_a2_05') {
           const isLeviathan = this.enemyId === 'ene_a3_06'
           const coreColor = isLeviathan ? '#FDBA74' : '#FDE047'
           const pulse = 0.92 + Math.sin(this.animTime * 6) * 0.05
@@ -5558,8 +5715,15 @@ export function getAstralScourgePhaseTwoAttackKind(
 
 export function getInferoChampionAttackKind(phase: number, cycleIndex: number): BossAttackKind {
   const cycles: Record<number, BossAttackKind[]> = {
-    1: ['tracking_strikes', 'rotating_cross_lasers', 'pursuit_beam', 'void_meteor_salvo'],
+    1: [
+      'inferno_spear_volley',
+      'tracking_strikes',
+      'rotating_cross_lasers',
+      'pursuit_beam',
+      'void_meteor_salvo'
+    ],
     2: [
+      'inferno_spear_volley',
       'rotating_cross_lasers',
       'tracking_strikes',
       'singularity_grid',
@@ -5568,6 +5732,7 @@ export function getInferoChampionAttackKind(phase: number, cycleIndex: number): 
     ],
     3: [
       'singularity_grid',
+      'inferno_spear_volley',
       'pursuit_beam',
       'bullet_hell',
       'tracking_strikes',

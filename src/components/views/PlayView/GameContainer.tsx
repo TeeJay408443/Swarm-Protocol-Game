@@ -1498,6 +1498,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
       if (isStationaryArenaBoss && bossArena) {
         spawnX = bossArena.left + bossArena.width / 2 - 46
         spawnY = bossArena.top + 195 - 46
+      } else if (isInferoChampion) {
+        spawnX = Math.max(48, Math.min(ARENA_SIZE - 160, playerCenter.x - 56))
+        spawnY = Math.max(48, Math.min(ARENA_SIZE - 180, playerCenter.y - 460))
       } else if (isFinalAreaBoss && isWormBoss) {
         spawnX = Math.max(140, Math.min(ARENA_SIZE - 140, playerCenter.x)) - 38
         spawnY = Math.max(120, Math.min(ARENA_SIZE - 160, playerCenter.y - 235)) - 38

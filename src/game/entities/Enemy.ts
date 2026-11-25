@@ -278,10 +278,12 @@ export interface BossTelegraphAttack {
   gridPulseWarningDuration?: number
   gridPulseFirstWarningDuration?: number
   gridPulseFollowupWarningDuration?: number
+  gridPulseExtensionDuration?: number
   gridPulseFireDuration?: number
   gridPulseGapDuration?: number
   gridPulseFiring?: boolean
   gridPulseTravelSpeed?: number
+  spinMode?: 'classic_spin' | 'furnace_volley'
   gridOffsets?: number[]
   isDiagonalGrid?: boolean
   beamCount?: number
@@ -2321,51 +2323,95 @@ export class Enemy {
       this.inferoHoverTarget = { x: targetX, y: swoopY }
       this.inferoHoverRetargetTimer = telegraph.chargeDuration + telegraph.activeDuration
     } else if (kind === 'infero_spinning_lattice' && this.isInferoChampion) {
+      const view = this.getInferoViewportBounds()
       const arenaCenter = this.getInferoArenaCenter()
       const inferoLaunchX = arenaCenter.x
       const inferoLaunchY = arenaCenter.y
       const phaseTwo = this.bossPhase >= 2
-      const shotCount = phaseTwo ? 5 : 4
-      const laserCount = phaseTwo
-        ? 9 + Math.floor(Math.random() * 2)
-        : 8 + Math.floor(Math.random() * 3)
-      const warningDuration = phaseTwo ? 0.46 : 0.58
-      const laserTravelDuration = phaseTwo ? 0.34 : 0.4
-      const laserHoldDuration = phaseTwo ? 0.36 : 0.48
-      const pulseCycle = warningDuration + laserTravelDuration + laserHoldDuration
-      telegraph = {
-        id,
-        kind,
-        x: inferoLaunchX,
-        y: inferoLaunchY,
-        inferoLaunchX,
-        inferoLaunchY,
-        beamCount: laserCount,
-        length: phaseTwo ? 205 : 185,
-        projectileLanes: [],
-        radius: 18,
-        gridLines: [],
-        gridPulseCount: shotCount,
-        gridPulseIndex: 0,
-        gridPulseWarningDuration: warningDuration,
-        gridPulseFireDuration: laserTravelDuration,
-        gridPulseGapDuration: laserHoldDuration,
-        gridPulseFiring: false,
-        gridPulseTravelSpeed: phaseTwo ? 570 : 480,
-        chargeTimer: 0,
-        chargeDuration: Math.max(
-          1.65,
-          Math.hypot(bossCenter.x - inferoLaunchX, bossCenter.y - inferoLaunchY) /
-            Math.max(1, this.baseSpeed) + 0.4
-        ),
-        activeTimer: 0,
-        activeDuration: shotCount * pulseCycle,
-        damage: Math.round(24 * Math.max(1, this.damageScale)),
-        warningLabel: `FURNACE CORE // ${shotCount} LASER BURSTS`,
-        hasTriggered: false,
-        hasDamagedPlayer: false
+      const laserLength = Math.max(
+        900,
+        Math.hypot(view.right - view.left, view.bottom - view.top) * 1.35
+      )
+      const angle = Math.random() * Math.PI * 2
+      if (phaseTwo) {
+        const shotCount = 5
+        const laserCount = 9 + Math.floor(Math.random() * 2)
+        const rotationDuration = 0.5
+        const extensionDuration = 0.24
+        const fireDuration = 0.46
+        const gapDuration = 0.36
+        telegraph = {
+          id,
+          kind,
+          x: inferoLaunchX,
+          y: inferoLaunchY,
+          inferoLaunchX,
+          inferoLaunchY,
+          angle,
+          spinMode: 'furnace_volley',
+          beamCount: laserCount,
+          length: laserLength,
+          projectileLanes: [],
+          radius: 18,
+          gridLines: [],
+          gridPulseCount: shotCount,
+          gridPulseIndex: 0,
+          gridPulseWarningDuration: rotationDuration,
+          gridPulseExtensionDuration: extensionDuration,
+          gridPulseFireDuration: fireDuration,
+          gridPulseGapDuration: gapDuration,
+          gridPulseFiring: false,
+          chargeTimer: 0,
+          chargeDuration: Math.max(
+            1.65,
+            Math.hypot(bossCenter.x - inferoLaunchX, bossCenter.y - inferoLaunchY) /
+              Math.max(1, this.baseSpeed) + 0.4
+          ),
+          activeTimer: 0,
+          activeDuration:
+            shotCount * (rotationDuration + extensionDuration + fireDuration + gapDuration),
+          damage: Math.round(24 * Math.max(1, this.damageScale)),
+          warningLabel: `FURNACE CORE // ${shotCount} ROTATING LASER BURSTS`,
+          hasTriggered: false,
+          hasDamagedPlayer: false
+        }
+        this.randomizeInferoSpinningLaserVolley(telegraph, { x: inferoLaunchX, y: inferoLaunchY })
+      } else {
+        telegraph = {
+          id,
+          kind,
+          x: inferoLaunchX,
+          y: inferoLaunchY,
+          inferoLaunchX,
+          inferoLaunchY,
+          angle,
+          turnRate: 0.42,
+          spinMode: 'classic_spin',
+          beamCount: 2,
+          length: laserLength,
+          radius: 18,
+          gridLines: getInferoSpinningLaserLines(
+            { x: inferoLaunchX, y: inferoLaunchY },
+            angle,
+            laserLength
+          ),
+          chargeTimer: 0,
+          chargeDuration: Math.max(
+            1.65,
+            Math.hypot(bossCenter.x - inferoLaunchX, bossCenter.y - inferoLaunchY) /
+              Math.max(1, this.baseSpeed) + 0.4
+          ),
+          activeTimer: 0,
+          activeDuration: 4.8,
+          damage: Math.round(24 * Math.max(1, this.damageScale)),
+          pulseTimer: 0,
+          pulseCount: 0,
+          gridPulseFiring: false,
+          warningLabel: 'FURNACE CROSS // TWO SPINNING LANCES',
+          hasTriggered: false,
+          hasDamagedPlayer: false
+        }
       }
-      this.randomizeInferoSpinningLaserVolley(telegraph, { x: inferoLaunchX, y: inferoLaunchY })
       this.inferoHoverTarget = { x: inferoLaunchX, y: inferoLaunchY }
       this.inferoHoverRetargetTimer = telegraph.chargeDuration + telegraph.activeDuration + 1.2
     } else if (kind === 'infero_aimed_ram' && this.isInferoChampion) {
@@ -3190,7 +3236,10 @@ export class Enemy {
     if (this.isInferoChampion) {
       const inferoWarningLabels: Partial<Record<BossAttackKind, string>> = {
         tracking_strikes: 'CINDER TRACK // MOVE BEFORE THE IMPACT',
-        infero_spinning_lattice: 'FURNACE CORE // DODGE THE OUTWARD LASERS',
+        infero_spinning_lattice:
+          telegraph.spinMode === 'classic_spin'
+            ? 'FURNACE CROSS // TWO SPINNING LANCES'
+            : 'FURNACE CORE // ROTATE, EXTEND, THEN DODGE',
         infero_underflame_swoops: 'UNDERFLAME DIVE // WATCH FOR THE FIRE COLUMN',
         infero_aimed_ram: 'INFERNO RAM // DODGE THE LOCKED LINE',
         infero_rebound_lances: 'EMBER LANCE FAN // WATCH FOR THE RE-THROW'
@@ -3250,6 +3299,34 @@ export class Enemy {
     })
   }
 
+  private launchInferoSpinningGridVolley(
+    attack: BossTelegraphAttack,
+    bossCenter: Vector2,
+    pulseIndex: number
+  ): void {
+    const spokeCount = 6
+    const baseAngle = (attack.angle ?? 0) + pulseIndex * 0.31
+    for (let index = 0; index < spokeCount; index++) {
+      const angle = baseAngle + (index / spokeCount) * Math.PI * 2
+      this.projectiles.push({
+        x: bossCenter.x,
+        y: bossCenter.y,
+        width: 13,
+        height: 13,
+        speed: 275,
+        direction: { x: Math.cos(angle), y: Math.sin(angle) },
+        damage: Math.round(16 * Math.max(1, this.damageScale)),
+        color: index % 2 === 0 ? '#FB923C' : '#FDE047',
+        lifetime: 0,
+        maxLifetime: 6,
+        curveTurnRate: index % 2 === 0 ? 0.38 : -0.38,
+        isInferoFireball: true,
+        trailTimer: 0,
+        trailParticles: []
+      })
+    }
+  }
+
   private randomizeInferoSpinningLaserVolley(
     attack: BossTelegraphAttack,
     origin: Vector2
@@ -3270,11 +3347,11 @@ export class Enemy {
       }
     })
     attack.projectileLanes = lanes
-    attack.gridLines = getInferoSpinningVolleyLines(
+    attack.gridLines = getInferoRotatingSpreadLines(
       origin,
       lanes,
-      0,
-      attack.length ?? 185
+      Math.max(90, this.width * 1.2),
+      0
     )
   }
 
@@ -3409,12 +3486,21 @@ export class Enemy {
       } else if (t.kind === 'infero_spinning_lattice') {
         t.x = t.inferoLaunchX ?? bossCenter.x
         t.y = t.inferoLaunchY ?? bossCenter.y
-        if (!t.hasTriggered) {
+        if (t.spinMode === 'classic_spin') {
+          if (!t.hasTriggered) {
+            t.angle = (t.angle ?? 0) + (t.turnRate ?? 0.42) * deltaTime * 0.34
+          }
+          t.gridLines = getInferoSpinningLaserLines(
+            { x: t.x, y: t.y },
+            t.angle ?? 0,
+            t.length ?? 1500
+          )
+        } else if (!t.hasTriggered) {
           t.gridLines = getInferoSpinningVolleyLines(
             { x: t.x, y: t.y },
             t.projectileLanes ?? [],
             0,
-            t.length ?? 185
+            Math.max(90, this.width * 1.2)
           )
         } else if (t.hasDamagedPlayer) {
           t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
@@ -3578,9 +3664,20 @@ export class Enemy {
               column.hasDamagedPlayer = false
             }
           } else if (t.kind === 'infero_spinning_lattice') {
-            t.gridPulseIndex = 0
-            t.gridPulseFiring = false
-            this.randomizeInferoSpinningLaserVolley(t, this.getCenter())
+            if (t.spinMode === 'classic_spin') {
+              t.pulseTimer = 0
+              t.pulseCount = 0
+              t.gridPulseFiring = true
+              t.gridLines = getInferoSpinningLaserLines(
+                this.getCenter(),
+                t.angle ?? 0,
+                t.length ?? 1500
+              )
+            } else {
+              t.gridPulseIndex = 0
+              t.gridPulseFiring = false
+              this.randomizeInferoSpinningLaserVolley(t, this.getCenter())
+            }
           } else if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
             // Warp worm head cleanly into the dimensional rift and unleash blazing jaw lunge
             this.x = t.portalX - this.width / 2
@@ -3835,38 +3932,66 @@ export class Enemy {
         } else if (t.kind === 'infero_spinning_lattice') {
           t.x = bossCenter.x
           t.y = bossCenter.y
-          const pulseCount = t.gridPulseCount ?? 4
-          const warningDuration = t.gridPulseWarningDuration ?? 0.58
-          const travelDuration = t.gridPulseFireDuration ?? 0.4
-          const holdDuration = t.gridPulseGapDuration ?? 0.48
-          const cycleDuration = warningDuration + travelDuration + holdDuration
-          const pulseIndex = Math.min(
-            pulseCount - 1,
-            Math.floor(t.activeTimer / Math.max(0.001, cycleDuration))
-          )
-          if (pulseIndex !== (t.gridPulseIndex ?? 0)) {
-            t.gridPulseIndex = pulseIndex
-            this.randomizeInferoSpinningLaserVolley(t, bossCenter)
+          if (t.spinMode === 'classic_spin') {
+            t.angle = (t.angle ?? 0) + (t.turnRate ?? 0.42) * deltaTime
+            t.gridLines = getInferoSpinningLaserLines(
+              bossCenter,
+              t.angle,
+              t.length ?? 1500
+            )
+            t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
+            if ((t.pulseTimer ?? 0) >= 0.54) {
+              t.pulseTimer = (t.pulseTimer ?? 0) - 0.54
+              const pulseIndex = t.pulseCount ?? 0
+              this.launchInferoSpinningGridVolley(t, bossCenter, pulseIndex)
+              t.pulseCount = pulseIndex + 1
+            }
+          } else {
+            const pulseCount = t.gridPulseCount ?? 5
+            const rotationDuration = t.gridPulseWarningDuration ?? 0.5
+            const extensionDuration = t.gridPulseExtensionDuration ?? 0.24
+            const fireDuration = t.gridPulseFireDuration ?? 0.46
+            const gapDuration = t.gridPulseGapDuration ?? 0.36
+            const cycleDuration =
+              rotationDuration + extensionDuration + fireDuration + gapDuration
+            const pulseIndex = Math.min(
+              pulseCount - 1,
+              Math.floor(t.activeTimer / Math.max(0.001, cycleDuration))
+            )
+            if (pulseIndex !== (t.gridPulseIndex ?? 0)) {
+              t.gridPulseIndex = pulseIndex
+              this.randomizeInferoSpinningLaserVolley(t, bossCenter)
+            }
+            const pulseElapsed = Math.max(0, t.activeTimer - pulseIndex * cycleDuration)
+            const rotationProgress = Math.min(1, pulseElapsed / Math.max(0.001, rotationDuration))
+            const extensionProgress = Math.max(
+              0,
+              Math.min(
+                1,
+                (pulseElapsed - rotationDuration) / Math.max(0.001, extensionDuration)
+              )
+            )
+            const isFiring =
+              pulseElapsed >= rotationDuration + extensionDuration &&
+              pulseElapsed < rotationDuration + extensionDuration + fireDuration
+            const shortLength = Math.max(90, this.width * 1.2)
+            const lineLength =
+              shortLength + ((t.length ?? 1500) - shortLength) * extensionProgress
+            const rotationAngle =
+              pulseElapsed < rotationDuration ? rotationProgress * Math.PI * 2 : 0
+            t.gridPulseFiring = isFiring
+            t.gridLines = getInferoRotatingSpreadLines(
+              bossCenter,
+              t.projectileLanes ?? [],
+              lineLength,
+              rotationAngle
+            )
+            t.warningLabel = isFiring
+              ? `FURNACE CORE // VOLLEY ${pulseIndex + 1}/${pulseCount} — FIRE`
+              : extensionProgress > 0
+                ? `FURNACE CORE // VOLLEY ${pulseIndex + 1}/${pulseCount} — EXTENDING`
+                : `FURNACE CORE // VOLLEY ${pulseIndex + 1}/${pulseCount} — ROTATING`
           }
-          const pulseElapsed = Math.max(0, t.activeTimer - pulseIndex * cycleDuration)
-          const isFiring =
-            pulseElapsed >= warningDuration &&
-            pulseElapsed < warningDuration + travelDuration + holdDuration
-          const travelElapsed = Math.max(
-            0,
-            Math.min(travelDuration, pulseElapsed - warningDuration)
-          )
-          const offsetDistance = isFiring
-            ? (t.gridPulseTravelSpeed ?? 480) * travelElapsed
-            : 0
-          t.gridPulseFiring = isFiring
-          t.gridLines = getInferoSpinningVolleyLines(
-            bossCenter,
-            t.projectileLanes ?? [],
-            offsetDistance,
-            t.length ?? 185
-          )
-          t.warningLabel = `FURNACE CORE // SHOT ${pulseIndex + 1}/${pulseCount}`
         } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
           const firstWarningDuration = t.gridPulseFirstWarningDuration ?? 0.24
@@ -4793,46 +4918,48 @@ export class Enemy {
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
 
-        const fireballCenter = camera.worldToScreen(this.getCenter().x, this.getCenter().y)
-        const fireballRadius = (this.width * 0.72 + 20) * camera.zoom
-        const fireballGlow = ctx.createRadialGradient(
-          fireballCenter.x,
-          fireballCenter.y,
-          fireballRadius * 0.22,
-          fireballCenter.x,
-          fireballCenter.y,
-          fireballRadius
-        )
-        fireballGlow.addColorStop(0, 'rgba(255, 247, 237, 0.78)')
-        fireballGlow.addColorStop(0.3, 'rgba(253, 224, 71, 0.45)')
-        fireballGlow.addColorStop(0.72, 'rgba(249, 115, 22, 0.28)')
-        fireballGlow.addColorStop(1, 'rgba(234, 88, 12, 0)')
-        ctx.fillStyle = fireballGlow
-        ctx.beginPath()
-        ctx.arc(fireballCenter.x, fireballCenter.y, fireballRadius, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.strokeStyle = '#FDE047'
-        ctx.lineWidth = 3
-        ctx.shadowColor = '#F97316'
-        ctx.shadowBlur = 22
-        ctx.beginPath()
-        ctx.arc(
-          fireballCenter.x,
-          fireballCenter.y,
-          fireballRadius * (0.78 + Math.sin(this.animTime * 7) * 0.04),
-          0,
-          Math.PI * 2
-        )
-        ctx.stroke()
-        for (let flame = 0; flame < 9; flame++) {
-          const angle = this.animTime * (flame % 2 === 0 ? 1.4 : -1.1) + flame * Math.PI * 2 / 9
-          const flameX = fireballCenter.x + Math.cos(angle) * fireballRadius * 0.68
-          const flameY = fireballCenter.y + Math.sin(angle) * fireballRadius * 0.68
-          ctx.fillStyle = flame % 2 === 0 ? '#FFF7ED' : '#FDE047'
-          ctx.shadowBlur = 14
+        if (t.spinMode === 'furnace_volley') {
+          const fireballCenter = camera.worldToScreen(this.getCenter().x, this.getCenter().y)
+          const fireballRadius = (this.width * 0.72 + 20) * camera.zoom
+          const fireballGlow = ctx.createRadialGradient(
+            fireballCenter.x,
+            fireballCenter.y,
+            fireballRadius * 0.22,
+            fireballCenter.x,
+            fireballCenter.y,
+            fireballRadius
+          )
+          fireballGlow.addColorStop(0, 'rgba(255, 247, 237, 0.78)')
+          fireballGlow.addColorStop(0.3, 'rgba(253, 224, 71, 0.45)')
+          fireballGlow.addColorStop(0.72, 'rgba(249, 115, 22, 0.28)')
+          fireballGlow.addColorStop(1, 'rgba(234, 88, 12, 0)')
+          ctx.fillStyle = fireballGlow
           ctx.beginPath()
-          ctx.arc(flameX, flameY, 4 + (flame % 3) * 1.5, 0, Math.PI * 2)
+          ctx.arc(fireballCenter.x, fireballCenter.y, fireballRadius, 0, Math.PI * 2)
           ctx.fill()
+          ctx.strokeStyle = '#FDE047'
+          ctx.lineWidth = 3
+          ctx.shadowColor = '#F97316'
+          ctx.shadowBlur = 22
+          ctx.beginPath()
+          ctx.arc(
+            fireballCenter.x,
+            fireballCenter.y,
+            fireballRadius * (0.78 + Math.sin(this.animTime * 7) * 0.04),
+            0,
+            Math.PI * 2
+          )
+          ctx.stroke()
+          for (let flame = 0; flame < 9; flame++) {
+            const angle = this.animTime * (flame % 2 === 0 ? 1.4 : -1.1) + flame * Math.PI * 2 / 9
+            const flameX = fireballCenter.x + Math.cos(angle) * fireballRadius * 0.68
+            const flameY = fireballCenter.y + Math.sin(angle) * fireballRadius * 0.68
+            ctx.fillStyle = flame % 2 === 0 ? '#FFF7ED' : '#FDE047'
+            ctx.shadowBlur = 14
+            ctx.beginPath()
+            ctx.arc(flameX, flameY, 4 + (flame % 3) * 1.5, 0, Math.PI * 2)
+            ctx.fill()
+          }
         }
 
         for (let beamIndex = 0; beamIndex < lines.length; beamIndex++) {
@@ -4889,25 +5016,77 @@ export class Enemy {
         ctx.setLineDash([])
         ctx.shadowBlur = 0
         const center = camera.worldToScreen(t.x, t.y)
-        if (t.hasTriggered && t.activeTimer < t.activeDuration) {
+        if (t.spinMode === 'classic_spin' && t.hasTriggered && t.activeTimer < t.activeDuration) {
+          const paths = getInferoSpinningGridProjectilePaths(
+            { x: t.x, y: t.y },
+            t.angle ?? 0,
+            t.pulseCount ?? 0,
+            6,
+            275
+          )
+          const secondsToVolley = Math.max(0, 0.54 - (t.pulseTimer ?? 0))
+          ctx.globalAlpha = 0.76
+          ctx.setLineDash([5, 7])
+          ctx.lineWidth = 2
+          ctx.strokeStyle = '#FDE68A'
+          ctx.shadowColor = '#FB923C'
+          ctx.shadowBlur = 7
+          for (const path of paths) {
+            if (path.length < 2) continue
+            const first = camera.worldToScreen(path[0].x, path[0].y)
+            ctx.beginPath()
+            ctx.moveTo(first.x, first.y)
+            for (let pointIndex = 1; pointIndex < path.length; pointIndex++) {
+              const point = camera.worldToScreen(path[pointIndex].x, path[pointIndex].y)
+              ctx.lineTo(point.x, point.y)
+            }
+            ctx.stroke()
+            const endpoint = camera.worldToScreen(path[path.length - 1].x, path[path.length - 1].y)
+            ctx.setLineDash([])
+            ctx.fillStyle = '#FEF3C7'
+            ctx.beginPath()
+            ctx.arc(endpoint.x, endpoint.y, 3.2, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.setLineDash([5, 7])
+          }
+          ctx.setLineDash([])
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = 1
+          ctx.fillStyle = 'rgba(28, 25, 23, 0.84)'
+          ctx.fillRect(center.x - 147, center.y + 38, 294, 20)
+          ctx.fillStyle = '#FDE68A'
+          ctx.font = 'bold 10px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(`CURVED FIRE PATHS • NEXT VOLLEY ${secondsToVolley.toFixed(1)}s`, center.x, center.y + 52)
+        } else if (t.spinMode === 'furnace_volley' && t.hasTriggered && t.activeTimer < t.activeDuration) {
+          const rotationDuration = t.gridPulseWarningDuration ?? 0.5
+          const extensionDuration = t.gridPulseExtensionDuration ?? 0.24
+          const fireDuration = t.gridPulseFireDuration ?? 0.46
+          const gapDuration = t.gridPulseGapDuration ?? 0.36
+          const pulseCycle = rotationDuration + extensionDuration + fireDuration + gapDuration
+          const pulseElapsed = t.activeTimer % pulseCycle
+          const modeLabel =
+            pulseElapsed < rotationDuration
+              ? 'LASERS ROTATING'
+              : pulseElapsed < rotationDuration + extensionDuration
+                ? 'LASERS EXTENDING'
+                : pulseElapsed < rotationDuration + extensionDuration + fireDuration
+                  ? 'FURNACE LASERS LIVE'
+                  : 'NEXT LASER SPIN'
+          const timeRemaining =
+            pulseElapsed < rotationDuration
+              ? rotationDuration - pulseElapsed
+              : pulseElapsed < rotationDuration + extensionDuration
+                ? rotationDuration + extensionDuration - pulseElapsed
+                : pulseElapsed < rotationDuration + extensionDuration + fireDuration
+                  ? rotationDuration + extensionDuration + fireDuration - pulseElapsed
+                  : pulseCycle - pulseElapsed
           ctx.fillStyle = 'rgba(28, 25, 23, 0.84)'
           ctx.fillRect(center.x - 135, center.y + 38, 270, 20)
           ctx.fillStyle = '#FDE68A'
           ctx.font = 'bold 10px monospace'
           ctx.textAlign = 'center'
-          const warningDuration = t.gridPulseWarningDuration ?? 0.58
-          const travelDuration = t.gridPulseFireDuration ?? 0.4
-          const holdDuration = t.gridPulseGapDuration ?? 0.48
-          const pulseCycle = warningDuration + travelDuration + holdDuration
-          const pulseElapsed = t.activeTimer % pulseCycle
-          const remaining = t.gridPulseFiring
-            ? Math.max(0, travelDuration - Math.max(0, pulseElapsed - warningDuration))
-            : Math.max(0, warningDuration - pulseElapsed)
-          ctx.fillText(
-            `${t.gridPulseFiring ? 'LASERS ADVANCING' : 'NEXT LASER BURST'} • ${remaining.toFixed(1)}s`,
-            center.x,
-            center.y + 52
-          )
+          ctx.fillText(`${modeLabel} • ${timeRemaining.toFixed(1)}s`, center.x, center.y + 52)
         }
         ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
         ctx.fillRect(center.x - 176, center.y - 58, 352, 25)
@@ -7462,6 +7641,26 @@ export function getInferoSpinningVolleyLines(
   })
 }
 
+export function getInferoRotatingSpreadLines(
+  center: Vector2,
+  lanes: NonNullable<BossTelegraphAttack['projectileLanes']>,
+  length: number,
+  rotation: number
+): CosmicLaserWallLine[] {
+  const rayLength = Math.max(0, length)
+  return lanes.map((lane) => {
+    const angle = Math.atan2(lane.directionY, lane.directionX) + rotation
+    return {
+      x1: center.x,
+      y1: center.y,
+      x2: center.x + Math.cos(angle) * rayLength,
+      y2: center.y + Math.sin(angle) * rayLength,
+      width: 12,
+      color: '#FB923C'
+    }
+  })
+}
+
 export function getInferoSpinningGridProjectilePaths(
   center: Vector2,
   angle: number,
@@ -7607,11 +7806,11 @@ export function checkBossTelegraphHit(
   if (telegraph.kind === 'infero_spinning_lattice' && telegraph.gridLines) {
     if (
       !telegraph.hasTriggered ||
-      !telegraph.gridPulseFiring ||
       telegraph.activeTimer >= telegraph.activeDuration
     ) {
       return false
     }
+    if (telegraph.spinMode === 'furnace_volley' && !telegraph.gridPulseFiring) return false
     for (const line of telegraph.gridLines) {
       const dx = line.x2 - line.x1
       const dy = line.y2 - line.y1

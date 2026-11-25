@@ -329,7 +329,7 @@ export const AREA_THREE_BOSSES: EnemiesRow[] = [
     id: MOLTEN_STARFORGE_FINAL_BOSS_ID,
     name: 'Infero Champion',
     category: 'Boss',
-    hp: 700000,
+    hp: 1000000,
     speed: 0.32,
     coin_value: 900,
     description:
@@ -374,7 +374,7 @@ export function getAreaFinalBossHp(areaId: ArenaId): number {
     return 240000
   }
   if (areaId === 'molten_starforge') {
-    return 700000
+    return 1000000
   }
   return getWave15FinalBossHp(areaId)
 }
@@ -589,7 +589,7 @@ export function getWave15BossCombatProfile(areaId: ArenaId): Wave15BossCombatPro
   }
   if (areaId === 'molten_starforge') {
     return {
-      hpMultiplier: 2.8,
+      hpMultiplier: 3,
       damageMultiplier: 1.82,
       damageReduction: 0.22,
       shootCooldownScale: 0.62,

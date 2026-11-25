@@ -2139,7 +2139,7 @@ export class Enemy {
         inferoLaunchX,
         inferoLaunchY,
         angle,
-        turnRate: this.bossPhase >= 3 ? 1.65 : this.bossPhase === 2 ? 1.4 : 1.15,
+        turnRate: this.bossPhase >= 3 ? 0.62 : this.bossPhase === 2 ? 0.52 : 0.42,
         beamCount: 2,
         length: laserLength,
         radius: 18,
@@ -3900,6 +3900,51 @@ export class Enemy {
         ctx.setLineDash([])
         ctx.shadowBlur = 0
         const center = camera.worldToScreen(t.x, t.y)
+        if (t.hasTriggered && t.activeTimer < t.activeDuration) {
+          const spokeCount = this.bossPhase >= 3 ? 7 : 6
+          const projectileSpeed = this.bossPhase >= 3 ? 310 : 275
+          const paths = getInferoSpinningGridProjectilePaths(
+            { x: t.x, y: t.y },
+            t.angle ?? 0,
+            t.pulseCount ?? 0,
+            spokeCount,
+            projectileSpeed
+          )
+          const secondsToVolley = Math.max(0, 0.54 - (t.pulseTimer ?? 0))
+          ctx.globalAlpha = 0.76
+          ctx.setLineDash([5, 7])
+          ctx.lineWidth = 2
+          ctx.strokeStyle = '#FDE68A'
+          ctx.shadowColor = '#FB923C'
+          ctx.shadowBlur = 7
+          for (const path of paths) {
+            if (path.length < 2) continue
+            const first = camera.worldToScreen(path[0].x, path[0].y)
+            ctx.beginPath()
+            ctx.moveTo(first.x, first.y)
+            for (let pointIndex = 1; pointIndex < path.length; pointIndex++) {
+              const point = camera.worldToScreen(path[pointIndex].x, path[pointIndex].y)
+              ctx.lineTo(point.x, point.y)
+            }
+            ctx.stroke()
+            const endpoint = camera.worldToScreen(path[path.length - 1].x, path[path.length - 1].y)
+            ctx.setLineDash([])
+            ctx.fillStyle = '#FEF3C7'
+            ctx.beginPath()
+            ctx.arc(endpoint.x, endpoint.y, 3.2, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.setLineDash([5, 7])
+          }
+          ctx.setLineDash([])
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = 1
+          ctx.fillStyle = 'rgba(28, 25, 23, 0.84)'
+          ctx.fillRect(center.x - 147, center.y + 38, 294, 20)
+          ctx.fillStyle = '#FDE68A'
+          ctx.font = 'bold 10px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(`CURVED FIRE PATHS • NEXT VOLLEY ${secondsToVolley.toFixed(1)}s`, center.x, center.y + 52)
+        }
         ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
         ctx.fillRect(center.x - 176, center.y - 58, 352, 25)
         ctx.fillStyle = t.hasTriggered ? '#FEF08A' : '#FDBA74'
@@ -6368,19 +6413,45 @@ export function getInferoSpinningLaserLines(
   angle: number,
   length: number
 ): CosmicLaserWallLine[] {
-  const halfLength = Math.max(0, length) / 2
+  const rayLength = Math.max(0, length)
   return [0, 1].map((beamIndex) => {
-    const beamAngle = angle + beamIndex * (Math.PI / 2)
-    const dx = Math.cos(beamAngle) * halfLength
-    const dy = Math.sin(beamAngle) * halfLength
+    const beamAngle = angle + beamIndex * Math.PI
+    const dx = Math.cos(beamAngle) * rayLength
+    const dy = Math.sin(beamAngle) * rayLength
     return {
-      x1: center.x - dx,
-      y1: center.y - dy,
+      x1: center.x,
+      y1: center.y,
       x2: center.x + dx,
       y2: center.y + dy,
       width: 22,
       color: '#F97316'
     }
+  })
+}
+
+export function getInferoSpinningGridProjectilePaths(
+  center: Vector2,
+  angle: number,
+  pulseIndex: number,
+  spokeCount: number,
+  speed: number,
+  duration = 1.25
+): Vector2[][] {
+  const step = 0.08
+  return Array.from({ length: spokeCount }, (_, index) => {
+    const turnRate = index % 2 === 0 ? 0.38 : -0.38
+    let directionAngle = angle + pulseIndex * 0.31 + (index / spokeCount) * Math.PI * 2
+    let x = center.x
+    let y = center.y
+    const points: Vector2[] = [{ x, y }]
+    for (let elapsed = 0; elapsed < duration; elapsed += step) {
+      const dt = Math.min(step, duration - elapsed)
+      directionAngle += turnRate * dt
+      x += Math.cos(directionAngle) * speed * dt
+      y += Math.sin(directionAngle) * speed * dt
+      points.push({ x, y })
+    }
+    return points
   })
 }
 

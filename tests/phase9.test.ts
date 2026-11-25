@@ -1865,7 +1865,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.update(0.25, player)
     const rotatedLine = attack.gridLines![0]
     const rotatedAngle = Math.atan2(rotatedLine.y2 - rotatedLine.y1, rotatedLine.x2 - rotatedLine.x1)
-    assert.ok(Math.abs(Math.abs(rotatedAngle - startAngle) - (Math.PI * 2) / 3) < 0.25)
+    let rotationDelta = rotatedAngle - startAngle
+    while (rotationDelta > Math.PI) rotationDelta -= Math.PI * 2
+    while (rotationDelta < -Math.PI) rotationDelta += Math.PI * 2
+    assert.ok(Math.abs(rotationDelta - (Math.PI * 2) / 3) < 0.25)
     assert.ok(Math.hypot(rotatedLine.x2 - rotatedLine.x1, rotatedLine.y2 - rotatedLine.y1) < 200)
 
     boss.update(0.55, player)

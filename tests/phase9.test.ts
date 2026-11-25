@@ -1491,7 +1491,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getInferoChampionAttackKind(2, 3), 'inferno_spear_volley')
     assert.equal(getInferoChampionAttackKind(3, 3), getInferoChampionAttackKind(2, 3))
     for (const phase of [1, 2]) {
-      const cycle = Array.from({ length: phase === 2 ? 8 : 7 }, (_, index) =>
+      const cycle = Array.from({ length: phase === 2 ? 9 : 7 }, (_, index) =>
         getInferoChampionAttackKind(phase, index)
       )
       assert.deepEqual(
@@ -1503,7 +1503,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
           'infero_underflame_swoops',
           'infero_aimed_ram',
           'infero_rebound_lances',
-          ...(phase === 2 ? ['infero_orbiting_lances'] : [])
+          ...(phase === 2 ? ['infero_orbiting_lances', 'infero_spear_cascade'] : [])
         ])
       )
       assert.equal(cycle.filter((kind) => kind === 'infero_aimed_ram').length, 2)
@@ -1777,6 +1777,58 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(orbitingLance.speed >= 860)
   })
 
+  it('reclaims Infero’s spear, throws it across the arena, and fans side spears from its shaft', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.bossPhase = 2
+    boss.specialCooldown = 100
+    boss.shootCooldown = 100
+    boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1300 })
+
+    const attack = boss.spawnTelegraphedAttack('infero_spear_cascade')!
+    assert.equal(attack.sideSpearCount, 4)
+    assert.ok(attack.sideSpearInterval! > 0)
+    assert.equal(attack.gridLines?.length, 1)
+    assert.equal(checkBossTelegraphHit(attack, {
+      x: (attack.gridLines![0].x1 + attack.gridLines![0].x2) / 2,
+      y: attack.gridLines![0].y1,
+      radius: 15
+    }), false, 'the crossing spear path stays a safe warning until the projectile arrives')
+
+    for (let frame = 0; frame < 180 && !attack.hasTriggered; frame++) boss.update(0.05, player)
+    assert.equal(attack.hasTriggered, true)
+    assert.ok(
+      Math.abs(boss.getCenter().x - attack.inferoLaunchX!) < 50,
+      'Infero quickly reaches the edge before throwing'
+    )
+    const mainSpear = boss.projectiles.find((projectile) => projectile.width === 84)!
+    assert.ok(mainSpear)
+    assert.equal(mainSpear.inferoSpearShardsRemaining, 4)
+
+    for (let frame = 0; frame < 8 && boss.projectiles.filter((projectile) => projectile.width === 26).length < 2; frame++) {
+      boss.update(0.05, player)
+    }
+    const firstSideSpears = boss.projectiles.filter((projectile) => projectile.width === 26)
+    assert.equal(firstSideSpears.length, 2)
+    assert.ok(firstSideSpears.every((projectile) =>
+      projectile.inferoLancePhase === 'aiming' &&
+      projectile.inferoLanceTargetX !== undefined &&
+      projectile.inferoLanceTargetY !== undefined &&
+      Math.abs(projectile.direction.y) > 0.99
+    ))
+    for (let frame = 0; frame < 10; frame++) boss.update(0.05, player)
+    assert.ok(firstSideSpears.every((projectile) => projectile.inferoLancePhase === 'launched'))
+  })
+
   it('keeps Infero’s original spinning lances and curved fire grid in Phase 1', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
@@ -1980,8 +2032,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(boss.telegraphs.includes(furnaceAttack), false)
     const sun = boss.telegraphs.find((attack) => attack.kind === 'infero_solar_core')
     assert.ok(sun, 'the sun core should remain after the boss exits it')
-    assert.ok(sun!.gridPulseCount === 2 || sun!.gridPulseCount === 3)
+    assert.ok(sun!.gridPulseCount === 4 || sun!.gridPulseCount === 5)
     assert.equal(sun!.spinMode, 'furnace_volley')
+    assert.equal(sun!.gridPulseGapDuration, 0.2)
     assert.equal(sun!.x, GAME_ARENA_SIZE / 2)
     assert.equal(sun!.y, GAME_ARENA_SIZE / 2)
 
@@ -1998,6 +2051,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_rebound_lances')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_orbiting_lances')
+    assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_spear_cascade')
   })
 
   it('swoops Infero under the player three or four times with dodgeable fire columns', () => {

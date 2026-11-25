@@ -97,6 +97,9 @@ export interface EnemyProjectile {
   inferoOrbitRadius?: number
   inferoOrbitSpeed?: number
   inferoOrbitDuration?: number
+  inferoSpearShardTimer?: number
+  inferoSpearShardsRemaining?: number
+  inferoSpearShardInterval?: number
   trailTimer?: number
   trailParticles?: Array<{
     x: number
@@ -156,6 +159,7 @@ export type BossAttackKind =
   | 'infero_aimed_ram'
   | 'infero_rebound_lances'
   | 'infero_orbiting_lances'
+  | 'infero_spear_cascade'
 
 export type Wave15BossIdentity =
   | 'omega_overlord'
@@ -261,6 +265,8 @@ export interface BossTelegraphAttack {
   lanceMoveTargetY?: number
   lanceMoveDuration?: number
   orbitDuration?: number
+  sideSpearCount?: number
+  sideSpearInterval?: number
   swoopCount?: number
   swoopIndex?: number
   swoopEndX?: number
@@ -1053,6 +1059,7 @@ export class Enemy {
             t.kind === 'inferno_spear_volley' ||
             t.kind === 'infero_spinning_lattice' ||
             t.kind === 'infero_orbiting_lances' ||
+            t.kind === 'infero_spear_cascade' ||
             t.kind === 'infero_underflame_swoops' ||
             t.kind === 'cosmic_portal_lunge' ||
             t.kind === 'cosmic_orb_barrage'
@@ -1229,7 +1236,8 @@ export class Enemy {
         (attack) =>
           (attack.kind === 'infero_underflame_swoops' && attack.hasTriggered) ||
           attack.kind === 'infero_aimed_ram' ||
-          (attack.kind === 'infero_rebound_lances' && attack.hasTriggered)
+          (attack.kind === 'infero_rebound_lances' && attack.hasTriggered) ||
+          (attack.kind === 'infero_spear_cascade' && attack.hasTriggered)
       )
     ) {
       this.velocity = Vector2.zero()
@@ -1241,6 +1249,7 @@ export class Enemy {
     const positioningAttack = this.telegraphs.find(
       (attack) =>
         (attack.kind === 'inferno_spear_volley' ||
+          attack.kind === 'infero_spear_cascade' ||
           attack.kind === 'infero_spinning_lattice' ||
           (attack.kind === 'infero_underflame_swoops' && !attack.hasTriggered) ||
           (attack.kind === 'infero_rebound_lances' && !attack.hasTriggered)) &&
@@ -1318,7 +1327,9 @@ export class Enemy {
     const moveSpeed = this.baseSpeed * (
       positioningAttack?.kind === 'inferno_spear_volley'
         ? 6
-        : positioningAttack?.kind === 'infero_underflame_swoops'
+        : positioningAttack?.kind === 'infero_spear_cascade'
+          ? 8
+          : positioningAttack?.kind === 'infero_underflame_swoops'
           ? 2.4
           : positioningAttack?.kind === 'infero_rebound_lances'
             ? 5.5
@@ -2180,7 +2191,8 @@ export class Enemy {
           'infero_aimed_ram',
           'infero_rebound_lances',
           'infero_aimed_ram',
-          'infero_orbiting_lances'
+          'infero_orbiting_lances',
+          'infero_spear_cascade'
         ]
         kind = emergedCycle[this.inferoSunAttackIndex++ % emergedCycle.length]
       } else {
@@ -2673,6 +2685,69 @@ export class Enemy {
         pulseTimer: 0,
         pulseCount: 0,
         warningLabel: `BLAZING SPEAR BARRAGE // ${projectileCount} SPEARS`,
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+      this.inferoHoverTarget = { x: inferoLaunchX, y: inferoLaunchY }
+      this.inferoHoverRetargetTimer =
+        telegraph.chargeDuration + telegraph.activeDuration + 1.2
+    } else if (kind === 'infero_spear_cascade' && this.isInferoChampion && this.bossPhase >= 2) {
+      const sideMode: ClosingSideLaserMode = Math.random() < 0.5 ? 'left' : 'right'
+      const view = this.getInferoViewportBounds()
+      const centerLimits = this.getInferoCenterLimits()
+      const directionX = sideMode === 'left' ? 1 : -1
+      const startX = sideMode === 'left' ? view.left + 16 : view.right - 16
+      const endX = sideMode === 'left' ? view.right - 16 : view.left + 16
+      const inferoLaunchX =
+        sideMode === 'left' ? centerLimits.x.min + 46 : centerLimits.x.max - 46
+      const inferoLaunchY = Math.max(
+        view.top + 56,
+        Math.min(view.bottom - 56, targetCenter.y + (Math.random() - 0.5) * 220)
+      )
+      const sideSpearCount = 4
+      const spearSpeed = 820
+      const horizontalDistance = Math.abs(endX - startX)
+      const sideSpearInterval = Math.max(
+        0.2,
+        Math.min(0.48, horizontalDistance / (spearSpeed * (sideSpearCount + 1)))
+      )
+      const projectileLanes = [{
+        x: startX,
+        y: inferoLaunchY,
+        directionX,
+        directionY: 0,
+        delay: 0
+      }]
+      telegraph = {
+        id,
+        kind,
+        x: bossCenter.x,
+        y: bossCenter.y,
+        sideMode,
+        radius: 16,
+        inferoLaunchX,
+        inferoLaunchY,
+        projectileCount: 1,
+        projectileLanes,
+        gridLines: [{
+          x1: startX,
+          y1: inferoLaunchY,
+          x2: endX,
+          y2: inferoLaunchY,
+          width: 4,
+          color: '#FB923C'
+        }],
+        sideSpearCount,
+        sideSpearInterval,
+        chargeTimer: 0,
+        chargeDuration:
+          Math.hypot(bossCenter.x - inferoLaunchX, bossCenter.y - inferoLaunchY) /
+            Math.max(1, this.baseSpeed * 8) +
+          0.48,
+        activeTimer: 0,
+        activeDuration: horizontalDistance / spearSpeed + 0.9,
+        damage: Math.round(38 * Math.max(1, this.damageScale)),
+        warningLabel: 'RECLAIMING SPEAR // WATCH THE CROSS-LANE',
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -3285,7 +3360,8 @@ export class Enemy {
         infero_underflame_swoops: 'UNDERFLAME DIVE // WATCH FOR THE FIRE COLUMN',
         infero_aimed_ram: 'INFERNO RAM // DODGE THE LOCKED LINE',
         infero_rebound_lances: 'EMBER LANCE FAN // WATCH FOR THE RE-THROW',
-        infero_orbiting_lances: 'EMBER ORBIT // DODGE WHEN THE LANCES LOCK'
+        infero_orbiting_lances: 'EMBER ORBIT // DODGE WHEN THE LANCES LOCK',
+        infero_spear_cascade: 'RECLAIMED BLAZING SPEAR // DODGE THE SIDE SPEARS'
       }
       telegraph.warningLabel =
         kind === 'inferno_spear_volley'
@@ -3340,6 +3416,68 @@ export class Enemy {
       trailTimer: 0,
       trailParticles: []
     })
+  }
+
+  private launchInferoSideSpear(attack: BossTelegraphAttack): void {
+    const lane = attack.projectileLanes?.[0]
+    if (!lane) return
+    this.projectiles.push({
+      x: attack.inferoLaunchX ?? lane.x,
+      y: attack.inferoLaunchY ?? lane.y,
+      width: 84,
+      height: 22,
+      speed: 820,
+      direction: Vector2.normalize({ x: lane.directionX, y: lane.directionY }),
+      damage: attack.damage,
+      color: '#FDE047',
+      lifetime: 0,
+      maxLifetime: 7,
+      isBlazingSpear: true,
+      inferoSpearShardTimer: 0,
+      inferoSpearShardsRemaining: attack.sideSpearCount ?? 4,
+      inferoSpearShardInterval: attack.sideSpearInterval ?? 0.32,
+      trailTimer: 0,
+      trailParticles: []
+    })
+  }
+
+  private launchInferoSpearSideShards(parent: EnemyProjectile): void {
+    const forwardAngle = Math.atan2(parent.direction.y, parent.direction.x)
+    const view = this.getInferoViewportBounds()
+    const rayLength = Math.max(480, (view.bottom - view.top) * 0.8)
+    for (const side of [-1, 1]) {
+      const angle = forwardAngle + side * (Math.PI / 2)
+      const direction = { x: Math.cos(angle), y: Math.sin(angle) }
+      const targetX = Math.max(
+        view.left + 12,
+        Math.min(view.right - 12, parent.x + direction.x * rayLength)
+      )
+      const targetY = Math.max(
+        view.top + 12,
+        Math.min(view.bottom - 12, parent.y + direction.y * rayLength)
+      )
+      this.projectiles.push({
+        x: parent.x,
+        y: parent.y,
+        width: 26,
+        height: 10,
+        speed: 0,
+        direction,
+        damage: Math.max(14, Math.round(parent.damage * 0.65)),
+        color: side < 0 ? '#FB923C' : '#FDE047',
+        lifetime: 0,
+        maxLifetime: 6,
+        isBlazingSpear: true,
+        inferoLancePhase: 'aiming',
+        inferoLancePhaseTimer: 0,
+        inferoLanceAimDuration: 0.38,
+        inferoLanceLaunchSpeed: 570,
+        inferoLanceTargetX: targetX,
+        inferoLanceTargetY: targetY,
+        trailTimer: 0,
+        trailParticles: []
+      })
+    }
   }
 
   private launchInferoSpinningGridVolley(
@@ -3401,11 +3539,11 @@ export class Enemy {
   private createInferoSolarCoreTelegraph(): BossTelegraphAttack {
     const center = this.getInferoArenaCenter()
     const view = this.getInferoViewportBounds()
-    const volleyCount = 2 + Math.floor(Math.random() * 2)
-    const rotationDuration = 0.75
+    const volleyCount = 4 + Math.floor(Math.random() * 2)
+    const rotationDuration = 0.62
     const extensionDuration = 0.24
     const fireDuration = 0.46
-    const gapDuration = 0.36
+    const gapDuration = 0.2
     const attack: BossTelegraphAttack = {
       id: `infero_solar_core_${Date.now()}_${this.specialAttackCounter}`,
       kind: 'infero_solar_core',
@@ -3826,7 +3964,8 @@ export class Enemy {
         t.chargeTimer += deltaTime
         const needsInferoPosition =
           t.kind === 'infero_underflame_swoops' ||
-          t.kind === 'infero_rebound_lances'
+          t.kind === 'infero_rebound_lances' ||
+          t.kind === 'infero_spear_cascade'
         const inferoHasReachedLaunchPoint =
           !needsInferoPosition ||
           Math.hypot(
@@ -3874,6 +4013,8 @@ export class Enemy {
             this.launchInferoReboundLances(t, this.getCenter())
           } else if (t.kind === 'infero_orbiting_lances' && targetCenter) {
             this.launchInferoOrbitingLances(t, targetCenter)
+          } else if (t.kind === 'infero_spear_cascade') {
+            this.launchInferoSideSpear(t)
           } else if (t.kind === 'infero_underflame_swoops') {
             t.swoopIndex = 0
             const positionAtDiveStart = this.getCenter()
@@ -4162,6 +4303,10 @@ export class Enemy {
                 ? `BLAZING SPEAR ${shotsFired + 2}/${t.projectileCount}`
                 : 'FINAL BLAZING SPEAR'
           }
+        } else if (t.kind === 'infero_spear_cascade') {
+          t.x = bossCenter.x
+          t.y = bossCenter.y
+          t.warningLabel = 'CROSS-LANE SPEAR // SIDE SPEARS INBOUND'
         } else if (t.kind === 'infero_spinning_lattice') {
           t.x = bossCenter.x
           t.y = bossCenter.y
@@ -4385,6 +4530,19 @@ export class Enemy {
       }
 
       proj.lifetime += deltaTime
+      if ((proj.inferoSpearShardsRemaining ?? 0) > 0) {
+        proj.inferoSpearShardTimer =
+          (proj.inferoSpearShardTimer ?? proj.inferoSpearShardInterval ?? 0.32) + deltaTime
+        const interval = Math.max(0.08, proj.inferoSpearShardInterval ?? 0.32)
+        while (
+          (proj.inferoSpearShardsRemaining ?? 0) > 0 &&
+          (proj.inferoSpearShardTimer ?? 0) >= interval
+        ) {
+          proj.inferoSpearShardTimer = (proj.inferoSpearShardTimer ?? 0) - interval
+          proj.inferoSpearShardsRemaining = (proj.inferoSpearShardsRemaining ?? 1) - 1
+          this.launchInferoSpearSideShards(proj)
+        }
+      }
 
       if (proj.isBlazingSpear || proj.isInferoFireball) {
         const trail = (proj.trailParticles ??= [])
@@ -4850,7 +5008,101 @@ export class Enemy {
         ? Math.max(0, Math.min(1, t.activeTimer / t.activeDuration))
         : 0
 
-      if (t.kind === 'inferno_spear_volley' && t.projectileLanes) {
+      if (t.kind === 'infero_spear_cascade' && t.projectileLanes?.[0]) {
+        const lane = t.projectileLanes[0]
+        const mainPath = t.gridLines?.[0]
+        if (!mainPath) continue
+        const start = camera.worldToScreen(mainPath.x1, mainPath.y1)
+        const end = camera.worldToScreen(mainPath.x2, mainPath.y2)
+        const view = this.getInferoViewportBounds()
+        const top = camera.worldToScreen(lane.x, view.top + 12)
+        const bottom = camera.worldToScreen(lane.x, view.bottom - 12)
+        const warningAlpha = t.hasTriggered
+          ? Math.max(0.16, 0.58 - impactProgress * 0.38)
+          : 0.35 + chargeProgress * 0.42
+        ctx.save()
+        ctx.lineCap = 'round'
+        ctx.setLineDash([15, 10])
+        ctx.strokeStyle = `rgba(253, 224, 71, ${warningAlpha})`
+        ctx.lineWidth = t.hasTriggered ? 3 : 2.5
+        ctx.shadowColor = '#F97316'
+        ctx.shadowBlur = 12
+        ctx.beginPath()
+        ctx.moveTo(start.x, start.y)
+        ctx.lineTo(end.x, end.y)
+        ctx.stroke()
+
+        const shardCount = t.sideSpearCount ?? 4
+        for (let index = 0; index < shardCount; index++) {
+          const progress = (index + 1) / (shardCount + 1)
+          const markerX = start.x + (end.x - start.x) * progress
+          const markerY = start.y + (end.y - start.y) * progress
+          const halfGuide = 92 * camera.zoom
+          ctx.globalAlpha = warningAlpha * 0.78
+          ctx.strokeStyle = '#FDBA74'
+          ctx.lineWidth = 1.7
+          ctx.setLineDash([7, 7])
+          ctx.beginPath()
+          ctx.moveTo(markerX, markerY - halfGuide)
+          ctx.lineTo(markerX, markerY + halfGuide)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.fillStyle = '#FEF08A'
+          ctx.beginPath()
+          ctx.arc(markerX, markerY, 5 * camera.zoom, 0, Math.PI * 2)
+          ctx.fill()
+        }
+
+        if (!t.hasTriggered) {
+          const bossPoint = camera.worldToScreen(
+            t.inferoLaunchX ?? t.x,
+            t.inferoLaunchY ?? t.y
+          )
+          const retrievalProgress = Math.max(
+            0,
+            Math.min(1, t.chargeTimer / Math.max(0.1, t.chargeDuration - 0.48))
+          )
+          const returnX = end.x + (bossPoint.x - end.x) * retrievalProgress
+          const returnY = start.y + (bossPoint.y - start.y) * retrievalProgress
+          const returnAngle = t.sideMode === 'left' ? Math.PI : 0
+          ctx.setLineDash([])
+          ctx.globalAlpha = 0.94
+          ctx.save()
+          ctx.translate(returnX, returnY)
+          ctx.rotate(returnAngle)
+          ctx.fillStyle = '#FDE047'
+          ctx.shadowBlur = 15
+          ctx.beginPath()
+          ctx.moveTo(17, 0)
+          ctx.lineTo(-8, -5)
+          ctx.lineTo(-5, 0)
+          ctx.lineTo(-8, 5)
+          ctx.closePath()
+          ctx.fill()
+          ctx.strokeStyle = '#FFF7ED'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(-17, 0)
+          ctx.lineTo(7, 0)
+          ctx.stroke()
+          ctx.restore()
+        }
+
+        ctx.globalAlpha = 1
+        const labelY = Math.max(30, start.y - 30)
+        ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
+        ctx.fillRect((start.x + end.x) / 2 - 176, labelY - 17, 352, 24)
+        ctx.fillStyle = t.hasTriggered ? '#FEF08A' : '#FEF3C7'
+        ctx.font = 'bold 12px monospace'
+        ctx.textAlign = 'center'
+        const warningText = t.hasTriggered
+          ? t.warningLabel ?? 'CROSS-LANE SPEAR'
+          : t.chargeTimer < t.chargeDuration - 0.48
+            ? 'SPEAR RECALL // SIDE SPEARS WILL FAN OUT'
+            : 'SPEAR RECLAIMED // DODGE THE CROSS-LANE'
+        ctx.fillText(warningText, (start.x + end.x) / 2, labelY)
+        ctx.restore()
+      } else if (t.kind === 'inferno_spear_volley' && t.projectileLanes) {
         const remainingAlpha = t.hasTriggered ? Math.max(0.12, 0.72 - impactProgress * 0.6) : 0.28 + chargeProgress * 0.48
         const lines = t.gridLines ?? []
         const nextSpearIndex = Math.min(t.pulseCount ?? 0, Math.max(0, lines.length - 1))
@@ -6958,7 +7210,15 @@ export class Enemy {
             ctx.ellipse(r * 0.19, -r * 0.53, r * 0.08, r * 0.045, 0.12, 0, Math.PI * 2)
             ctx.fill()
 
-            if (this.telegraphs.some((telegraph) => telegraph.kind === 'inferno_spear_volley')) {
+            if (
+              this.telegraphs.some(
+                (telegraph) =>
+                  telegraph.kind === 'inferno_spear_volley' ||
+                  (telegraph.kind === 'infero_spear_cascade' &&
+                    !telegraph.hasTriggered &&
+                    telegraph.chargeTimer >= telegraph.chargeDuration - 0.45)
+              )
+            ) {
               ctx.save()
               ctx.translate(r * 0.38, r * 0.18)
               ctx.rotate(0.12)
@@ -8021,7 +8281,8 @@ export function getInferoChampionAttackKind(phase: number, cycleIndex: number): 
       'infero_underflame_swoops',
       'infero_rebound_lances',
       'infero_aimed_ram',
-      'infero_orbiting_lances'
+      'infero_orbiting_lances',
+      'infero_spear_cascade'
     ]
   }
   const safePhase = Math.max(1, Math.min(2, Math.floor(phase)))
@@ -8068,7 +8329,7 @@ export function checkBossTelegraphHit(
   telegraph: BossTelegraphAttack,
   targetCircle: { x: number; y: number; radius: number }
 ): boolean {
-  if (telegraph.kind === 'bullet_hell') {
+  if (telegraph.kind === 'bullet_hell' || telegraph.kind === 'infero_spear_cascade') {
     return false // Projectiles are checked via enemy.projectiles collisions
   }
   if (

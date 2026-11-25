@@ -6352,6 +6352,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'astral_targeted_lasers' ||
                   telegraph.kind === 'infero_spinning_lattice' ||
                   telegraph.kind === 'infero_underflame_swoops' ||
+                  telegraph.kind === 'infero_aimed_ram' ||
                   telegraph.kind === 'cosmic_portal_lunge' ||
                   telegraph.kind === 'cosmic_orb_barrage'
 

@@ -1489,7 +1489,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
           'tracking_strikes',
           'inferno_spear_volley',
           'infero_spinning_lattice',
-          'infero_underflame_swoops'
+          'infero_underflame_swoops',
+          'infero_aimed_ram'
         ])
       )
     }
@@ -1554,6 +1555,54 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }
     assert.ok(boss.projectiles.every((projectile) => projectile.isBlazingSpear))
     assert.ok(boss.projectiles.some((projectile) => (projectile.trailParticles?.length ?? 0) > 0))
+  })
+
+  it('locks Infero’s ram direction at the player and never tracks during the charge', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.cutsceneDelayTimer = 0
+    boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1450 })
+
+    const attack = boss.spawnTelegraphedAttack('infero_aimed_ram')!
+    const initialBossCenter = boss.getCenter()
+    const lockedAim = player.getCenter()
+    const targetX = attack.ramTargetX!
+    const targetY = attack.ramTargetY!
+    assert.equal(attack.hasTriggered, false)
+    assert.ok(Math.hypot(targetX - initialBossCenter.x, targetY - initialBossCenter.y) > 300)
+
+    player.x = 1700
+    player.y = 1500
+    for (let frame = 0; frame < 20 && !attack.hasTriggered; frame++) boss.update(0.05, player)
+    assert.equal(attack.hasTriggered, true)
+    assert.deepEqual(
+      { x: attack.ramAimX, y: attack.ramAimY },
+      { x: lockedAim.x, y: lockedAim.y },
+      'the warning remains locked to the player position from the start'
+    )
+    assert.deepEqual(
+      { x: attack.ramTargetX, y: attack.ramTargetY },
+      { x: targetX, y: targetY },
+      'moving the player does not redirect the ram'
+    )
+    assert.deepEqual(boss.getCenter(), initialBossCenter, 'the boss holds position during the warning')
+
+    for (let frame = 0; frame < 30 && boss.telegraphs.includes(attack); frame++) {
+      boss.update(0.05, player)
+    }
+    const finalBossCenter = boss.getCenter()
+    assert.ok(Math.hypot(finalBossCenter.x - targetX, finalBossCenter.y - targetY) < 2)
+    assert.ok(finalBossCenter.x >= 0 && finalBossCenter.x <= GAME_ARENA_SIZE)
+    assert.ok(finalBossCenter.y >= 0 && finalBossCenter.y <= GAME_ARENA_SIZE)
   })
 
   it('keeps Infero visible when camera bounds change and uses rotating, damaging lasers with curved fire grids', () => {
@@ -1644,6 +1693,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(attack.swoopCount === 3 || attack.swoopCount === 4)
     assert.equal(attack.fireColumns?.length, 1)
     const firstColumn = attack.fireColumns![0]
+    assert.equal(firstColumn.y, 1450, 'the column launches from the visible bottom edge')
+    assert.equal(firstColumn.topY, 500)
+    assert.equal(firstColumn.active, 3, 'each column burns for about three seconds')
     assert.equal(firstColumn.hasIgnited, false)
     assert.equal(checkInferoFireColumnHit(firstColumn, {
       x: firstColumn.x, y: firstColumn.y, radius: 20
@@ -1670,16 +1722,17 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }), true, 'the fire column becomes damaging only after its warning')
     for (let frame = 0; frame < 4; frame++) boss.update(0.05, player)
     assert.equal(checkInferoFireColumnHit(firstColumn, {
-      x: firstColumn.x, y: 10, radius: 5
+      x: firstColumn.x, y: firstColumn.topY + 10, radius: 5
     }), true, 'the blazing beam reaches the top of the arena')
     assert.equal(checkInferoFireColumnHit(firstColumn, {
-      x: firstColumn.x + firstColumn.width, y: 10, radius: 5
+      x: firstColumn.x + firstColumn.width, y: firstColumn.topY + 10, radius: 5
     }), false, 'players can dodge outside the indicated beam lane')
-    for (let frame = 0; frame < 7; frame++) boss.update(0.05, player)
+    for (let frame = 0; frame < 42; frame++) boss.update(0.05, player)
     assert.equal(checkInferoFireColumnHit(firstColumn, {
       x: firstColumn.x, y: firstColumn.y, radius: 20
     }), true, 'the column remains active for its extended burn window')
-    for (let frame = 0; frame < 4; frame++) boss.update(0.05, player)
+    for (let frame = 0; frame < 8; frame++) boss.update(0.05, player)
+    for (let frame = 0; frame < 6; frame++) boss.update(0.05, player)
     assert.equal(checkInferoFireColumnHit(firstColumn, {
       x: firstColumn.x, y: firstColumn.y, radius: 20
     }), false, 'the column clears after its active window')
@@ -1689,7 +1742,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     assert.ok(separation >= 120, 'Infero should pass below rather than touch the player')
 
-    const remainingPasses = (attack.swoopCount ?? 3) * (attack.swoopInterval ?? 2)
+    const remainingPasses = (attack.swoopCount ?? 3) * (attack.swoopInterval ?? 3.4)
     for (let frame = 0; frame < Math.ceil(remainingPasses / 0.05); frame++) {
       if (!boss.telegraphs.includes(attack)) break
       boss.update(0.05, player)

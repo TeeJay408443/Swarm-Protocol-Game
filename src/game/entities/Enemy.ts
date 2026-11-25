@@ -186,7 +186,7 @@ const INFERO_FIRE_COLUMN_HOLD_SECONDS = 0.28
 const INFERO_FIRE_COLUMN_WARNING_SECONDS = 0.48
 const INFERO_FIRE_COLUMN_ACTIVE_SECONDS = 3
 const INFERO_UNDERFLAME_SWOOP_SECONDS = 0.5
-const INFERO_UNDERFLAME_INTERVAL_SECONDS = 3.4
+const INFERO_UNDERFLAME_INTERVAL_SECONDS = 2.4
 
 export interface BossTelegraphAttack {
   id: string
@@ -7027,6 +7027,7 @@ export function getInferoChampionAttackKind(phase: number, cycleIndex: number): 
   const cycles: Record<number, BossAttackKind[]> = {
       1: [
         'inferno_spear_volley',
+        'infero_aimed_ram',
         'tracking_strikes',
         'infero_spinning_lattice',
         'infero_underflame_swoops',
@@ -7035,15 +7036,17 @@ export function getInferoChampionAttackKind(phase: number, cycleIndex: number): 
       2: [
         'tracking_strikes',
         'infero_spinning_lattice',
-        'infero_underflame_swoops',
+        'infero_aimed_ram',
         'inferno_spear_volley',
+        'infero_underflame_swoops',
         'infero_aimed_ram'
       ],
       3: [
         'infero_spinning_lattice',
         'inferno_spear_volley',
-        'tracking_strikes',
+        'infero_aimed_ram',
         'infero_underflame_swoops',
+        'tracking_strikes',
         'infero_aimed_ram'
       ]
   }

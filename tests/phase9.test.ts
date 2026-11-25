@@ -2022,11 +2022,21 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.notDeepEqual(firstPortal, initialPosition, 'the portal opens at a remote arena location')
     boss.update(0.25, player)
     assert.deepEqual(boss.getCenter(), initialPosition, 'Infero waits briefly for the portal to open')
+    player.x += 100
+    player.y += 100
+    assert.deepEqual(boss.inferoDesperationLockedTarget, lockedTarget, 'the warning locks aim when the portal opens')
     boss.update(0.05, player)
     assert.deepEqual(boss.getCenter(), firstPortal, 'teleportation occurs at the launch frame')
     assert.ok(Math.hypot(boss.velocity.x, boss.velocity.y) > 1000, 'the ram starts simultaneously')
     const launchVelocity = { ...boss.velocity }
-    assert.ok(Math.hypot(launchVelocity.x, launchVelocity.y) >= 1699, 'desperation rams move faster')
+    const launchSpeed = Math.hypot(launchVelocity.x, launchVelocity.y)
+    assert.ok(Math.abs(launchSpeed - 1120) < 0.01, 'desperation rams use the slower speed')
+    assert.ok(Math.abs(
+      launchVelocity.x / launchSpeed - (lockedTarget.x - firstPortal.x) / portalDistance
+    ) < 1e-6, 'the charge follows the original warning, not the player’s new position')
+    assert.ok(Math.abs(
+      launchVelocity.y / launchSpeed - (lockedTarget.y - firstPortal.y) / portalDistance
+    ) < 1e-6)
     player.x += 170
     player.y += 120
     boss.update(0.05, player)
@@ -2035,8 +2045,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(boss.takeDamage(500), false, 'the finale cannot be interrupted by more damage')
     let passedLockedTarget = false
     const direction = {
-      x: launchVelocity.x / 1700,
-      y: launchVelocity.y / 1700
+      x: launchVelocity.x / launchSpeed,
+      y: launchVelocity.y / launchSpeed
     }
     for (let frame = 0; frame < 20 && Math.hypot(boss.velocity.x, boss.velocity.y) > 0; frame++) {
       boss.update(0.025, player)

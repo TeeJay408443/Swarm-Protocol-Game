@@ -9,6 +9,12 @@ Inferno Champion must remain alive at zero HP for a ten-second desperation final
 
 **How to apply:** Keep the whiteout and boss finale on the same gameplay timer, including pause behavior. Do not award defeat rewards or activate victory before the full-white frame.
 
+Desperation rams must lock onto the player's position when each portal opens. Neither the warning nor the launched ram should track subsequent movement.
+
+**Why:** The user specifically requested this to make the slower rams more dodgeable.
+
+**How to apply:** Use the same captured target for both the warning and the ram.
+
 The boss's correct displayed name is **Inferno Champion**, not Infero Champion.
 
 **Why:** The user corrected the original typo.

@@ -27,7 +27,7 @@ export const INFERO_DESPERATION_DURATION_SECONDS = 10
 const INFERO_DESPERATION_PORTAL_SECONDS = 0.3
 const INFERO_DESPERATION_RAM_SECONDS = 0.62
 const INFERO_DESPERATION_RECOVERY_SECONDS = 0.18
-const INFERO_DESPERATION_RAM_SPEED = 1700
+const INFERO_DESPERATION_RAM_SPEED = 1120
 
 export type EnemyType =
   | 'Swarm'
@@ -449,6 +449,7 @@ export class Enemy {
   hasCompletedInferoDesperation: boolean = false
   inferoDesperationTimer: number = 0
   inferoDesperationPortalPosition: Vector2 | null = null
+  inferoDesperationLockedTarget: Vector2 | null = null
   private inferoDesperationCycleMode: 'portal' | 'ram' | 'recover' = 'portal'
   private inferoDesperationCycleTimer: number = 0
   private inferoDesperationDirection: Vector2 = { x: 1, y: 0 }
@@ -1392,22 +1393,21 @@ export class Enemy {
     }
 
     this.inferoDesperationCycleTimer += deltaTime
-    const center = this.getCenter()
 
     if (this.inferoDesperationCycleMode === 'portal') {
       this.velocity = Vector2.zero()
       if (!this.inferoDesperationPortalPosition) {
-        this.inferoDesperationPortalPosition = { ...center }
+        this.openInferoDesperationPortal()
       }
 
-      const targetCenter = this.target?.isAlive ? this.target.getCenter() : null
+      const targetCenter = this.inferoDesperationLockedTarget
       const portalCenter = this.inferoDesperationPortalPosition!
       if (targetCenter) {
         this.facingAngle = Math.atan2(targetCenter.y - portalCenter.y, targetCenter.x - portalCenter.x)
       }
 
       if (this.inferoDesperationCycleTimer >= INFERO_DESPERATION_PORTAL_SECONDS) {
-        // Emerge at the remote portal and launch in one frame; aim is then locked.
+        // Emerge and launch at the position marked when the portal first opened.
         this.x = portalCenter.x - this.width / 2
         this.y = portalCenter.y - this.height / 2
         if (targetCenter) {
@@ -1480,6 +1480,7 @@ export class Enemy {
       }
     }
     this.inferoDesperationPortalPosition = { ...portal }
+    this.inferoDesperationLockedTarget = { ...target }
   }
 
   get inferoDesperationWhiteOpacity(): number {
@@ -6904,7 +6905,7 @@ export class Enemy {
       ctx.restore()
       if (this.inferoDesperationCycleMode === 'portal') {
         // Show the destination and intended charge before the simultaneous teleport/ram.
-        const target = this.target?.getCenter()
+        const target = this.inferoDesperationLockedTarget
         if (target) {
           const destination = camera.worldToScreen(target.x, target.y)
           const angle = Math.atan2(destination.y - portal.y, destination.x - portal.x)

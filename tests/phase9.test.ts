@@ -1800,7 +1800,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const spinAttack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
     assert.equal(spinAttack.spinMode, 'furnace_volley')
     assert.ok(spinAttack.beamCount! >= 9 && spinAttack.beamCount! <= 10)
-    assert.equal(spinAttack.gridPulseCount, 5)
+    assert.equal(spinAttack.gridPulseCount, 2)
     assert.equal(spinAttack.gridLines?.length, spinAttack.beamCount)
     assert.ok(spinAttack.damage > spearVolley.damage * 0.75)
     const lanceAttack = boss.spawnTelegraphedAttack('infero_rebound_lances')!
@@ -1833,7 +1833,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }
   })
 
-  it('rotates Infero’s phase-two laser spokes for half a second before extending and firing', () => {
+  it('rotates Infero’s phase-two laser spokes slowly before extending and firing', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
     const boss = new Enemy({
@@ -1850,7 +1850,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.specialCooldown = 100
     boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1300 })
     const attack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
-    assert.equal(attack.gridPulseWarningDuration, 0.5)
+    assert.equal(attack.gridPulseWarningDuration, 0.75)
     assert.equal(attack.gridPulseExtensionDuration, 0.24)
     assert.ok(attack.length! > 900)
     assert.ok(attack.gridLines!.every((line) => Math.hypot(line.x2 - line.x1, line.y2 - line.y1) < 200))
@@ -1865,15 +1865,15 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.update(0.25, player)
     const rotatedLine = attack.gridLines![0]
     const rotatedAngle = Math.atan2(rotatedLine.y2 - rotatedLine.y1, rotatedLine.x2 - rotatedLine.x1)
-    assert.ok(Math.abs(Math.abs(rotatedAngle - startAngle) - Math.PI) < 0.25)
+    assert.ok(Math.abs(Math.abs(rotatedAngle - startAngle) - (Math.PI * 2) / 3) < 0.25)
     assert.ok(Math.hypot(rotatedLine.x2 - rotatedLine.x1, rotatedLine.y2 - rotatedLine.y1) < 200)
 
-    boss.update(0.3, player)
+    boss.update(0.55, player)
     const extendingLine = attack.gridLines![0]
     assert.ok(Math.hypot(extendingLine.x2 - extendingLine.x1, extendingLine.y2 - extendingLine.y1) > startLength)
     assert.equal(attack.gridPulseFiring, false, 'the extending beams remain a safe indicator')
 
-    boss.update(0.25, player)
+    boss.update(0.2, player)
     assert.equal(attack.gridPulseFiring, true, 'damage begins after the beams finish extending')
     const firedLine = attack.gridLines![0]
     assert.ok(Math.hypot(firedLine.x2 - firedLine.x1, firedLine.y2 - firedLine.y1) >= attack.length! * 0.99)
@@ -1882,6 +1882,50 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       y: (firedLine.y1 + firedLine.y2) / 2,
       radius: 12
     }), true)
+  })
+
+  it('emerges Infero after two furnace turns while the sun fires on its own', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.bossPhase = 2
+    boss.specialCooldown = 100
+    boss.shootCooldown = 100
+    boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1300 })
+    const furnaceAttack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
+    assert.equal(furnaceAttack.gridPulseCount, 2)
+
+    for (let frame = 0; frame < 360 && boss.telegraphs.includes(furnaceAttack); frame++) {
+      boss.update(0.05, player)
+    }
+    assert.equal(boss.telegraphs.includes(furnaceAttack), false)
+    const sun = boss.telegraphs.find((attack) => attack.kind === 'infero_solar_core')
+    assert.ok(sun, 'the sun core should remain after the boss exits it')
+    assert.ok(sun!.gridPulseCount === 2 || sun!.gridPulseCount === 3)
+    assert.equal(sun!.spinMode, 'furnace_volley')
+    assert.equal(sun!.x, GAME_ARENA_SIZE / 2)
+    assert.equal(sun!.y, GAME_ARENA_SIZE / 2)
+
+    const bossCenterBefore = boss.getCenter()
+    for (let frame = 0; frame < 25; frame++) boss.update(0.05, player)
+    const bossCenterAfter = boss.getCenter()
+    assert.ok(Math.hypot(bossCenterAfter.x - sun!.x, bossCenterAfter.y - sun!.y) >
+      Math.hypot(bossCenterBefore.x - sun!.x, bossCenterBefore.y - sun!.y))
+    assert.equal(sun!.x, GAME_ARENA_SIZE / 2, 'the sun stays anchored at arena center')
+    assert.equal(sun!.y, GAME_ARENA_SIZE / 2)
+    assert.equal(sun!.gridPulseFiring, true, 'the sun continues firing independently of the boss')
+
+    assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
+    assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
+    assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_rebound_lances')
   })
 
   it('swoops Infero under the player three or four times with dodgeable fire columns', () => {

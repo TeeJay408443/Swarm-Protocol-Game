@@ -147,6 +147,7 @@ export type BossAttackKind =
   | 'astral_targeted_lasers'
   | 'inferno_spear_volley'
   | 'infero_spinning_lattice'
+  | 'infero_solar_core'
   | 'infero_underflame_swoops'
   | 'infero_aimed_ram'
   | 'infero_rebound_lances'
@@ -423,6 +424,8 @@ export class Enemy {
   private astralGridCooldownRemaining: number = 0
   private inferoHoverTarget: Vector2 | null = null
   private inferoHoverRetargetTimer: number = 0
+  private inferoSunEmerged: boolean = false
+  private inferoSunAttackIndex: number = 0
   private visibleWorldBounds: { left: number; right: number; top: number; bottom: number } | null = null
 
   get isInferoChampion(): boolean {
@@ -2165,7 +2168,16 @@ export class Enemy {
           ? 'astral_orbital_grid'
           : forcedKind
     } else if (this.isInferoChampion) {
-      kind = getInferoChampionAttackKind(this.bossPhase, this.specialAttackCounter - 1)
+      if (this.bossPhase >= 2 && this.inferoSunEmerged) {
+        const emergedCycle: BossAttackKind[] = [
+          'infero_aimed_ram',
+          'infero_aimed_ram',
+          'infero_rebound_lances'
+        ]
+        kind = emergedCycle[this.inferoSunAttackIndex++ % emergedCycle.length]
+      } else {
+        kind = getInferoChampionAttackKind(this.bossPhase, this.specialAttackCounter - 1)
+      }
     } else if (this.isWormBoss) {
       if (this.isAstralScourge && this.bossPhase >= 2) {
         kind = getAstralScourgePhaseTwoAttackKind()
@@ -2334,9 +2346,9 @@ export class Enemy {
       )
       const angle = Math.random() * Math.PI * 2
       if (phaseTwo) {
-        const shotCount = 5
+        const shotCount = 2
         const laserCount = 9 + Math.floor(Math.random() * 2)
-        const rotationDuration = 0.5
+        const rotationDuration = 0.75
         const extensionDuration = 0.24
         const fireDuration = 0.46
         const gapDuration = 0.36
@@ -3240,6 +3252,7 @@ export class Enemy {
           telegraph.spinMode === 'classic_spin'
             ? 'FURNACE CROSS // TWO SPINNING LANCES'
             : 'FURNACE CORE // ROTATE, EXTEND, THEN DODGE',
+        infero_solar_core: 'SUN CORE // DODGE THE CENTRAL LASER BURST',
         infero_underflame_swoops: 'UNDERFLAME DIVE // WATCH FOR THE FIRE COLUMN',
         infero_aimed_ram: 'INFERNO RAM // DODGE THE LOCKED LINE',
         infero_rebound_lances: 'EMBER LANCE FAN // WATCH FOR THE RE-THROW'
@@ -3353,6 +3366,92 @@ export class Enemy {
       Math.max(90, this.width * 1.2),
       0
     )
+  }
+
+  private createInferoSolarCoreTelegraph(): BossTelegraphAttack {
+    const center = this.getInferoArenaCenter()
+    const view = this.getInferoViewportBounds()
+    const volleyCount = 2 + Math.floor(Math.random() * 2)
+    const rotationDuration = 0.75
+    const extensionDuration = 0.24
+    const fireDuration = 0.46
+    const gapDuration = 0.36
+    const attack: BossTelegraphAttack = {
+      id: `infero_solar_core_${Date.now()}_${this.specialAttackCounter}`,
+      kind: 'infero_solar_core',
+      x: center.x,
+      y: center.y,
+      angle: Math.random() * Math.PI * 2,
+      spinMode: 'furnace_volley',
+      beamCount: 9 + Math.floor(Math.random() * 2),
+      length: Math.max(
+        900,
+        Math.hypot(view.right - view.left, view.bottom - view.top) * 1.35
+      ),
+      projectileLanes: [],
+      radius: 30,
+      gridLines: [],
+      gridPulseCount: volleyCount,
+      gridPulseIndex: 0,
+      gridPulseWarningDuration: rotationDuration,
+      gridPulseExtensionDuration: extensionDuration,
+      gridPulseFireDuration: fireDuration,
+      gridPulseGapDuration: gapDuration,
+      gridPulseFiring: false,
+      chargeTimer: 0,
+      chargeDuration: 0,
+      activeTimer: 0,
+      activeDuration: volleyCount * (rotationDuration + extensionDuration + fireDuration + gapDuration),
+      damage: Math.round(20 * Math.max(1, this.damageScale)),
+      warningLabel: `SUN CORE // ${volleyCount} MORE VOLLEYS`,
+      hasTriggered: true,
+      hasDamagedPlayer: false
+    }
+    this.randomizeInferoSpinningLaserVolley(attack, center)
+    return attack
+  }
+
+  private updateInferoFurnaceVolley(attack: BossTelegraphAttack, center: Vector2): void {
+    const pulseCount = attack.gridPulseCount ?? 1
+    const rotationDuration = attack.gridPulseWarningDuration ?? 0.75
+    const extensionDuration = attack.gridPulseExtensionDuration ?? 0.24
+    const fireDuration = attack.gridPulseFireDuration ?? 0.46
+    const gapDuration = attack.gridPulseGapDuration ?? 0.36
+    const cycleDuration = rotationDuration + extensionDuration + fireDuration + gapDuration
+    const pulseIndex = Math.min(
+      pulseCount - 1,
+      Math.floor(attack.activeTimer / Math.max(0.001, cycleDuration))
+    )
+    if (pulseIndex !== (attack.gridPulseIndex ?? 0)) {
+      attack.gridPulseIndex = pulseIndex
+      this.randomizeInferoSpinningLaserVolley(attack, center)
+    }
+    const pulseElapsed = Math.max(0, attack.activeTimer - pulseIndex * cycleDuration)
+    const rotationProgress = Math.min(1, pulseElapsed / Math.max(0.001, rotationDuration))
+    const extensionProgress = Math.max(
+      0,
+      Math.min(1, (pulseElapsed - rotationDuration) / Math.max(0.001, extensionDuration))
+    )
+    const isFiring =
+      pulseElapsed >= rotationDuration + extensionDuration &&
+      pulseElapsed < rotationDuration + extensionDuration + fireDuration
+    const shortLength = Math.max(90, this.width * 1.2)
+    const lineLength =
+      shortLength + ((attack.length ?? 1500) - shortLength) * extensionProgress
+    const rotationAngle = pulseElapsed < rotationDuration ? rotationProgress * Math.PI * 2 : 0
+    attack.gridPulseFiring = isFiring
+    attack.gridLines = getInferoRotatingSpreadLines(
+      center,
+      attack.projectileLanes ?? [],
+      lineLength,
+      rotationAngle
+    )
+    const subject = attack.kind === 'infero_solar_core' ? 'SUN CORE' : 'FURNACE CORE'
+    attack.warningLabel = isFiring
+      ? `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — FIRE`
+      : extensionProgress > 0
+        ? `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — EXTENDING`
+        : `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — ROTATING`
   }
 
   private launchInferoReboundLances(
@@ -3508,6 +3607,12 @@ export class Enemy {
             t.hitCooldown = 0
             t.hasDamagedPlayer = false
           }
+        }
+      } else if (t.kind === 'infero_solar_core' && t.hasDamagedPlayer) {
+        t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
+        if (t.hitCooldown >= 0.48) {
+          t.hitCooldown = 0
+          t.hasDamagedPlayer = false
         }
       } else if (t.kind === 'astral_targeted_lasers') {
         if (!t.hasTriggered && targetCenter) {
@@ -3947,51 +4052,10 @@ export class Enemy {
               t.pulseCount = pulseIndex + 1
             }
           } else {
-            const pulseCount = t.gridPulseCount ?? 5
-            const rotationDuration = t.gridPulseWarningDuration ?? 0.5
-            const extensionDuration = t.gridPulseExtensionDuration ?? 0.24
-            const fireDuration = t.gridPulseFireDuration ?? 0.46
-            const gapDuration = t.gridPulseGapDuration ?? 0.36
-            const cycleDuration =
-              rotationDuration + extensionDuration + fireDuration + gapDuration
-            const pulseIndex = Math.min(
-              pulseCount - 1,
-              Math.floor(t.activeTimer / Math.max(0.001, cycleDuration))
-            )
-            if (pulseIndex !== (t.gridPulseIndex ?? 0)) {
-              t.gridPulseIndex = pulseIndex
-              this.randomizeInferoSpinningLaserVolley(t, bossCenter)
-            }
-            const pulseElapsed = Math.max(0, t.activeTimer - pulseIndex * cycleDuration)
-            const rotationProgress = Math.min(1, pulseElapsed / Math.max(0.001, rotationDuration))
-            const extensionProgress = Math.max(
-              0,
-              Math.min(
-                1,
-                (pulseElapsed - rotationDuration) / Math.max(0.001, extensionDuration)
-              )
-            )
-            const isFiring =
-              pulseElapsed >= rotationDuration + extensionDuration &&
-              pulseElapsed < rotationDuration + extensionDuration + fireDuration
-            const shortLength = Math.max(90, this.width * 1.2)
-            const lineLength =
-              shortLength + ((t.length ?? 1500) - shortLength) * extensionProgress
-            const rotationAngle =
-              pulseElapsed < rotationDuration ? rotationProgress * Math.PI * 2 : 0
-            t.gridPulseFiring = isFiring
-            t.gridLines = getInferoRotatingSpreadLines(
-              bossCenter,
-              t.projectileLanes ?? [],
-              lineLength,
-              rotationAngle
-            )
-            t.warningLabel = isFiring
-              ? `FURNACE CORE // VOLLEY ${pulseIndex + 1}/${pulseCount} — FIRE`
-              : extensionProgress > 0
-                ? `FURNACE CORE // VOLLEY ${pulseIndex + 1}/${pulseCount} — EXTENDING`
-                : `FURNACE CORE // VOLLEY ${pulseIndex + 1}/${pulseCount} — ROTATING`
+            this.updateInferoFurnaceVolley(t, bossCenter)
           }
+        } else if (t.kind === 'infero_solar_core') {
+          this.updateInferoFurnaceVolley(t, { x: t.x, y: t.y })
         } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
           const firstWarningDuration = t.gridPulseFirstWarningDuration ?? 0.24
@@ -4141,7 +4205,20 @@ export class Enemy {
             this.astralGridCooldownRemaining =
               ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS
           }
+          const shouldInferoEmerge =
+            this.isInferoChampion &&
+            this.bossPhase >= 2 &&
+            t.kind === 'infero_spinning_lattice' &&
+            t.spinMode === 'furnace_volley' &&
+            !this.inferoSunEmerged
           this.telegraphs.splice(i, 1)
+          if (shouldInferoEmerge) {
+            this.inferoSunEmerged = true
+            this.inferoSunAttackIndex = 0
+            this.inferoHoverTarget = null
+            this.inferoHoverRetargetTimer = 0
+            this.telegraphs.push(this.createInferoSolarCoreTelegraph())
+          }
         }
       }
     }
@@ -4910,7 +4987,10 @@ export class Enemy {
           }
         }
         ctx.restore()
-      } else if (t.kind === 'infero_spinning_lattice' && t.gridLines) {
+      } else if (
+        (t.kind === 'infero_spinning_lattice' || t.kind === 'infero_solar_core') &&
+        t.gridLines
+      ) {
         const lines = t.gridLines
         const warningAlpha = 0.25 + chargeProgress * 0.55
         const isLaserShotActive = Boolean(t.hasTriggered && t.gridPulseFiring)
@@ -4919,7 +4999,7 @@ export class Enemy {
         ctx.lineJoin = 'round'
 
         if (t.spinMode === 'furnace_volley') {
-          const fireballCenter = camera.worldToScreen(this.getCenter().x, this.getCenter().y)
+          const fireballCenter = camera.worldToScreen(t.x, t.y)
           const fireballRadius = (this.width * 0.72 + 20) * camera.zoom
           const fireballGlow = ctx.createRadialGradient(
             fireballCenter.x,
@@ -7803,7 +7883,10 @@ export function checkBossTelegraphHit(
     return false
   }
 
-  if (telegraph.kind === 'infero_spinning_lattice' && telegraph.gridLines) {
+  if (
+    (telegraph.kind === 'infero_spinning_lattice' || telegraph.kind === 'infero_solar_core') &&
+    telegraph.gridLines
+  ) {
     if (
       !telegraph.hasTriggered ||
       telegraph.activeTimer >= telegraph.activeDuration

@@ -26,6 +26,9 @@ export const GAME_CONFIG = {
 // WAVE SYSTEM
 // ============================================
 
+// Slightly soften normal enemy contact and ranged hits; boss encounters retain their tuning.
+export const REGULAR_ENEMY_BASE_DAMAGE_MULTIPLIER = 0.85
+
 export const WAVE_CONFIG = {
   // Duration of active wave (enemies spawn)
   WAVE_DURATION_SECONDS: 30,

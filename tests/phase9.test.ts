@@ -9,6 +9,7 @@ import { InfernoRamTrail } from '../src/game/entities/InfernoRamTrail'
 
 import {
   GAME_CONFIG,
+  REGULAR_ENEMY_BASE_DAMAGE_MULTIPLIER,
   WAVE_CONFIG,
   SCORING_CONFIG,
   LEVEL_UP_CONFIG,
@@ -268,6 +269,49 @@ import {
 import { createLoadout, getExtendedLoadout } from '../src/services/loadouts'
 
 describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
+  it('softens normal enemy contact and projectiles across all areas without nerfing bosses', () => {
+    assert.equal(REGULAR_ENEMY_BASE_DAMAGE_MULTIPLIER, 0.85)
+    const regularTemplates = [...enemies, ...AREA_TWO_ENEMIES, ...AREA_THREE_ENEMIES]
+      .filter((template) => template.category !== 'Boss' && template.category !== 'Mini-Boss')
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 650, y: 500, hero })
+    for (const template of regularTemplates) {
+      const enemy = new Enemy({ x: 500, y: 500, enemyData: template, target: player })
+      const oldBase = template.category === 'Heavy Swarm'
+        ? Math.max(12, Math.round(template.hp * 0.18))
+        : Math.max(8, Math.round(template.hp * 0.2))
+      assert.equal(enemy.damage, Math.max(1, Math.round(oldBase * 0.85)), template.name)
+      assert.equal(enemy.maxHealth, template.hp, 'health is unchanged')
+      assert.equal(enemy.coinValue, template.coin_value, 'coin rewards are unchanged')
+      if (enemy.canShoot) {
+        enemy.isSpawning = false
+        enemy.cutsceneDelayTimer = 0
+        enemy.shootCooldown = 0
+        enemy.damageScale = 2
+        enemy.update(0.01, player)
+        assert.ok(enemy.projectiles.length > 0, `${template.name} must fire`)
+        const projectileBase = template.category === 'Ranged Caster'
+          ? 11 : template.id === 'ene_a2_03' ? 13 : 12
+        for (const projectile of enemy.projectiles) {
+          assert.equal(projectile.damage, Math.round(projectileBase * 0.85 * 2))
+        }
+      }
+    }
+    assert.equal(new Enemy({ damage: 100 }).damage, 85)
+    assert.equal(new Enemy({ damage: 1 }).damage, 1)
+    assert.equal(new Enemy({ damage: 100, isBoss: true }).damage, 200)
+    const champion = new Enemy({ enemyData: AREA_THREE_BOSSES[3], isBoss: true, isFinalBoss: true })
+    assert.equal(champion.damage, 58)
+    for (const template of [...AREA_TWO_ENEMIES, ...AREA_THREE_ENEMIES]
+      .filter((template) => template.category === 'Mini-Boss')) {
+      const mini = new Enemy({ enemyData: template })
+      const oldBase = template.id.startsWith('ene_a3_')
+        ? Math.max(20, Math.round(template.hp * 0.1))
+        : Math.max(16, Math.round(template.hp * 0.08))
+      assert.equal(mini.damage, oldBase, 'mini-boss tuning is preserved')
+    }
+  })
+
   it('validates canonical seed data (35 entities + foreign keys)', () => {
     const result = validateSeedData()
     assert.equal(result.valid, true, `Seed validation failed: ${result.errors.join('; ')}`)

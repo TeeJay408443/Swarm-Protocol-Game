@@ -5,7 +5,7 @@
 
 import { Vector2 } from '../utils/vector'
 import { Camera } from '../engine/Camera'
-import { GAME_CONFIG } from '../../config/gameConstants'
+import { GAME_CONFIG, REGULAR_ENEMY_BASE_DAMAGE_MULTIPLIER } from '../../config/gameConstants'
 import { GAME_ARENA_SIZE } from '../constants'
 import {
   ASTRAL_SCOURGE_PHASE_ONE_HP,
@@ -833,6 +833,12 @@ export class Enemy {
       this.maxHealth = ASTRAL_SCOURGE_PHASE_ONE_HP
       this.health = this.maxHealth
     }
+    // Apply once, after type-specific base stats and before wave/area/difficulty scaling.
+    this.damage = Math.max(1, Math.round(this.damage * this.baseDamageMultiplier))
+  }
+
+  private get baseDamageMultiplier(): number {
+    return this.isBoss || this.isMiniBoss ? 1 : REGULAR_ENEMY_BASE_DAMAGE_MULTIPLIER
   }
 
   /**
@@ -2180,7 +2186,7 @@ export class Enemy {
     if (this.type === 'Ranged Caster') {
       // Astral Arcanist: fires a 3-orb fanned arcane projectile burst
       const baseAngle = Math.atan2(direction.y, direction.x)
-      const orbDamage = Math.round(11 * Math.max(1, this.damageScale))
+      const orbDamage = Math.round(11 * this.baseDamageMultiplier * Math.max(1, this.damageScale))
       for (const offset of [-0.22, 0, 0.22]) {
         const a = baseAngle + offset
         this.projectiles.push({
@@ -2208,7 +2214,7 @@ export class Enemy {
         height: 6,
         speed: 325,
         direction,
-        damage: Math.round(13 * Math.max(1, this.damageScale)),
+        damage: Math.round(13 * this.baseDamageMultiplier * Math.max(1, this.damageScale)),
         color: '#34D399',
         lifetime: 0,
         maxLifetime: 3.0
@@ -2224,7 +2230,7 @@ export class Enemy {
       height: 8,
       speed: 290,
       direction,
-      damage: Math.round(12 * Math.max(1, this.damageScale)),
+      damage: Math.round(12 * this.baseDamageMultiplier * Math.max(1, this.damageScale)),
       color: '#FF0055',
       lifetime: 0,
       maxLifetime: 3

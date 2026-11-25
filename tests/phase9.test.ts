@@ -31,6 +31,9 @@ import {
 import {
   AREA_TWO_BOSSES,
   AREA_TWO_ENEMIES,
+  AREA_THREE_BOSSES,
+  AREA_THREE_ENEMIES,
+  AREA_THREE_MAX_WAVE,
   ASTRAL_SCOURGE_PHASE_ONE_HP,
   ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
   ASTRAL_SCOURGE_PHASE_TWO_DELAY_SECONDS,
@@ -46,15 +49,19 @@ import {
   GAME_AREAS,
   getAreaBossTemplateForWave,
   getAreaById,
+  getAreaFinalBossHp,
+  getAreaMaxWave,
   getAreaEnemies,
   getAreaMiniBossCap,
   getAreaOneBossBuff,
   getAreaTwoBossBuff,
+  getAreaThreeBossBuff,
   getAstralScourgePhaseTwoCutsceneTheme,
   getDevSpawnableEnemyById,
   getWave15BossCombatProfile,
   getWave15CutsceneTheme,
   getWave15FinalBossHp,
+  MOLTEN_STARFORGE_FINAL_BOSS_ID,
   isAreaUnlocked,
   isSecretDevOnlyBossId,
   SECRET_DEVOURER_OF_GODS_CUTSCENE_LINES,
@@ -102,6 +109,7 @@ import {
   isUnlockableHero
 } from '../src/config/unlockableHeroes'
 import {
+  AREA_THREE_UPGRADES,
   AREA_TWO_UPGRADES,
   getAvailableRunUpgrades,
   isAreaTwoUpgradesUnlocked
@@ -158,7 +166,7 @@ import {
   getLocalAuthState,
   listSavedAccounts
 } from '../src/services/auth'
-import { getLocalPlayerTelemetry, submitScore } from '../src/services/scores'
+import { getLocalPlayerTelemetry, recordAreaCompletion, submitScore } from '../src/services/scores'
 import { computePostGameMetrics, formatSurvivalClock } from '../src/config/postGameSummary'
 import AudioService, {
   ASTRAL_SCOURGE_YOUTUBE_URL,
@@ -1259,15 +1267,21 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
   })
 
-  it('defines 2 distinct areas and unlocks Area 2 only after beating Wave 15', async () => {
-    assert.equal(GAME_AREAS.length, 2)
+  it('defines three areas and unlocks them through their final-boss victories', async () => {
+    assert.equal(GAME_AREAS.length, 3)
     const area1 = getAreaById('carbon_sector')
     const area2 = getAreaById('astral_citadel')
+    const area3 = getAreaById('molten_starforge')
     assert.equal(area1.id, 'carbon_sector')
     assert.equal(area2.id, 'astral_citadel')
     assert.notEqual(area1.floorColor, area2.floorColor)
     assert.equal(area2.unlockWaveRequirement, 15)
     assert.ok(area2.coinBonusMultiplier > 1)
+    assert.equal(area3.maxWave, 20)
+    assert.equal(area3.unlockWaveRequirement, 20)
+    assert.equal(area3.coinBonusPercent, 75)
+    assert.equal(area3.coinBonusMultiplier, 1.75)
+    assert.ok(area3.enemyHpMultiplier > area2.enemyHpMultiplier)
 
     const areaUser = `area_user_${Date.now()}`
     const freshTelemetry = getLocalPlayerTelemetry(areaUser)
@@ -1307,6 +1321,25 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(afterVictory.wave_15_cleared, true)
     assert.equal(afterVictory.boss_victories, 1)
     assert.equal(isAreaUnlocked('astral_citadel', afterVictory), true)
+    assert.equal(isAreaUnlocked('molten_starforge', afterVictory), false)
+
+    await submitScore({
+      userId: areaUser,
+      playerName: 'AreaTester',
+      survivalSeconds: 820,
+      coinsCollected: 550,
+      enemiesDefeated: 420,
+      damageFreeWaveStreak: 4,
+      waveReached: 20,
+      victory: true,
+      areaId: 'astral_citadel',
+      heroUsed: 'hero_01'
+    })
+    const afterAreaTwoFinal = getLocalPlayerTelemetry(areaUser)
+    assert.equal(afterAreaTwoFinal.area_2_wave20_cleared, true)
+    assert.equal(isAreaUnlocked('molten_starforge', afterAreaTwoFinal), true)
+    const afterAreaThreeFinal = recordAreaCompletion('molten_starforge', areaUser)
+    assert.equal(afterAreaThreeFinal.area_3_wave20_cleared, true)
   })
 
   it('populates Area 2 with 5 distinct enemies including slow tanky AoE-indicator mini-boss', async () => {
@@ -1404,6 +1437,35 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     for (const b2 of AREA_TWO_BOSSES) {
       assert.ok(codexEnemies.some((e) => e.id === b2.id))
     }
+  })
+
+  it('builds the 20-wave Molten Starforge with stronger rewards and a Wave 20 finale', () => {
+    assert.equal(AREA_THREE_MAX_WAVE, 20)
+    assert.equal(getAreaMaxWave('molten_starforge'), 20)
+    assert.equal(getAreaEnemies('molten_starforge').length, 6)
+    assert.equal(AREA_THREE_BOSSES.length, 4)
+    assert.equal(getAreaBossTemplateForWave('molten_starforge', 15).id, 'boss_a3_15')
+    assert.equal(
+      getAreaBossTemplateForWave('molten_starforge', 20).id,
+      MOLTEN_STARFORGE_FINAL_BOSS_ID
+    )
+    assert.equal(MOLTEN_STARFORGE_FINAL_BOSS_ID, 'boss_a3_20')
+    assert.equal(getAreaFinalBossHp('molten_starforge'), 360000)
+    assert.equal(getAreaThreeBossBuff(15).damageReduction, 0.42)
+    assert.equal(shouldSpawnRegularEnemiesInWave(15, false, false, 'molten_starforge'), false)
+    assert.equal(shouldSpawnRegularEnemiesInWave(20, false, false, 'molten_starforge'), false)
+
+    const leviathan = selectAreaEnemyTemplateForWave('molten_starforge', 10, {
+      roll: 0.99,
+      subRoll: 0.75,
+      canSpawnMiniBoss: true
+    })
+    assert.equal(leviathan.template.id, 'ene_a3_06')
+    assert.equal(leviathan.isMiniBoss, true)
+    assert.equal(AREA_THREE_UPGRADES.length, 6)
+    assert.ok(getWave15CutsceneTheme('molten_starforge').kind === 'w15_starforge')
+    assert.equal(getWave15BossAttackKind('primordial_starforge', 1, 0), 'pursuit_beam')
+    assert.equal(getWave15BossAttackKind('primordial_starforge', 3, 0), 'singularity_grid')
   })
 
   it('spawns dedicated Area 2 bosses every 5 waves, disables Wave 15 adds, and enables Endless Mode in Area 2', () => {
@@ -1890,7 +1952,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const codexUpgrades = await getUpgrades()
     assert.equal(
       codexUpgrades.length,
-      upgrades.length + AREA_TWO_UPGRADES.length + UNIVERSAL_CRIT_UPGRADES.length
+      upgrades.length +
+        AREA_TWO_UPGRADES.length +
+        AREA_THREE_UPGRADES.length +
+        UNIVERSAL_CRIT_UPGRADES.length
     )
 
     // Vanguard Laser Strider (upg_a2_02): walks near player and fires piercing laser bolts (+ Engineer bonus)
@@ -2813,7 +2878,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(grid!.gridPulseCount === 3 || grid!.gridPulseCount === 4)
     assert.equal(grid!.gridPulseIndex, 0)
     assert.equal(grid!.gridPulseFiring, false)
-    assert.equal(grid!.gridPulseWarningDuration, 0.24)
+    assert.equal(grid!.gridPulseWarningDuration, 0.74)
     assert.equal(grid!.gridPulseFirstWarningDuration, 0.74)
     assert.equal(grid!.gridPulseFollowupWarningDuration, 0.64)
     assert.equal(grid!.gridPulseFireDuration, 0.34)
@@ -2845,6 +2910,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.deepEqual(scourge.getCenter(), lockedHead, 'The head should remain fixed during the grid firing window')
     assert.deepEqual(grid!.gridLines, lockedLines, 'The grid should stay at its original world position')
 
+    scourge.update(0.25, player)
     scourge.update(0.25, player)
     assert.equal(grid!.gridPulseFiring, true, 'Each grid pulse warns before its damage window')
     const firstPulseLines = grid!.gridLines!.map((line) => ({ ...line }))
@@ -3690,10 +3756,15 @@ describe('Boss drop crafting', () => {
     const areaTwoMiniBossIds = AREA_TWO_ENEMIES
       .filter((enemy) => enemy.category === 'Mini-Boss')
       .map((enemy) => enemy.id)
+    const areaThreeMiniBossIds = AREA_THREE_ENEMIES
+      .filter((enemy) => enemy.category === 'Mini-Boss')
+      .map((enemy) => enemy.id)
     const playableBossIds = [
       ...areaOneMiniBossIds,
       ...areaTwoMiniBossIds,
-      ...AREA_TWO_BOSSES.map((boss) => boss.id)
+      ...AREA_TWO_BOSSES.map((boss) => boss.id),
+      ...areaThreeMiniBossIds,
+      ...AREA_THREE_BOSSES.map((boss) => boss.id)
     ]
 
     for (const enemyId of playableBossIds) {
@@ -3701,11 +3772,11 @@ describe('Boss drop crafting', () => {
     }
     assert.equal(getBossDropSetId('ene_04', true), 'omega_overlord')
     assert.equal(getBossDropSetId(SECRET_DEVOURER_OF_GODS_ID), null)
-    assert.equal(PLAYABLE_BOSS_DROP_SETS.length, 7)
+    assert.equal(PLAYABLE_BOSS_DROP_SETS.length, 13)
     assert.equal(BOSS_CRAFTING_RECIPES.length, PLAYABLE_BOSS_DROP_SETS.length)
 
     const materialIds = PLAYABLE_BOSS_DROP_SETS.flatMap((boss) => boss.materials.map((m) => m.id))
-    assert.equal(materialIds.length, 21)
+    assert.equal(materialIds.length, 39)
     assert.equal(new Set(materialIds).size, materialIds.length)
     for (const boss of PLAYABLE_BOSS_DROP_SETS) {
       assert.equal(boss.materials.length, 3)
@@ -3742,7 +3813,13 @@ describe('Boss drop crafting', () => {
       { enemyId: 'boss_a2_05', setId: 'emerald_prism_monarch' },
       { enemyId: 'boss_a2_10', setId: 'astral_vortex_colossus' },
       { enemyId: 'boss_a2_15', setId: 'solar_archon_seraph' },
-      { enemyId: 'boss_a2_20', setId: 'astral_scourge' }
+      { enemyId: 'boss_a2_20', setId: 'astral_scourge' },
+      { enemyId: 'ene_a3_05', setId: 'crucible_brute' },
+      { enemyId: 'ene_a3_06', setId: 'furnace_leviathan' },
+      { enemyId: 'boss_a3_05', setId: 'cinder_crown' },
+      { enemyId: 'boss_a3_10', setId: 'magma_artificer' },
+      { enemyId: 'boss_a3_15', setId: 'searing_juggernaut' },
+      { enemyId: 'boss_a3_20', setId: 'primordial_starforge' }
     ]
 
     for (const identity of combatIdentities) {
@@ -3763,7 +3840,7 @@ describe('Boss drop crafting', () => {
     assert.equal(secretBossResult.success, false)
     assert.equal(
       Object.keys(getShopAccountState(userId).bossMaterials).length,
-      21,
+      PLAYABLE_BOSS_DROP_SETS.length * 3,
       'secret boss must not add materials'
     )
   })

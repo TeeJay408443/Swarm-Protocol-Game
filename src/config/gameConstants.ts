@@ -551,8 +551,8 @@ export function getUpgradeLevelPerkHint(upgradeId: string, targetLevel: number):
     },
     upg_a3_01: {
       1: 'Fires a piercing cinderrail slug with a burning impact burst',
-      2: 'Adds a second slug and widens the cinder burst',
-      3: 'Fires three staggered rail slugs with longer burn',
+      2: 'Widens the burn burst and pierces through more enemies',
+      3: 'Adds a second staggered slug with longer burn',
       4: 'Twin overcharged rail slugs pierce deep into enemy lines'
     },
     upg_a3_02: {
@@ -571,7 +571,19 @@ export function getUpgradeLevelPerkHint(upgradeId: string, targetLevel: number):
       1: 'Deploys 1 Ember Relay turret',
       2: 'Turret fires faster and hits harder',
       3: 'Deploys a second Ember Relay turret',
-      4: 'Twin overcharged turrets fire piercing ember rounds'
+      4: 'Turrets fire overcharged piercing ember rounds'
+    },
+    upg_a3_04: {
+      1: 'Adds 12 maximum health and 4.8% damage reduction',
+      2: 'Adds another 12 maximum health and 4.8% damage reduction',
+      3: 'Adds another 12 maximum health and 4.8% damage reduction',
+      4: 'Adds another 12 maximum health and 4.8% damage reduction'
+    },
+    upg_a3_05: {
+      1: 'Restores 0.7% of maximum health each second',
+      2: 'Restores 1.4% of maximum health each second',
+      3: 'Restores 2.1% of maximum health each second',
+      4: 'Restores 2.8% of maximum health each second'
     }
   }
 

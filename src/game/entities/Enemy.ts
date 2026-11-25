@@ -122,7 +122,10 @@ export type BossAttackKind =
   | 'astral_orbital_grid'
   | 'astral_targeted_lasers'
 
-export type Wave15BossIdentity = 'omega_overlord' | 'solar_archon_seraph'
+export type Wave15BossIdentity =
+  | 'omega_overlord'
+  | 'solar_archon_seraph'
+  | 'primordial_starforge'
 
 export interface CosmicLaserWallLine {
   x1: number
@@ -473,7 +476,7 @@ export class Enemy {
             this.baseColor = this.color
             this.width = this.enemyId === 'ene_a3_06' ? 68 : 60
             this.height = this.width
-            this.movementPattern = this.enemyId === 'ene_a3_06' ? 'strafe' : 'chase'
+            this.movementPattern = this.enemyId === 'ene_a3_06' ? 'orbit' : 'chase'
             this.damage = Math.max(20, Math.round(this.enemyData.hp * 0.1))
             this.attackRange = 620
             this.aoeCooldown = 0.85
@@ -1720,8 +1723,21 @@ export class Enemy {
     const tierBoost = Math.max(0, this.bossTier - 1)
 
     const isSolarArchon = this.enemyId === 'boss_a2_15'
-    const wormPrimary = this.isAstralScourge ? '#34D399' : isSolarArchon ? '#FACC15' : '#22D3EE'
-    const wormSecondary = this.isAstralScourge ? '#FACC15' : isSolarArchon ? '#34D399' : '#E879F9'
+    const isStarforgeBoss = this.enemyId.startsWith('boss_a3_')
+    const wormPrimary = this.isAstralScourge
+      ? '#34D399'
+      : isSolarArchon
+        ? '#FACC15'
+        : isStarforgeBoss
+          ? '#FB923C'
+          : '#22D3EE'
+    const wormSecondary = this.isAstralScourge
+      ? '#FACC15'
+      : isSolarArchon
+        ? '#34D399'
+        : isStarforgeBoss
+          ? '#FDE047'
+          : '#E879F9'
 
     let kind: BossAttackKind
     if (forcedKind) {
@@ -1758,7 +1774,9 @@ export class Enemy {
     ) {
       const identity: Wave15BossIdentity = isSolarArchon
         ? 'solar_archon_seraph'
-        : 'omega_overlord'
+        : isStarforgeBoss
+          ? 'primordial_starforge'
+          : 'omega_overlord'
       const cycleIndex =
         this.bossPhase >= 3
           ? this.phaseThreeAttackIndex++
@@ -2121,11 +2139,13 @@ export class Enemy {
         activeTimer: 0,
         activeDuration: 0.65,
         damage: Math.round(36 * Math.max(1, this.damageScale * 0.72)),
-        accentPrimary: isSolarArchon ? '#FACC15' : '#F43F5E',
-        accentSecondary: isSolarArchon ? '#34D399' : '#FACC15',
+        accentPrimary: isSolarArchon ? '#FACC15' : isStarforgeBoss ? '#FB923C' : '#F43F5E',
+        accentSecondary: isSolarArchon ? '#34D399' : isStarforgeBoss ? '#FDE047' : '#FACC15',
         warningLabel: isSolarArchon
           ? 'SERAPH ECLIPSE GRID — FIND THE SAFE CELL!'
-          : 'OMEGA SINGULARITY GRID — FIND THE SAFE CELL!',
+          : isStarforgeBoss
+            ? 'STARFORGE CINDER GRID — FIND THE SAFE CELL!'
+            : 'OMEGA SINGULARITY GRID — FIND THE SAFE CELL!',
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -2234,9 +2254,13 @@ export class Enemy {
         activeTimer: 0,
         activeDuration: 0.72,
         damage: Math.round(28 * Math.max(1, this.damageScale * 0.72)),
-        accentPrimary: isSolarArchon ? '#FACC15' : '#FF0055',
-        accentSecondary: isSolarArchon ? '#34D399' : '#FACC15',
-        warningLabel: isSolarArchon ? 'SERAPH SUNLANCE — BREAK THE LOCK!' : undefined,
+        accentPrimary: isSolarArchon ? '#FACC15' : isStarforgeBoss ? '#FB923C' : '#FF0055',
+        accentSecondary: isSolarArchon ? '#34D399' : isStarforgeBoss ? '#FDE047' : '#FACC15',
+        warningLabel: isSolarArchon
+          ? 'SERAPH SUNLANCE — BREAK THE LOCK!'
+          : isStarforgeBoss
+            ? 'STARFORGE FURNACE BEAM — BREAK THE LOCK!'
+            : undefined,
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -2596,7 +2620,10 @@ export class Enemy {
                 speed: t.kind === 'singularity_grid' ? 255 : 230,
                 direction: { x: Math.cos(ba), y: Math.sin(ba) },
                 damage: burstDmg,
-                color: t.kind === 'singularity_grid' ? '#F43F5E' : '#FACC15',
+                color:
+                  t.kind === 'singularity_grid'
+                    ? t.accentPrimary || '#F43F5E'
+                    : t.accentPrimary || '#FACC15',
                 lifetime: 0,
                 maxLifetime: 4.0
               })
@@ -2937,7 +2964,11 @@ export class Enemy {
             ? 'cosmic_laser_walls'
             : this.isStationaryBoss
               ? getWave15BossAttackKind(
-                  this.enemyId === 'boss_a2_15' ? 'solar_archon_seraph' : 'omega_overlord',
+                  this.enemyId === 'boss_a2_15'
+                    ? 'solar_archon_seraph'
+                    : this.enemyId.startsWith('boss_a3_')
+                      ? 'primordial_starforge'
+                      : 'omega_overlord',
                   2,
                   0
                 )
@@ -2965,7 +2996,11 @@ export class Enemy {
             ? 'cosmic_laser_walls'
             : this.isStationaryBoss
               ? getWave15BossAttackKind(
-                  this.enemyId === 'boss_a2_15' ? 'solar_archon_seraph' : 'omega_overlord',
+                  this.enemyId === 'boss_a2_15'
+                    ? 'solar_archon_seraph'
+                    : this.enemyId.startsWith('boss_a3_')
+                      ? 'primordial_starforge'
+                      : 'omega_overlord',
                   3,
                   0
                 )
@@ -4346,6 +4381,122 @@ export class Enemy {
 
       case 'Mini-Boss':
       case 'Boss': {
+        if (this.enemyId === 'ene_a3_05' || this.enemyId === 'ene_a3_06') {
+          const isLeviathan = this.enemyId === 'ene_a3_06'
+          const coreColor = isLeviathan ? '#FDBA74' : '#FDE047'
+          const pulse = 0.92 + Math.sin(this.animTime * 6) * 0.05
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#431407'
+          ctx.strokeStyle = isLeviathan ? '#FB923C' : '#F97316'
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          for (let i = 0; i < 10; i++) {
+            const angle = (i / 10) * Math.PI * 2 + this.animTime * (isLeviathan ? 0.45 : 0.12)
+            const radius = r * (i % 2 === 0 ? pulse : 0.76)
+            const x = Math.cos(angle) * radius
+            const y = Math.sin(angle) * radius
+            if (i === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+          }
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+          if (isLeviathan) {
+            for (let i = 0; i < 3; i++) {
+              const angle = this.animTime * 1.4 + i * (Math.PI * 2 / 3)
+              ctx.fillStyle = i % 2 === 0 ? '#FB923C' : '#FACC15'
+              ctx.beginPath()
+              ctx.ellipse(
+                Math.cos(angle) * r * 0.62,
+                Math.sin(angle) * r * 0.62,
+                r * 0.36,
+                r * 0.12,
+                angle,
+                0,
+                Math.PI * 2
+              )
+              ctx.fill()
+            }
+          } else {
+            ctx.strokeStyle = '#FDBA74'
+            ctx.lineWidth = 4
+            ctx.beginPath()
+            ctx.moveTo(-r * 0.72, -r * 0.36)
+            ctx.lineTo(r * 0.72, -r * 0.36)
+            ctx.moveTo(-r * 0.72, r * 0.36)
+            ctx.lineTo(r * 0.72, r * 0.36)
+            ctx.stroke()
+          }
+          ctx.fillStyle = coreColor
+          ctx.beginPath()
+          ctx.arc(0, 0, r * 0.29, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#FFF7ED'
+          ctx.beginPath()
+          ctx.arc(0, 0, r * 0.12, 0, Math.PI * 2)
+          ctx.fill()
+          break
+        }
+
+        if (this.enemyId.startsWith('boss_a3_')) {
+          const isFinalStar = this.enemyId === 'boss_a3_20'
+          const coreColor =
+            this.enemyId === 'boss_a3_10'
+              ? '#FDE047'
+              : this.enemyId === 'boss_a3_15'
+                ? '#FDBA74'
+                : '#FFF7ED'
+          const rotation = this.animTime * (isFinalStar ? 0.52 : 0.28)
+          ctx.fillStyle = isFlashing ? '#FFFFFF' : '#431407'
+          ctx.strokeStyle = this.color
+          ctx.lineWidth = isFinalStar ? 4 : 3
+          ctx.beginPath()
+          for (let i = 0; i < (isFinalStar ? 12 : 8); i++) {
+            const count = isFinalStar ? 12 : 8
+            const angle = (i / count) * Math.PI * 2 + rotation
+            const radius = r * (i % 2 === 0 ? 0.95 : isFinalStar ? 0.62 : 0.77)
+            const x = Math.cos(angle) * radius
+            const y = Math.sin(angle) * radius
+            if (i === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+          }
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          if (isFinalStar) {
+            ctx.save()
+            ctx.strokeStyle = '#FDE047'
+            ctx.lineWidth = 2.5
+            ctx.globalAlpha = 0.72
+            ctx.beginPath()
+            ctx.ellipse(0, 0, r * 1.3, r * 0.48, rotation, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.beginPath()
+            ctx.ellipse(0, 0, r * 0.48, r * 1.3, -rotation, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.restore()
+          } else {
+            ctx.fillStyle = this.enemyId === 'boss_a3_15' ? '#7C2D12' : '#9A3412'
+            ctx.beginPath()
+            ctx.moveTo(0, -r * 0.62)
+            ctx.lineTo(r * 0.58, -r * 0.18)
+            ctx.lineTo(r * 0.44, r * 0.48)
+            ctx.lineTo(0, r * 0.65)
+            ctx.lineTo(-r * 0.44, r * 0.48)
+            ctx.lineTo(-r * 0.58, -r * 0.18)
+            ctx.closePath()
+            ctx.fill()
+          }
+          ctx.fillStyle = coreColor
+          ctx.shadowColor = this.color
+          ctx.shadowBlur = isFinalStar ? 20 : 12
+          ctx.beginPath()
+          ctx.arc(0, 0, r * (isFinalStar ? 0.29 : 0.23), 0, Math.PI * 2)
+          ctx.fill()
+          ctx.shadowBlur = 0
+          break
+        }
+
         if (this.enemyId === 'ene_a2_05') {
           // Astral Bastion Warden: heavy golden-amber fortress hull + twin shoulder AoE mortars
           ctx.fillStyle = isFlashing ? '#FFFFFF' : '#1E293B'
@@ -5133,8 +5284,18 @@ export function getWave15BossAttackKind(
     2: ['pursuit_beam', 'cosmic_laser_walls', 'void_meteor_salvo'],
     3: ['cosmic_laser_walls', 'pursuit_beam', 'singularity_grid', 'void_meteor_salvo']
   }
+  const starforgeCycles: Record<number, BossAttackKind[]> = {
+    1: ['pursuit_beam', 'tracking_strikes', 'closing_side_lasers'],
+    2: ['rotating_cross_lasers', 'void_meteor_salvo', 'pursuit_beam', 'closing_side_lasers'],
+    3: ['singularity_grid', 'void_meteor_salvo', 'rotating_cross_lasers', 'pursuit_beam']
+  }
   const safePhase = Math.max(1, Math.min(3, Math.floor(phase)))
-  const cycle = (identity === 'solar_archon_seraph' ? seraphCycles : omegaCycles)[safePhase]
+  const cycle =
+    (identity === 'solar_archon_seraph'
+      ? seraphCycles
+      : identity === 'primordial_starforge'
+        ? starforgeCycles
+        : omegaCycles)[safePhase]
   const safeIndex = ((Math.floor(cycleIndex) % cycle.length) + cycle.length) % cycle.length
   return cycle[safeIndex]
 }

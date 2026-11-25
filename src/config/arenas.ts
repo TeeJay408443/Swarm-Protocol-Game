@@ -90,7 +90,7 @@ export const GAME_AREAS: ArenaDefinition[] = [
     name: 'Molten Starforge',
     subtitle: 'Heart of the Dying Star',
     description:
-      'A superheated orbital foundry with 25 escalating waves, new Starforge weapons, a final battle against the Primordial Starforge, and +75% Battle Coins.',
+      'A superheated orbital foundry with 20 escalating waves, new Starforge weapons, a final battle against the Primordial Starforge, and +75% Battle Coins.',
     maxWave: AREA_THREE_MAX_WAVE,
     unlockWaveRequirement: AREA_TWO_MAX_WAVE,
     unlockAreaId: 'astral_citadel',

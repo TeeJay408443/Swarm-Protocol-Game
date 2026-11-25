@@ -440,7 +440,7 @@ export const DevPanel: React.FC = () => {
                 aria-label="Select enemy to spawn"
                 className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs focus:outline-none focus:border-fuchsia-400"
               >
-                {(['Area 1', 'Area 2', 'Bosses', 'Secret Boss'] as const).map((group) => (
+                {(['Area 1', 'Area 2', 'Area 3', 'Bosses', 'Secret Boss'] as const).map((group) => (
                   <optgroup key={group} label={group}>
                     {DEV_SPAWNABLE_ENEMIES.filter((item) => item.group === group).map((item) => (
                       <option key={item.id} value={item.id}>

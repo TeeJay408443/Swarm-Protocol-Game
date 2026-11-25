@@ -52,7 +52,6 @@ import {
   AREA_THREE_ENEMIES,
   ArenaId,
   ASTRAL_SCOURGE_BOSS_ID,
-  MOLTEN_STARFORGE_FINAL_BOSS_ID,
   ASTRAL_SCOURGE_PHASE_ONE_HP,
   ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
   BossCutsceneKind,
@@ -1578,7 +1577,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         isBoss: forceBoss,
         isStationaryBoss: isStationaryArenaBoss,
         isFinalBoss: isFinalAreaBoss,
-        isWave15SpecialBoss: isWave15AreaTwoBoss,
+        isWave15SpecialBoss,
         anchorPos,
         arenaBounds: isStationaryArenaBoss ? bossArena : null
       })
@@ -8980,9 +8979,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
               {activeArea.name} • Wave {getAreaMaxWave(activeArea.id)} Cleared
             </div>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-yellow-300 mb-3">
-              {activeArea.id === 'astral_citadel'
-                ? 'ASTRAL SCOURGE VANQUISHED!'
-                : 'SECTOR BOSS DEFEATED!'}
+              {activeArea.id === 'molten_starforge'
+                ? 'PRIMORDIAL STARFORGE DEFEATED!'
+                : activeArea.id === 'astral_citadel'
+                  ? 'ASTRAL SCOURGE VANQUISHED!'
+                  : 'SECTOR BOSS DEFEATED!'}
             </h2>
             <p className="text-slate-200 text-sm sm:text-base mb-6">
               You conquered the {activeArea.name} Final Boss! Extract now to lock in your Victory, or

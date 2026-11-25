@@ -87,8 +87,6 @@ export function HQView() {
     }
   }, [])
 
-  const wave15Cleared = Boolean(telemetry?.wave_15_cleared)
-  const area2Wave20Cleared = Boolean(telemetry?.area_2_wave20_cleared)
   const highestWave = telemetry?.highest_wave ?? 0
   const selectedArea = getAreaById(selectedAreaId)
   const selectedDifficulty = getDifficultyById(selectedDifficultyId)
@@ -206,14 +204,6 @@ export function HQView() {
             {GAME_AREAS.map((area) => {
               const unlocked = isAreaUnlocked(area.id, telemetry)
               const isSelected = selectedAreaId === area.id
-              const progressPct =
-                area.id === 'molten_starforge'
-                  ? area2Wave20Cleared
-                    ? 100
-                    : 0
-                  : wave15Cleared
-                    ? 100
-                    : Math.min(100, Math.round((highestWave / 15) * 100))
 
               return (
                 <button
@@ -248,20 +238,10 @@ export function HQView() {
                       Area {area.order} · {area.subtitle}
                     </div>
 
-                    {/* Locked Overlay Centerpiece */}
+                    {/* Compact lock badge keeps area names readable on three-column layouts. */}
                     {!unlocked && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
-                        <div className="w-12 h-12 rounded-2xl bg-slate-950/85 border border-amber-300/50 flex items-center justify-center text-2xl mb-2 shadow-lg">
-                          🔒
-                        </div>
-                        <span className="font-display font-bold text-sm sm:text-base text-amber-200">
-                          Beat Wave 15 to Unlock
-                        </span>
-                        <span className="text-xs text-slate-300 mt-0.5 tabular-nums">
-                          {area.id === 'molten_starforge'
-                            ? `Defeat Astral Scourge in Area 2 (${progressPct}% complete)`
-                            : `Progress: Wave ${highestWave} / 15 (${progressPct}%)`}
-                        </span>
+                      <div className="absolute top-3 right-3 rounded-full bg-slate-950/85 border border-amber-300/50 px-2.5 py-1 text-[11px] font-bold text-amber-200 shadow-lg">
+                        🔒 Locked
                       </div>
                     )}
 
@@ -289,6 +269,13 @@ export function HQView() {
                     <p className="text-sm text-slate-200/90 leading-snug">
                       {area.description}
                     </p>
+                    {!unlocked && (
+                      <p className="text-xs text-amber-200/90">
+                        {area.id === 'molten_starforge'
+                          ? 'Defeat Astral Scourge at Area 2 Wave 20 to unlock.'
+                          : 'Defeat the Area 1 Wave 15 boss to unlock.'}
+                      </p>
+                    )}
                     <div className="text-xs text-slate-300/80 font-medium tabular-nums pt-1 border-t border-white/10 flex items-center justify-between">
                       <span>{area.difficultyLabel}</span>
                       <span className={area.coinBonusPercent > 0 ? 'text-amber-300 font-semibold' : ''}>

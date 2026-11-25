@@ -90,7 +90,7 @@ export const GAME_AREAS: ArenaDefinition[] = [
     name: 'Molten Starforge',
     subtitle: 'Heart of the Dying Star',
     description:
-      'A superheated orbital foundry with 20 escalating waves, new Starforge weapons, a final battle against the Primordial Starforge, and +75% Battle Coins.',
+      'A superheated orbital foundry with 20 escalating waves, new Starforge weapons, a final battle against Infero Champion, and +75% Battle Coins.',
     maxWave: AREA_THREE_MAX_WAVE,
     unlockWaveRequirement: AREA_TWO_MAX_WAVE,
     unlockAreaId: 'astral_citadel',
@@ -327,13 +327,13 @@ export const AREA_THREE_BOSSES: EnemiesRow[] = [
   },
   {
     id: MOLTEN_STARFORGE_FINAL_BOSS_ID,
-    name: 'Primordial Starforge',
+    name: 'Infero Champion',
     category: 'Boss',
     hp: 360000,
     speed: 0.32,
     coin_value: 900,
     description:
-      'Wave 20 final boss: the living star at the center of the foundry, shifting through three increasingly volatile phases.'
+      'Wave 20 final boss: a winged molten-rock champion crowned in living fire, shifting through three increasingly volatile phases.'
   }
 ]
 
@@ -1122,10 +1122,10 @@ export function getAreaFinalBossCutsceneTheme(areaId: ArenaId): BossCutsceneThem
       revealDelaySeconds: 2.3,
       presentation: 'warning',
       particleStyle: 'carbon_inferno',
-      speaker: 'Primordial Starforge',
+      speaker: 'Infero Champion',
       line1: '',
       line2: '',
-      warningTitle: 'FINAL BOSS // PRIMORDIAL STARFORGE',
+      warningTitle: 'FINAL BOSS // INFERO CHAMPION',
       warningSubtitle: 'MOLTEN STARFORGE WAVE 20 CORE AWAKENING',
       warningCriticalText: 'STELLAR CORE COLLAPSE IMMINENT',
       primaryColor: '#FB923C',

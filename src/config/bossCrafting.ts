@@ -168,11 +168,11 @@ export const PLAYABLE_BOSS_DROP_SETS: BossCraftingBossSet[] = [
   },
   {
     id: 'primordial_starforge',
-    name: 'Primordial Starforge',
+    name: 'Infero Champion',
     materials: createMaterials('primordial_starforge', [
-      ['Primordial Starheart', 'A stable fragment of the Starforge’s living core.', 'starheart', '#FDE047'],
-      ['Solar Foundry Shard', 'A glowing shard from its stellar armor shell.', 'shard', '#FB923C'],
-      ['World-Anvil Sigil', 'A sigil formed in the oldest furnace chamber.', 'sigil', '#EA580C']
+      ['Infero Flameheart', 'A burning core fragment from Infero Champion.', 'starheart', '#FDE047'],
+      ['Molten Wing Shard', 'A basalt feather shard still glowing with furnace heat.', 'shard', '#FB923C'],
+      ['Champion’s Cinder Sigil', 'A victory mark forged in the Starforge’s final chamber.', 'sigil', '#EA580C']
     ]),
     recipeId: 'recipe_primordial_starforge',
     itemId: 'acc_crafted_primordial_starforge'

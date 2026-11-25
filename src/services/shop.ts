@@ -975,13 +975,13 @@ export const CRAFTED_ACCESSORIES: ShopAccessoryItem[] = [
   {
     id: 'acc_crafted_primordial_starforge',
     kind: 'accessory',
-    name: 'Primordial Starheart',
-    slotLabel: 'Starheart Core',
+    name: 'Infero Champion’s Flameheart',
+    slotLabel: 'Champion’s Flameheart',
     rarity: 'mythic',
     price: 0,
     salvageValue: 1200,
     statSummary: '+150 Max HP • +20% Damage • -12% Damage Taken',
-    function_desc: 'A perfected core that channels the Starforge’s power into offense and armor.',
+    function_desc: 'Infero Champion’s living flame channels molten power into offense and armor.',
     accentColor: '#FDE047',
     bonuses: { bonusHp: 150, damageMultiplier: 0.2, damageReduction: 0.12 }
   }

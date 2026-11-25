@@ -4439,21 +4439,138 @@ export class Enemy {
 
         if (this.enemyId.startsWith('boss_a3_')) {
           const isFinalStar = this.enemyId === 'boss_a3_20'
+          if (isFinalStar) {
+            const wingBeat = Math.sin(this.animTime * 5) * r * 0.07
+
+            // Broad basalt wings with glowing magma seams.
+            for (const side of [-1, 1]) {
+              ctx.save()
+              ctx.scale(side, 1)
+              ctx.fillStyle = isFlashing ? '#FFFFFF' : '#292524'
+              ctx.strokeStyle = '#A8A29E'
+              ctx.lineWidth = 2.5
+              ctx.beginPath()
+              ctx.moveTo(r * 0.3, -r * 0.18)
+              ctx.lineTo(r * 0.92, -r * 0.78 + wingBeat)
+              ctx.lineTo(r * 1.52, -r * 0.96 + wingBeat)
+              ctx.lineTo(r * 1.31, -r * 0.52 + wingBeat * 0.5)
+              ctx.lineTo(r * 1.56, -r * 0.34)
+              ctx.lineTo(r * 1.13, -r * 0.17)
+              ctx.lineTo(r * 1.35, r * 0.16 + wingBeat * 0.35)
+              ctx.lineTo(r * 0.78, r * 0.08)
+              ctx.lineTo(r * 0.48, r * 0.32)
+              ctx.closePath()
+              ctx.fill()
+              ctx.stroke()
+
+              ctx.strokeStyle = '#F97316'
+              ctx.lineWidth = 2
+              ctx.beginPath()
+              ctx.moveTo(r * 0.49, -r * 0.12)
+              ctx.lineTo(r * 1.31, -r * 0.65 + wingBeat * 0.6)
+              ctx.moveTo(r * 0.64, r * 0.04)
+              ctx.lineTo(r * 1.34, -r * 0.27 + wingBeat * 0.3)
+              ctx.stroke()
+              ctx.restore()
+            }
+
+            // Fire-shaped head, layered from deep red to a near-white hot center.
+            ctx.save()
+            ctx.shadowColor = '#F97316'
+            ctx.shadowBlur = 22
+            const fireGradient = ctx.createLinearGradient(0, -r * 1.5, 0, -r * 0.45)
+            fireGradient.addColorStop(0, '#FEF08A')
+            fireGradient.addColorStop(0.36, '#FACC15')
+            fireGradient.addColorStop(0.72, '#F97316')
+            fireGradient.addColorStop(1, '#B91C1C')
+            ctx.fillStyle = fireGradient
+            ctx.beginPath()
+            ctx.moveTo(-r * 0.38, -r * 0.47)
+            ctx.quadraticCurveTo(-r * 0.62, -r * 0.96, -r * 0.24, -r * 1.18)
+            ctx.lineTo(-r * 0.1, -r * 1.5)
+            ctx.lineTo(r * 0.08, -r * 1.2)
+            ctx.quadraticCurveTo(r * 0.42, -r * 1.46, r * 0.34, -r * 1.1)
+            ctx.quadraticCurveTo(r * 0.66, -r * 0.75, r * 0.38, -r * 0.47)
+            ctx.closePath()
+            ctx.fill()
+
+            ctx.fillStyle = '#FFF7AE'
+            ctx.beginPath()
+            ctx.moveTo(-r * 0.17, -r * 0.57)
+            ctx.quadraticCurveTo(-r * 0.28, -r * 0.9, -r * 0.04, -r * 1.18)
+            ctx.quadraticCurveTo(r * 0.08, -r * 0.98, r * 0.2, -r * 0.7)
+            ctx.lineTo(r * 0.14, -r * 0.54)
+            ctx.closePath()
+            ctx.fill()
+            ctx.restore()
+
+            // Jagged molten-rock body.
+            ctx.fillStyle = isFlashing ? '#FFFFFF' : '#292524'
+            ctx.strokeStyle = '#A8A29E'
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.moveTo(0, -r * 0.74)
+            ctx.lineTo(r * 0.48, -r * 0.48)
+            ctx.lineTo(r * 0.63, -r * 0.05)
+            ctx.lineTo(r * 0.47, r * 0.48)
+            ctx.lineTo(r * 0.2, r * 0.72)
+            ctx.lineTo(0, r * 0.59)
+            ctx.lineTo(-r * 0.25, r * 0.73)
+            ctx.lineTo(-r * 0.52, r * 0.38)
+            ctx.lineTo(-r * 0.62, -r * 0.08)
+            ctx.lineTo(-r * 0.44, -r * 0.49)
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+
+            // Glowing magma cracks and a bright chest core.
+            ctx.strokeStyle = '#FB923C'
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.moveTo(-r * 0.08, -r * 0.45)
+            ctx.lineTo(r * 0.08, -r * 0.2)
+            ctx.lineTo(-r * 0.06, r * 0.02)
+            ctx.lineTo(r * 0.16, r * 0.29)
+            ctx.moveTo(-r * 0.46, -r * 0.12)
+            ctx.lineTo(-r * 0.18, r * 0.02)
+            ctx.lineTo(-r * 0.34, r * 0.34)
+            ctx.moveTo(r * 0.43, -r * 0.1)
+            ctx.lineTo(r * 0.21, r * 0.08)
+            ctx.lineTo(r * 0.36, r * 0.34)
+            ctx.stroke()
+
+            ctx.fillStyle = '#FDE047'
+            ctx.shadowColor = '#F97316'
+            ctx.shadowBlur = 18
+            ctx.beginPath()
+            ctx.arc(0, r * 0.05, r * 0.18, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.shadowBlur = 0
+
+            // Small molten eyes beneath the flame crown.
+            ctx.fillStyle = '#FFF7ED'
+            ctx.beginPath()
+            ctx.ellipse(-r * 0.19, -r * 0.53, r * 0.08, r * 0.045, -0.12, 0, Math.PI * 2)
+            ctx.ellipse(r * 0.19, -r * 0.53, r * 0.08, r * 0.045, 0.12, 0, Math.PI * 2)
+            ctx.fill()
+            break
+          }
+
           const coreColor =
             this.enemyId === 'boss_a3_10'
               ? '#FDE047'
               : this.enemyId === 'boss_a3_15'
                 ? '#FDBA74'
                 : '#FFF7ED'
-          const rotation = this.animTime * (isFinalStar ? 0.52 : 0.28)
+          const rotation = this.animTime * 0.28
           ctx.fillStyle = isFlashing ? '#FFFFFF' : '#431407'
           ctx.strokeStyle = this.color
-          ctx.lineWidth = isFinalStar ? 4 : 3
+          ctx.lineWidth = 3
           ctx.beginPath()
-          for (let i = 0; i < (isFinalStar ? 12 : 8); i++) {
-            const count = isFinalStar ? 12 : 8
+          for (let i = 0; i < 8; i++) {
+            const count = 8
             const angle = (i / count) * Math.PI * 2 + rotation
-            const radius = r * (i % 2 === 0 ? 0.95 : isFinalStar ? 0.62 : 0.77)
+            const radius = r * (i % 2 === 0 ? 0.95 : 0.77)
             const x = Math.cos(angle) * radius
             const y = Math.sin(angle) * radius
             if (i === 0) ctx.moveTo(x, y)
@@ -4463,35 +4580,21 @@ export class Enemy {
           ctx.fill()
           ctx.stroke()
 
-          if (isFinalStar) {
-            ctx.save()
-            ctx.strokeStyle = '#FDE047'
-            ctx.lineWidth = 2.5
-            ctx.globalAlpha = 0.72
-            ctx.beginPath()
-            ctx.ellipse(0, 0, r * 1.3, r * 0.48, rotation, 0, Math.PI * 2)
-            ctx.stroke()
-            ctx.beginPath()
-            ctx.ellipse(0, 0, r * 0.48, r * 1.3, -rotation, 0, Math.PI * 2)
-            ctx.stroke()
-            ctx.restore()
-          } else {
-            ctx.fillStyle = this.enemyId === 'boss_a3_15' ? '#7C2D12' : '#9A3412'
-            ctx.beginPath()
-            ctx.moveTo(0, -r * 0.62)
-            ctx.lineTo(r * 0.58, -r * 0.18)
-            ctx.lineTo(r * 0.44, r * 0.48)
-            ctx.lineTo(0, r * 0.65)
-            ctx.lineTo(-r * 0.44, r * 0.48)
-            ctx.lineTo(-r * 0.58, -r * 0.18)
-            ctx.closePath()
-            ctx.fill()
-          }
+          ctx.fillStyle = this.enemyId === 'boss_a3_15' ? '#7C2D12' : '#9A3412'
+          ctx.beginPath()
+          ctx.moveTo(0, -r * 0.62)
+          ctx.lineTo(r * 0.58, -r * 0.18)
+          ctx.lineTo(r * 0.44, r * 0.48)
+          ctx.lineTo(0, r * 0.65)
+          ctx.lineTo(-r * 0.44, r * 0.48)
+          ctx.lineTo(-r * 0.58, -r * 0.18)
+          ctx.closePath()
+          ctx.fill()
           ctx.fillStyle = coreColor
           ctx.shadowColor = this.color
-          ctx.shadowBlur = isFinalStar ? 20 : 12
+          ctx.shadowBlur = 12
           ctx.beginPath()
-          ctx.arc(0, 0, r * (isFinalStar ? 0.29 : 0.23), 0, Math.PI * 2)
+          ctx.arc(0, 0, r * 0.23, 0, Math.PI * 2)
           ctx.fill()
           ctx.shadowBlur = 0
           break

@@ -1449,6 +1449,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       getAreaBossTemplateForWave('molten_starforge', 20).id,
       MOLTEN_STARFORGE_FINAL_BOSS_ID
     )
+    assert.equal(getAreaBossTemplateForWave('molten_starforge', 20).name, 'Infero Champion')
     assert.equal(MOLTEN_STARFORGE_FINAL_BOSS_ID, 'boss_a3_20')
     assert.equal(getAreaFinalBossHp('molten_starforge'), 360000)
     assert.equal(getAreaThreeBossBuff(15).damageReduction, 0.42)
@@ -3773,6 +3774,10 @@ describe('Boss drop crafting', () => {
     assert.equal(getBossDropSetId('ene_04', true), 'omega_overlord')
     assert.equal(getBossDropSetId(SECRET_DEVOURER_OF_GODS_ID), null)
     assert.equal(PLAYABLE_BOSS_DROP_SETS.length, 13)
+    assert.equal(
+      PLAYABLE_BOSS_DROP_SETS.find((boss) => boss.id === 'primordial_starforge')?.name,
+      'Infero Champion'
+    )
     assert.equal(BOSS_CRAFTING_RECIPES.length, PLAYABLE_BOSS_DROP_SETS.length)
 
     const materialIds = PLAYABLE_BOSS_DROP_SETS.flatMap((boss) => boss.materials.map((m) => m.id))

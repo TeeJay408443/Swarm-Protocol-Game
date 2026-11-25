@@ -1263,7 +1263,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
             toast.success(
               victory
                 ? areaRef.current.id === 'molten_starforge'
-                  ? `VICTORY! Primordial Starforge Defeated — Area 3 Wave ${areaMaxWave} Cleared! Score: ${computedScore.toLocaleString()}`
+                  ? `VICTORY! Infero Champion Defeated — Area 3 Wave ${areaMaxWave} Cleared! Score: ${computedScore.toLocaleString()}`
                   : areaRef.current.id === 'astral_citadel'
                     ? `VICTORY! Astral Scourge Vanquished — Wave ${areaMaxWave} Cleared! Molten Starforge unlocked!`
                     : `VICTORY! Wave ${areaMaxWave} Cleared — Area 2 Unlocked! Score: ${computedScore.toLocaleString()}`
@@ -1688,7 +1688,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         enemy.bossTier = isAreaThree ? 5 : isAreaTwo ? 4 : 3
         enemy.bossTitle =
           isAreaThree
-            ? 'PRIMORDIAL STARFORGE — FINAL BOSS (W20)'
+            ? 'INFERO CHAMPION — FINAL BOSS (W20)'
             : areaMeta.id === 'astral_citadel'
             ? 'ASTRAL SCOURGE — FINAL BOSS (W20)'
             : 'OMEGA OVERLORD — FINAL BOSS (W15)'

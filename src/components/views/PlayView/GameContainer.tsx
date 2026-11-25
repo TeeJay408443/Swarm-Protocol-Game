@@ -1487,7 +1487,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const isWave15SpecialBoss = isWave15AreaTwoBoss || isWave15AreaThreeBoss
       const isFinalAreaBoss = forceBoss && waveNumber === areaMaxWave && !endlessModeRef.current
       const isWormBoss = bossTemplate?.id === ASTRAL_SCOURGE_BOSS_ID
-      const isStationaryArenaBoss = (isFinalAreaBoss || isWave15SpecialBoss) && !isWormBoss
+      const isInferoChampion = bossTemplate?.id === 'boss_a3_20'
+      const isStationaryArenaBoss =
+        (isFinalAreaBoss || isWave15SpecialBoss) && !isWormBoss && !isInferoChampion
       const bossArena = bossArenaRef.current
       const playerCenter = player.getCenter()
 
@@ -1592,7 +1594,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const beginAreaBossCutscene = (theme: BossCutsceneTheme) => {
         if (dogBossActiveRef.current) return
         const duration = theme.durationSeconds ?? WAVE_15_CUTSCENE_DURATION_SECONDS
-        const focusPos = anchorPos || enemy.getCenter()
+        const focusPos =
+          theme.kind === 'w20_area3' ? player.getCenter() : anchorPos || enemy.getCenter()
         enemy.isSpawning = true
         enemy.spawnTime = 0
         enemy.spawnDelay = duration
@@ -1616,11 +1619,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
         }
         dogPostDropRef.current = null
         dogCutsceneParticlesRef.current = []
+        const isInferoChampionCutscene = theme.kind === 'w20_area3'
         dogGroundCracksRef.current = createDogGroundCracks(
           focusPos.x,
           focusPos.y,
-          8,
-          220,
+          isInferoChampionCutscene ? 14 : 8,
+          isInferoChampionCutscene ? 320 : 220,
           duration + 1.8,
           [theme.primaryColor, theme.secondaryColor]
         )
@@ -1628,14 +1632,19 @@ const GameContainer: React.FC<GameContainerProps> = ({
           pushSeraphSolarBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, 0.9)
         } else {
           pushBossAreaInfernoBurst(dogCutsceneParticlesRef.current, focusPos.x, focusPos.y, {
-            flames: 32,
-            embers: 28,
-            speedScale: 0.95,
+            flames: isInferoChampionCutscene ? 54 : 32,
+            embers: isInferoChampionCutscene ? 64 : 28,
+            speedScale: isInferoChampionCutscene ? 1.35 : 0.95,
             palette: theme.palette,
             coreColor: theme.coreColor,
-            shockwaves: [
-              { maxRadius: 230, color: theme.primaryColor, lineWidth: 4.5, duration: 0.65 }
-            ]
+            shockwaves: isInferoChampionCutscene
+              ? [
+                  { maxRadius: 260, color: theme.primaryColor, lineWidth: 5, duration: 0.72 },
+                  { maxRadius: 390, color: theme.secondaryColor, lineWidth: 3, duration: 1.05 }
+                ]
+              : [
+                  { maxRadius: 230, color: theme.primaryColor, lineWidth: 4.5, duration: 0.65 }
+                ]
           })
         }
         setDogCutsceneUi({

@@ -329,7 +329,7 @@ export const AREA_THREE_BOSSES: EnemiesRow[] = [
     id: MOLTEN_STARFORGE_FINAL_BOSS_ID,
     name: 'Infero Champion',
     category: 'Boss',
-    hp: 360000,
+    hp: 1200000,
     speed: 0.32,
     coin_value: 900,
     description:
@@ -374,7 +374,7 @@ export function getAreaFinalBossHp(areaId: ArenaId): number {
     return 240000
   }
   if (areaId === 'molten_starforge') {
-    return 360000
+    return 1200000
   }
   return getWave15FinalBossHp(areaId)
 }
@@ -1118,16 +1118,16 @@ export function getAreaFinalBossCutsceneTheme(areaId: ArenaId): BossCutsceneThem
   if (areaId === 'molten_starforge') {
     return {
       kind: 'w20_area3',
-      durationSeconds: 6.4,
-      revealDelaySeconds: 2.3,
+      durationSeconds: 8.2,
+      revealDelaySeconds: 3.1,
       presentation: 'warning',
       particleStyle: 'carbon_inferno',
       speaker: 'Infero Champion',
       line1: '',
       line2: '',
-      warningTitle: 'FINAL BOSS // INFERO CHAMPION',
-      warningSubtitle: 'MOLTEN STARFORGE WAVE 20 CORE AWAKENING',
-      warningCriticalText: 'STELLAR CORE COLLAPSE IMMINENT',
+      warningTitle: 'INFERO CHAMPION // THE WINGED ASCENDANT',
+      warningSubtitle: 'MOLTEN STARFORGE WAVE 20 — AERIAL ENGAGEMENT',
+      warningCriticalText: 'THE FIRST FIRE TAKES FLIGHT',
       primaryColor: '#FB923C',
       secondaryColor: '#FDE047',
       coreColor: '#FFF7ED',

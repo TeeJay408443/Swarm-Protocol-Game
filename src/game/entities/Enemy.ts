@@ -327,6 +327,11 @@ export class Enemy {
   private astralRamHeading: number | null = null
   private astralRamSpeed: number = 0
   private astralGridCooldownRemaining: number = 0
+  private inferoOrbitAngle: number | null = null
+
+  get isInferoChampion(): boolean {
+    return this.enemyId === 'boss_a3_20'
+  }
 
   get isWormBoss(): boolean {
     return this.isDevourerOfGods || this.isAstralScourge
@@ -574,6 +579,14 @@ export class Enemy {
             this.aoeCooldownMax = this.enemyId === 'boss_a3_20' ? 1.8 : 2.4
             this.specialCooldown = 1.3
             this.specialCooldownMax = this.enemyId === 'boss_a3_20' ? 2.4 : 3.4
+            if (this.enemyId === 'boss_a3_20') {
+              this.isStationaryBoss = false
+              this.movementPattern = 'orbit'
+              this.baseSpeed = 320
+              this.speed = 320
+              this.damageReduction = 0.48
+              this.enableEnrage = true
+            }
           } else if (this.enemyId === 'boss_secret_dog') {
             this.isBoss = true
             this.isDevourerOfGods = true
@@ -730,6 +743,8 @@ export class Enemy {
           this.phaseTwoRushStart = null
           this.phaseTwoRushEnd = null
         }
+      } else if (this.isInferoChampion) {
+        this.updateInferoChampionMovement(deltaTime, true)
       } else if (this.isWormBoss) {
         const defaultDelay = this.isDevourerOfGods
           ? DEVOURER_CUTSCENE_DURATION_SECONDS
@@ -779,6 +794,7 @@ export class Enemy {
         this.slowMultiplier = 1.0
         this.updateProjectiles(deltaTime)
         this.updateAoeProjectiles(deltaTime)
+        if (this.isInferoChampion) this.keepInferoSafeDistanceFromPlayer()
         return
       }
       // Stationary final bosses resist hard freeze with a chill slow
@@ -795,7 +811,9 @@ export class Enemy {
     }
     
     // Movement pattern (stationary Wave 15 boss stays anchored; Worm bosses slither & dash)
-    if (this.isStationaryBoss) {
+    if (this.isInferoChampion) {
+      this.updateInferoChampionMovement(deltaTime)
+    } else if (this.isStationaryBoss) {
       this.velocity = Vector2.zero()
       if (this.anchorPos) {
         this.x = this.anchorPos.x - this.width / 2
@@ -907,7 +925,7 @@ export class Enemy {
         this.specialCooldown = Math.max(0, this.specialCooldown - combatDeltaTime)
       }
       const hasPendingMajorPattern =
-        (this.isStationaryBoss || this.isWormBoss) &&
+        (this.isStationaryBoss || this.isWormBoss || this.isInferoChampion) &&
         this.telegraphs.some(
           (t) =>
             !t.hasTriggered ||
@@ -926,10 +944,15 @@ export class Enemy {
         )
       if (this.specialCooldown <= 0 && !hasPendingMajorPattern && this.target && this.target.isAlive) {
         const distToTarget = Vector2.distance(this.getCenter(), this.target.getCenter())
-        const triggerRange = this.isStationaryBoss || this.isWormBoss ? 1800 : 560
+        const triggerRange =
+          this.isStationaryBoss || this.isWormBoss || this.isInferoChampion ? 1800 : 560
         if (distToTarget <= triggerRange) {
           this.spawnTelegraphedAttack()
-          this.specialCooldown = this.isStationaryBoss
+          this.specialCooldown = this.isInferoChampion
+            ? this.bossPhase >= 3
+              ? 1.65
+              : 2.1
+            : this.isStationaryBoss
             ? this.bossPhase >= 3
               ? 1.7
               : this.bossPhase === 2
@@ -951,6 +974,7 @@ export class Enemy {
     
     // Boundary check
     this.clampToBounds()
+    if (this.isInferoChampion) this.keepInferoSafeDistanceFromPlayer()
   }
 
   /**
@@ -1065,6 +1089,125 @@ export class Enemy {
     const moveDir = Vector2.normalize(rawDir)
     this.velocity = Vector2.multiply(moveDir, this.speed)
     this.direction = moveDir
+  }
+
+  /**
+   * Infero Champion circles the player in wide, reversing aerial sweeps.
+   * Its separation correction prevents body contact even if the player closes in.
+   */
+  private updateInferoChampionMovement(deltaTime: number, applyPosition = false): void {
+    if (!this.target || !this.target.isAlive) {
+      this.velocity = Vector2.zero()
+      return
+    }
+
+    const targetCenter = this.target.getCenter()
+    const currentCenter = this.getCenter()
+    if (this.inferoOrbitAngle === null) {
+      this.inferoOrbitAngle = Math.atan2(
+        currentCenter.y - targetCenter.y,
+        currentCenter.x - targetCenter.x
+      )
+    }
+
+    const direction = Math.floor(this.animTime / 5.4) % 2 === 0 ? 1 : -1
+    const turnRate = this.bossPhase >= 3 ? 1.72 : this.bossPhase === 2 ? 1.38 : 1.08
+    this.inferoOrbitAngle += direction * turnRate * deltaTime
+
+    const baseRadius = this.bossPhase >= 3 ? 245 : this.bossPhase === 2 ? 278 : 310
+    const orbitRadius = Math.max(baseRadius, this.getInferoMinimumPlayerDistance() + 86)
+    const radius = orbitRadius + Math.sin(this.animTime * 2.1) * 16
+    const desiredCenter = {
+      x: targetCenter.x + Math.cos(this.inferoOrbitAngle) * radius,
+      y: targetCenter.y + Math.sin(this.inferoOrbitAngle) * radius
+    }
+    const marginX = this.width / 2 + 36
+    const marginY = this.height / 2 + 36
+    desiredCenter.x = Math.max(marginX, Math.min(2000 - marginX, desiredCenter.x))
+    desiredCenter.y = Math.max(marginY, Math.min(2000 - marginY, desiredCenter.y))
+
+    const dx = desiredCenter.x - currentCenter.x
+    const dy = desiredCenter.y - currentCenter.y
+    const distance = Math.hypot(dx, dy)
+    const moveSpeed = this.baseSpeed * (this.bossPhase >= 3 ? 1.22 : this.bossPhase === 2 ? 1.08 : 1)
+    const maxStep = Math.min(distance, moveSpeed * Math.max(deltaTime, 0))
+    const safeDistance = Math.max(distance, 0.001)
+    const nextCenter = {
+      x: currentCenter.x + (dx / safeDistance) * maxStep,
+      y: currentCenter.y + (dy / safeDistance) * maxStep
+    }
+    const safeDelta = Math.max(deltaTime, 0.001)
+    this.velocity = {
+      x: (nextCenter.x - currentCenter.x) / safeDelta,
+      y: (nextCenter.y - currentCenter.y) / safeDelta
+    }
+    this.direction = Vector2.normalize(this.velocity)
+
+    if (applyPosition) {
+      this.x = nextCenter.x - this.width / 2
+      this.y = nextCenter.y - this.height / 2
+      this.clampToBounds()
+      this.keepInferoSafeDistanceFromPlayer()
+    }
+  }
+
+  private getInferoMinimumPlayerDistance(): number {
+    if (!this.target) return this.width + 48
+    return (
+      Math.hypot(this.width, this.height) / 2 +
+      Math.hypot(this.target.width, this.target.height) / 2 +
+      44
+    )
+  }
+
+  private keepInferoSafeDistanceFromPlayer(): void {
+    if (!this.target || !this.target.isAlive) return
+
+    const targetCenter = this.target.getCenter()
+    const currentCenter = this.getCenter()
+    const minimumDistance = this.getInferoMinimumPlayerDistance()
+    const currentDistance = Math.hypot(
+      currentCenter.x - targetCenter.x,
+      currentCenter.y - targetCenter.y
+    )
+    if (currentDistance >= minimumDistance) return
+
+    const minX = this.width / 2 + 24
+    const maxX = 2000 - this.width / 2 - 24
+    const minY = this.height / 2 + 24
+    const maxY = 2000 - this.height / 2 - 24
+    let best: { x: number; y: number; distance: number; travel: number } | null = null
+
+    for (let index = 0; index < 24; index++) {
+      const angle = (index / 24) * Math.PI * 2
+      const x = Math.max(
+        minX,
+        Math.min(maxX, targetCenter.x + Math.cos(angle) * (minimumDistance + 8))
+      )
+      const y = Math.max(
+        minY,
+        Math.min(maxY, targetCenter.y + Math.sin(angle) * (minimumDistance + 8))
+      )
+      const separation = Math.hypot(x - targetCenter.x, y - targetCenter.y)
+      const travel = Math.hypot(x - currentCenter.x, y - currentCenter.y)
+      if (
+        !best ||
+        (separation >= minimumDistance && best.distance < minimumDistance) ||
+        (separation >= minimumDistance &&
+          best.distance >= minimumDistance &&
+          travel < best.travel) ||
+        (separation < minimumDistance &&
+          best.distance < minimumDistance &&
+          separation > best.distance)
+      ) {
+        best = { x, y, distance: separation, travel }
+      }
+    }
+
+    if (best) {
+      this.x = best.x - this.width / 2
+      this.y = best.y - this.height / 2
+    }
   }
 
   private updateAstralGridOrbit(attack: BossTelegraphAttack, deltaTime: number): boolean {
@@ -1493,6 +1636,33 @@ export class Enemy {
       return
     }
 
+    if (this.isInferoChampion) {
+      this.attackPatternIndex++
+      const baseAngle = Math.atan2(direction.y, direction.x)
+      const fanCount = this.bossPhase >= 3 ? 7 : this.bossPhase === 2 ? 5 : 3
+      const spread = this.bossPhase >= 3 ? 0.78 : this.bossPhase === 2 ? 0.58 : 0.38
+      for (let index = 0; index < fanCount; index++) {
+        const progress = index / (fanCount - 1)
+        const angle = baseAngle + (progress - 0.5) * spread
+        const outerShot = index === 0 || index === fanCount - 1
+        this.projectiles.push({
+          x: startPos.x,
+          y: startPos.y,
+          width: this.bossPhase >= 3 ? 15 : 13,
+          height: this.bossPhase >= 3 ? 15 : 13,
+          speed: outerShot ? 285 : 335,
+          direction: { x: Math.cos(angle), y: Math.sin(angle) },
+          damage: Math.round((16 + this.bossPhase * 2) * Math.max(1, this.damageScale)),
+          color: outerShot ? '#FB923C' : '#FDE047',
+          lifetime: 0,
+          maxLifetime: 3.6,
+          homingTurnRate: this.bossPhase >= 3 && outerShot ? 0.85 : undefined,
+          homingRemaining: this.bossPhase >= 3 && outerShot ? 0.9 : undefined
+        })
+      }
+      return
+    }
+
     if (this.isBoss) {
       this.attackPatternIndex++
       const heavyPattern = this.bossTier >= 2 || this.isEnraged || this.bossPhase >= 2
@@ -1745,6 +1915,8 @@ export class Enemy {
         this.isAstralScourge && forcedKind === 'rotating_cross_lasers'
           ? 'astral_orbital_grid'
           : forcedKind
+    } else if (this.isInferoChampion) {
+      kind = getInferoChampionAttackKind(this.bossPhase, this.specialAttackCounter - 1)
     } else if (this.isWormBoss) {
       if (this.isAstralScourge && this.bossPhase >= 2) {
         kind = getAstralScourgePhaseTwoAttackKind()
@@ -2421,6 +2593,18 @@ export class Enemy {
         hasTriggered: false,
         hasDamagedPlayer: false
       }
+    }
+
+    if (this.isInferoChampion) {
+      const inferoWarningLabels: Partial<Record<BossAttackKind, string>> = {
+        tracking_strikes: 'CINDER TRACK // MOVE BEFORE THE IMPACT',
+        rotating_cross_lasers: 'FURNACE CROSS // FIND THE OPEN LANE',
+        pursuit_beam: 'RADIANT LANCE // BREAK THE LINE',
+        void_meteor_salvo: 'FALLING EMBERS // CLEAR THE MARKS',
+        singularity_grid: 'ASCENDANT GRID // SHIFT THROUGH THE GAPS',
+        bullet_hell: 'FLAME STORM // WEAVE THROUGH THE EMBERS'
+      }
+      telegraph.warningLabel = inferoWarningLabels[kind] ?? 'INFERO CHAMPION // AERIAL STRIKE'
     }
 
     this.telegraphs.push(telegraph)
@@ -5370,6 +5554,31 @@ export function getAstralScourgePhaseTwoAttackKind(
   if (roll < 0.6) return 'astral_targeted_lasers'
   if (roll < 0.8) return 'cosmic_laser_walls'
   return 'cosmic_portal_lunge'
+}
+
+export function getInferoChampionAttackKind(phase: number, cycleIndex: number): BossAttackKind {
+  const cycles: Record<number, BossAttackKind[]> = {
+    1: ['tracking_strikes', 'rotating_cross_lasers', 'pursuit_beam', 'void_meteor_salvo'],
+    2: [
+      'rotating_cross_lasers',
+      'tracking_strikes',
+      'singularity_grid',
+      'void_meteor_salvo',
+      'pursuit_beam'
+    ],
+    3: [
+      'singularity_grid',
+      'pursuit_beam',
+      'bullet_hell',
+      'tracking_strikes',
+      'void_meteor_salvo',
+      'rotating_cross_lasers'
+    ]
+  }
+  const safePhase = Math.max(1, Math.min(3, Math.floor(phase)))
+  const cycle = cycles[safePhase]
+  const safeIndex = ((Math.floor(cycleIndex) % cycle.length) + cycle.length) % cycle.length
+  return cycle[safeIndex]
 }
 
 export function getWave15BossAttackKind(

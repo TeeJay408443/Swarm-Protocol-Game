@@ -50,6 +50,7 @@ import {
   getAreaBossTemplateForWave,
   getAreaById,
   getAreaFinalBossHp,
+  getAreaFinalBossCutsceneTheme,
   getAreaMaxWave,
   getAreaEnemies,
   getAreaMiniBossCap,
@@ -149,6 +150,7 @@ import {
   Enemy,
   getAstralOrbitalGridLines,
   getAstralScourgePhaseTwoAttackKind,
+  getInferoChampionAttackKind,
   getAstralTargetedLaserLines,
   getWave15BossAttackKind,
   getRotatingCrossLaserSegments,
@@ -1451,7 +1453,13 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     assert.equal(getAreaBossTemplateForWave('molten_starforge', 20).name, 'Infero Champion')
     assert.equal(MOLTEN_STARFORGE_FINAL_BOSS_ID, 'boss_a3_20')
-    assert.equal(getAreaFinalBossHp('molten_starforge'), 360000)
+    assert.equal(getAreaFinalBossHp('molten_starforge'), 1200000)
+    const inferoCutscene = getAreaFinalBossCutsceneTheme('molten_starforge')
+    assert.equal(inferoCutscene.durationSeconds, 8.2)
+    assert.equal(inferoCutscene.warningCriticalText, 'THE FIRST FIRE TAKES FLIGHT')
+    assert.equal(getInferoChampionAttackKind(1, 0), 'tracking_strikes')
+    assert.equal(getInferoChampionAttackKind(2, 2), 'singularity_grid')
+    assert.equal(getInferoChampionAttackKind(3, 2), 'bullet_hell')
     assert.equal(getAreaThreeBossBuff(15).damageReduction, 0.42)
     assert.equal(shouldSpawnRegularEnemiesInWave(15, false, false, 'molten_starforge'), false)
     assert.equal(shouldSpawnRegularEnemiesInWave(20, false, false, 'molten_starforge'), false)
@@ -1467,6 +1475,55 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(getWave15CutsceneTheme('molten_starforge').kind === 'w15_starforge')
     assert.equal(getWave15BossAttackKind('primordial_starforge', 1, 0), 'pursuit_beam')
     assert.equal(getWave15BossAttackKind('primordial_starforge', 3, 0), 'singularity_grid')
+  })
+
+  it('keeps Infero Champion circling outside body-contact range during its entrance and fight', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1220,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.spawnDelay = 10
+    boss.cutsceneDelayTimer = 10
+    boss.isSpawning = true
+
+    const initialPosition = boss.getCenter()
+    const minimumDistance =
+      Math.hypot(boss.width, boss.height) / 2 +
+      Math.hypot(player.width, player.height) / 2 +
+      44
+    const assertSafeOrbit = () => {
+      const bossCenter = boss.getCenter()
+      const playerCenter = player.getCenter()
+      assert.ok(
+        Math.hypot(bossCenter.x - playerCenter.x, bossCenter.y - playerCenter.y) >=
+          minimumDistance - 0.01
+      )
+    }
+
+    for (let frame = 0; frame < 24; frame++) {
+      boss.update(0.1, player)
+      assertSafeOrbit()
+    }
+    assert.notDeepEqual(boss.getCenter(), initialPosition)
+
+    boss.isSpawning = false
+    boss.cutsceneDelayTimer = 0
+    boss.shootCooldown = 100
+    boss.specialCooldown = 100
+    for (let frame = 0; frame < 100; frame++) {
+      boss.update(0.05, player)
+      assertSafeOrbit()
+    }
+
+    player.setPosition(boss.x, boss.y)
+    boss.update(0.05, player)
+    assertSafeOrbit()
   })
 
   it('spawns dedicated Area 2 bosses every 5 waves, disables Wave 15 adds, and enables Endless Mode in Area 2', () => {

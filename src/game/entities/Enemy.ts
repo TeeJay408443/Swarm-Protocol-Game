@@ -23,7 +23,7 @@ import { EnemiesRow } from '../../types/database'
 import { Player } from './Player'
 
 export const ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS = 20
-const INFERO_DESPERATION_DURATION_SECONDS = 10
+export const INFERO_DESPERATION_DURATION_SECONDS = 10
 const INFERO_DESPERATION_PORTAL_SECONDS = 0.3
 const INFERO_DESPERATION_RAM_SECONDS = 0.62
 const INFERO_DESPERATION_RECOVERY_SECONDS = 0.18
@@ -451,6 +451,7 @@ export class Enemy {
   private inferoDesperationCycleMode: 'portal' | 'ram' | 'recover' = 'portal'
   private inferoDesperationCycleTimer: number = 0
   private inferoDesperationDirection: Vector2 = { x: 1, y: 0 }
+  private inferoDesperationPortalIndex: number = 0
   private visibleWorldBounds: { left: number; right: number; top: number; bottom: number } | null = null
 
   get isInferoChampion(): boolean {
@@ -1398,14 +1399,18 @@ export class Enemy {
       }
 
       const targetCenter = this.target?.isAlive ? this.target.getCenter() : null
+      const portalCenter = this.inferoDesperationPortalPosition!
       if (targetCenter) {
-        this.facingAngle = Math.atan2(targetCenter.y - center.y, targetCenter.x - center.x)
+        this.facingAngle = Math.atan2(targetCenter.y - portalCenter.y, targetCenter.x - portalCenter.x)
       }
 
       if (this.inferoDesperationCycleTimer >= INFERO_DESPERATION_PORTAL_SECONDS) {
+        // Emerge at the remote portal and launch in one frame; aim is then locked.
+        this.x = portalCenter.x - this.width / 2
+        this.y = portalCenter.y - this.height / 2
         if (targetCenter) {
-          const dx = targetCenter.x - center.x
-          const dy = targetCenter.y - center.y
+          const dx = targetCenter.x - portalCenter.x
+          const dy = targetCenter.y - portalCenter.y
           const distance = Math.hypot(dx, dy) || 1
           this.inferoDesperationDirection = { x: dx / distance, y: dy / distance }
         }
@@ -1413,7 +1418,6 @@ export class Enemy {
           this.inferoDesperationDirection.y,
           this.inferoDesperationDirection.x
         )
-        this.inferoDesperationPortalPosition = { ...center }
         this.inferoDesperationCycleMode = 'ram'
         this.inferoDesperationCycleTimer = 0
         this.velocity = {
@@ -1444,8 +1448,48 @@ export class Enemy {
     if (this.inferoDesperationCycleTimer >= INFERO_DESPERATION_RECOVERY_SECONDS) {
       this.inferoDesperationCycleMode = 'portal'
       this.inferoDesperationCycleTimer = 0
-      this.inferoDesperationPortalPosition = { ...center }
+      this.openInferoDesperationPortal()
     }
+  }
+
+  private openInferoDesperationPortal(): void {
+    const limits = this.getInferoCenterLimits()
+    const target = this.target?.getCenter() ?? this.getInferoArenaCenter()
+    const positions = [
+      { x: limits.x.min, y: limits.y.min },
+      { x: limits.x.max, y: limits.y.max },
+      { x: limits.x.max, y: limits.y.min },
+      { x: limits.x.min, y: limits.y.max }
+    ]
+    // Alternate arena corners rather than spawning a portal beneath the boss.
+    const index = this.inferoDesperationPortalIndex++ % positions.length
+    let portal = positions[index]
+    if (Vector2.distance(portal, target) < 200) {
+      portal = positions[(index + 1) % positions.length]
+    }
+    this.inferoDesperationPortalPosition = { ...portal }
+  }
+
+  get inferoDesperationWhiteOpacity(): number {
+    return Math.max(0, Math.min(1, this.inferoDesperationTimer / INFERO_DESPERATION_DURATION_SECONDS))
+  }
+
+  completeInferoDesperation(): boolean {
+    if (
+      !this.isAlive ||
+      !this.isInferoDesperationPhase ||
+      !this.pendingInferoDesperationCompletion ||
+      this.inferoDesperationTimer < INFERO_DESPERATION_DURATION_SECONDS
+    ) return false
+    this.pendingInferoDesperationCompletion = false
+    this.isInferoDesperationPhase = false
+    this.hasCompletedInferoDesperation = true
+    this.health = 0
+    this.isAlive = false
+    this.isDying = true
+    this.deathTimer = 0
+    this.inferoDesperationPortalPosition = null
+    return true
   }
 
   private getInferoCenterLimits(): {
@@ -4785,7 +4829,7 @@ export class Enemy {
     }
 
     // Area final-boss phase gates; Infero deliberately has only two phases.
-    if ((this.isFinalBoss || this.isWave15SpecialBoss) && !this.isAstralScourge) {
+    if ((this.isFinalBoss || this.isWave15SpecialBoss || this.isInferoChampion) && !this.isAstralScourge) {
       const phase2Threshold = Math.floor(this.maxHealth * (this.isInferoChampion ? 0.5 : 0.66))
       const phase3Threshold = Math.floor(this.maxHealth * 0.33)
 
@@ -4870,8 +4914,6 @@ export class Enemy {
     if (this.health <= 0) {
       if (
         this.isInferoChampion &&
-        this.isFinalBoss &&
-        this.bossPhase >= 2 &&
         !this.hasCompletedInferoDesperation
       ) {
         this.health = 0
@@ -4880,7 +4922,14 @@ export class Enemy {
         this.inferoDesperationTimer = 0
         this.inferoDesperationCycleMode = 'portal'
         this.inferoDesperationCycleTimer = 0
-        this.inferoDesperationPortalPosition = { ...this.getCenter() }
+        this.inferoDesperationPortalIndex = 0
+        this.openInferoDesperationPortal()
+        this.isDying = false
+        this.color = this.baseColor
+        this.hitFlashTimer = 0
+        this.freezeTimer = 0
+        this.burnTimer = 0
+        this.pendingPhaseAnnouncement = null
         this.telegraphs = []
         this.projectiles = []
         this.aoeProjectiles = []
@@ -4938,7 +4987,7 @@ export class Enemy {
    * Heal
    */
   heal(amount: number): void {
-    if (!this.isAlive) return
+    if (!this.isAlive || this.isInferoDesperationPhase) return
     this.health += amount
     if (this.health > this.maxHealth) this.health = this.maxHealth
   }
@@ -4947,7 +4996,7 @@ export class Enemy {
    * Ignite enemy with a stacking/refreshing burn DoT
    */
   applyBurn(damagePerTick: number, duration = 3.0): void {
-    if (!this.isAlive || this.isSpawning) return
+    if (!this.isAlive || this.isSpawning || this.isInferoDesperationPhase) return
     const safeDmg = Math.max(1, Math.round(damagePerTick))
     this.burnDamagePerTick = Math.max(this.burnDamagePerTick, safeDmg)
     this.burnTimer = Math.max(this.burnTimer, duration)
@@ -4973,7 +5022,7 @@ export class Enemy {
    * Freeze enemy temporarily in solid ice (halting movement & attacks)
    */
   applyFreeze(duration = 1.6): void {
-    if (!this.isAlive || this.isSpawning || duration <= 0) return
+    if (!this.isAlive || this.isSpawning || this.isInferoDesperationPhase || duration <= 0) return
     if (this.freezeTimer <= 0 && this.freezeImmuneTimer > 0) return
     const effectiveDuration = this.isStationaryBoss
       ? Math.min(0.45, duration * 0.25)
@@ -6821,6 +6870,25 @@ export class Enemy {
       ctx.ellipse(0, 0, 17, 40, 0, 0, Math.PI * 2)
       ctx.stroke()
       ctx.restore()
+      if (this.inferoDesperationCycleMode === 'portal') {
+        // Show the destination and intended charge before the simultaneous teleport/ram.
+        const target = this.target?.getCenter()
+        if (target) {
+          const destination = camera.worldToScreen(target.x, target.y)
+          const angle = Math.atan2(destination.y - portal.y, destination.x - portal.x)
+          ctx.save()
+          ctx.strokeStyle = 'rgba(253, 224, 71, 0.8)'
+          ctx.lineWidth = 3
+          ctx.setLineDash([12, 10])
+          ctx.beginPath()
+          ctx.moveTo(portal.x, portal.y)
+          ctx.lineTo(portal.x + Math.cos(angle) * 1600, portal.y + Math.sin(angle) * 1600)
+          ctx.stroke()
+          ctx.restore()
+        }
+        // The old body dissolves as the remote portal opens.
+        ctx.globalAlpha = Math.max(0.1, 1 - this.inferoDesperationCycleTimer / INFERO_DESPERATION_PORTAL_SECONDS)
+      }
     }
 
     // Segmented Worm Bosses (Devourer of Gods / Astral Scourge) trailing body segments

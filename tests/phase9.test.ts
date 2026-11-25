@@ -1977,18 +1977,65 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(boss.isInferoDesperationPhase, true)
     assert.equal(boss.health, 0)
     assert.ok(boss.inferoDesperationPortalPosition)
+    assert.equal(boss.inferoDesperationWhiteOpacity, 0, 'the arena starts fully visible')
+    assert.equal(boss.completeInferoDesperation(), false, 'victory cannot skip the survival timer')
+    assert.equal(boss.isDying, false)
 
-    const initialX = boss.getCenter().x
-    for (let frame = 0; frame < 24; frame++) boss.update(0.05, player)
-    assert.notEqual(boss.getCenter().x, initialX, 'Infero repeatedly rams from each portal')
+    const initialPosition = boss.getCenter()
+    const firstPortal = { ...boss.inferoDesperationPortalPosition! }
+    assert.notDeepEqual(firstPortal, initialPosition, 'the portal opens at a remote arena location')
+    boss.update(0.25, player)
+    assert.deepEqual(boss.getCenter(), initialPosition, 'Infero waits briefly for the portal to open')
+    boss.update(0.05, player)
+    assert.deepEqual(boss.getCenter(), firstPortal, 'teleportation occurs at the launch frame')
+    assert.ok(Math.hypot(boss.velocity.x, boss.velocity.y) > 1000, 'the ram starts simultaneously')
+    const launchVelocity = { ...boss.velocity }
+    player.x += 170
+    player.y += 120
+    boss.update(0.05, player)
+    assert.deepEqual(boss.velocity, launchVelocity, 'the launched ram does not follow the player')
+    assert.notDeepEqual(boss.getCenter(), firstPortal)
     assert.equal(boss.takeDamage(500), false, 'the finale cannot be interrupted by more damage')
 
-    for (let frame = 0; frame < 220 && !boss.pendingInferoDesperationCompletion; frame++) {
+    const portals = new Set([`${firstPortal.x},${firstPortal.y}`])
+    while (boss.inferoDesperationTimer < 5 - 1e-7) {
+      boss.update(0.05, player)
+      if (boss.inferoDesperationPortalPosition) {
+        const portal = boss.inferoDesperationPortalPosition
+        portals.add(`${portal.x},${portal.y}`)
+      }
+      assert.equal(boss.isAlive, true)
+      assert.equal(boss.isDying, false)
+    }
+    assert.ok(Math.abs(boss.inferoDesperationWhiteOpacity - 0.5) < 1e-6)
+    assert.ok(portals.size >= 3, 'repeated rams emerge from different portals')
+    while (boss.inferoDesperationTimer < 9.95 - 1e-7) {
       boss.update(0.05, player)
     }
+    assert.equal(boss.completeInferoDesperation(), false, 'Infero is still alive just before full white')
+    assert.ok(boss.inferoDesperationWhiteOpacity < 1)
+    boss.update(0.06, player)
     assert.equal(boss.inferoDesperationTimer, 10)
+    assert.equal(boss.inferoDesperationWhiteOpacity, 1)
     assert.equal(boss.pendingInferoDesperationCompletion, true)
     assert.equal(boss.isAlive, true, 'the game waits for the white fade before showing victory')
+    assert.equal(boss.completeInferoDesperation(), true)
+    assert.equal(boss.isAlive, false)
+    assert.equal(boss.health, 0, 'completion does not simulate another damaging hit')
+    assert.equal(boss.isDying, true)
+    assert.equal(boss.hasCompletedInferoDesperation, true)
+    assert.equal(boss.completeInferoDesperation(), false, 'completion and rewards happen only once')
+  })
+
+  it('also preserves Infero’s finale when spawned without the final-wave flag', () => {
+    const boss = new Enemy({ enemyData: AREA_THREE_BOSSES[3], isBoss: true })
+    boss.isSpawning = false
+    boss.bossPhase = 2
+    boss.health = 1
+    assert.equal(boss.isFinalBoss, false)
+    assert.equal(boss.takeDamage(100), false)
+    assert.equal(boss.isInferoDesperationPhase, true)
+    assert.equal(boss.isAlive, true)
   })
 
   it('rotates Infero’s phase-two laser spokes slowly before extending and firing', () => {

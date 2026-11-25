@@ -927,7 +927,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const [activeUpgradeNames, setActiveUpgradeNames] = useState<string[]>([])
   const [shieldActive, setShieldActive] = useState<boolean>(false)
   const [activeBossHud, setActiveBossHud] = useState<ActiveBossHudState | null>(null)
-  const [inferoDesperationFade, setInferoDesperationFade] = useState<'white' | 'fade-out' | null>(null)
+  const inferoWhiteOverlayRef = useRef<HTMLDivElement>(null)
   const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[]>([])
   const [finalScore, setFinalScore] = useState<number>(0)
   const [isVictory, setIsVictory] = useState<boolean>(false)
@@ -962,8 +962,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const cameraRef = useRef<Camera | null>(null)
   const inputRef = useRef<InputManager | null>(null)
   const enemiesRef = useRef<Enemy[]>([])
-  const inferoVictoryFinalizeTimerRef = useRef<number | null>(null)
-  const inferoVictoryFinalizeScheduledRef = useRef(false)
+  const inferoFinaleRef = useRef<{
+    boss: Enemy
+    whitePresented: boolean
+    fadeBackElapsed: number | null
+  } | null>(null)
   const playerProjectilesRef = useRef<Projectile[]>([])
   const coinsRef = useRef<Coin[]>([])
   const summonsRef = useRef<Summon[]>([])
@@ -1188,12 +1191,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
     (victory = false) => {
       if (gameStateRef.current === 'gameover') return
       if (!victory) {
-        setInferoDesperationFade(null)
-        if (inferoVictoryFinalizeTimerRef.current) {
-          clearTimeout(inferoVictoryFinalizeTimerRef.current)
-          inferoVictoryFinalizeTimerRef.current = null
-        }
-        inferoVictoryFinalizeScheduledRef.current = false
+        inferoFinaleRef.current = null
+        if (inferoWhiteOverlayRef.current) inferoWhiteOverlayRef.current.style.opacity = '0'
       }
 
       flushBankedCoins()
@@ -1820,12 +1819,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
   )
 
   const initRun = useCallback(() => {
-    if (inferoVictoryFinalizeTimerRef.current) {
-      clearTimeout(inferoVictoryFinalizeTimerRef.current)
-      inferoVictoryFinalizeTimerRef.current = null
-    }
-    inferoVictoryFinalizeScheduledRef.current = false
-    setInferoDesperationFade(null)
+    inferoFinaleRef.current = null
+    if (inferoWhiteOverlayRef.current) inferoWhiteOverlayRef.current.style.opacity = '0'
 
     const canvas = canvasRef.current
     if (!canvas) return
@@ -2190,6 +2185,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
         setMaxHealth(player.maxHealth)
         setHealth(player.health)
       } else if (action.type === 'skip_wave') {
+        inferoFinaleRef.current = null
+        if (inferoWhiteOverlayRef.current) inferoWhiteOverlayRef.current.style.opacity = '0'
         const canvas = canvasRef.current
         const targetWave =
           action.mode === 'delta'
@@ -2722,7 +2719,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const wasInferoDesperate = enemy.isInferoDesperationPhase
       const wasKilled = enemy.takeDamage(finalDamage)
       if (!wasInferoDesperate && enemy.isInferoDesperationPhase) {
-        setInferoDesperationFade('white')
+        inferoFinaleRef.current = { boss: enemy, whitePresented: false, fadeBackElapsed: null }
+        if (inferoWhiteOverlayRef.current) inferoWhiteOverlayRef.current.style.opacity = '0'
         playSoundRef.current('wave')
         floatingTextsRef.current.push({
           x: enemy.getCenter().x,
@@ -2890,7 +2888,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         )
       }
 
-      if (knockbackFrom && !enemy.isStationaryBoss) {
+      if (knockbackFrom && !enemy.isStationaryBoss && !enemy.isInferoDesperationPhase) {
         const ec = enemy.getCenter()
         const dx = ec.x - knockbackFrom.x
         const dy = ec.y - knockbackFrom.y
@@ -2899,7 +2897,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
         enemy.y += (dy / len) * 18
       }
 
-      if (wasKilled) {
+      if (wasKilled) handleEnemyDefeat(enemy)
+    }
+
+    // Shared by normal kills and the explicit end of Infero's survival finale.
+    const handleEnemyDefeat = (enemy: Enemy) => {
         enemiesDefeatedRef.current += 1
         if (enemy.isBoss) {
           bossesDefeatedRef.current += 1
@@ -3017,18 +3019,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           }
           if (areaRef.current.id !== 'carbon_sector') {
             playSoundRef.current('levelup')
-            if (enemy.isInferoChampion) {
-              inferoVictoryFinalizeTimerRef.current = window.setTimeout(() => {
-                inferoVictoryFinalizeTimerRef.current = null
-                inferoVictoryFinalizeScheduledRef.current = false
-                if (gameStateRef.current !== 'playing') {
-                  setInferoDesperationFade(null)
-                  return
-                }
-                setInferoDesperationFade(null)
-                setEngineState('victory_choice')
-              }, 420)
-            } else {
+            if (!enemy.isInferoChampion || !inferoFinaleRef.current) {
               setEngineState('victory_choice')
             }
           } else {
@@ -3052,7 +3043,6 @@ const GameContainer: React.FC<GameContainerProps> = ({
           playSoundRef.current('levelup')
           setEngineState('levelup')
         }
-      }
     }
 
     const damagePlayer = (amount: number, knockbackOrigin?: { x: number; y: number }): boolean => {
@@ -6283,23 +6273,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
               enemy.setVisibleWorldBounds(cameraRef.current?.getWorldBounds() ?? null)
             }
             enemy.update(deltaTime, player)
-            if (
-              enemy.isInferoChampion &&
-              enemy.pendingInferoDesperationCompletion &&
-              !inferoVictoryFinalizeScheduledRef.current
-            ) {
-              enemy.pendingInferoDesperationCompletion = false
-              inferoVictoryFinalizeScheduledRef.current = true
-              setInferoDesperationFade('fade-out')
-              enemy.isInferoDesperationPhase = false
-              enemy.hasCompletedInferoDesperation = true
-              enemy.health = 1
-              const player = playerRef.current
-              if (player) {
-                player.isInvulnerable = true
-                player.invulnerabilityTimer = Math.max(player.invulnerabilityTimer, 0.8)
-              }
-              damageEnemy(enemy, 1, undefined, { canCrit: false, color: '#FDE047' })
+            if (enemy.isInferoDesperationPhase && !inferoFinaleRef.current) {
+              inferoFinaleRef.current = { boss: enemy, whitePresented: false, fadeBackElapsed: null }
             }
             if (enemy.pendingAstralPhaseTwoCutscene) {
               startAstralScourgePhaseTwoCutscene(enemy)
@@ -8596,16 +8571,38 @@ const GameContainer: React.FC<GameContainerProps> = ({
         }
       }
 
+      const finale = inferoFinaleRef.current
+      if (finale && inferoWhiteOverlayRef.current && gameStateRef.current === 'playing') {
+        if (finale.fadeBackElapsed === null) {
+          inferoWhiteOverlayRef.current.style.opacity = String(finale.boss.inferoDesperationWhiteOpacity)
+          if (finale.boss.pendingInferoDesperationCompletion) {
+            // Present at least one fully white frame before any death rewards or victory.
+            if (!finale.whitePresented) {
+              finale.whitePresented = true
+            } else if (finale.boss.completeInferoDesperation()) {
+              playerRef.current!.isInvulnerable = true
+              playerRef.current!.invulnerabilityTimer = Math.max(
+                playerRef.current!.invulnerabilityTimer, 1
+              )
+              finale.fadeBackElapsed = 0
+              handleEnemyDefeat(finale.boss)
+            }
+          }
+        } else {
+          finale.fadeBackElapsed += deltaTime
+          inferoWhiteOverlayRef.current.style.opacity = String(Math.max(0, 1 - finale.fadeBackElapsed / 0.42))
+          if (finale.fadeBackElapsed >= 0.42) {
+            inferoFinaleRef.current = null
+            if (finale.boss.isFinalBoss) setEngineState('victory_choice')
+          }
+        }
+      }
       rafId = requestAnimationFrame(frame)
     }
 
     rafId = requestAnimationFrame(frame)
     return () => {
       cancelAnimationFrame(rafId)
-      if (inferoVictoryFinalizeTimerRef.current) {
-        clearTimeout(inferoVictoryFinalizeTimerRef.current)
-        inferoVictoryFinalizeTimerRef.current = null
-      }
     }
   }, [pickLevelUpOptions, setEngineState, spawnEnemyForWave, toast, triggerEndGame])
 
@@ -8758,7 +8755,6 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
   const handlePauseToggle = useCallback(() => {
     if (gameStateRef.current === 'playing') {
-      if (inferoVictoryFinalizeScheduledRef.current) return
       pauseMusicRef.current()
       setEngineState('paused')
     } else if (gameStateRef.current === 'paused') {
@@ -8846,17 +8842,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
     >
       <GameCanvas ref={canvasRef} />
       <YouTubeBossMusicPlayer />
-      {inferoDesperationFade && (
-        <div
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-0 z-[100] bg-white ${
-            inferoDesperationFade === 'white'
-              ? 'infero-desperation-white'
-              : 'infero-desperation-fade-back'
-          }`}
-          style={{ animationPlayState: gameState === 'paused' ? 'paused' : 'running' }}
-        />
-      )}
+      <div
+        ref={inferoWhiteOverlayRef}
+        aria-hidden="true"
+        data-testid="infero-whiteout"
+        className="pointer-events-none absolute inset-0 z-[100] bg-white"
+        style={{ opacity: 0 }}
+      />
 
       {gameState === 'menu' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 z-30 p-6 text-center">
@@ -9115,7 +9107,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
             </div>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-yellow-300 mb-3">
               {activeArea.id === 'molten_starforge'
-                ? 'PRIMORDIAL STARFORGE DEFEATED!'
+                ? 'INFERO CHAMPION DEFEATED!'
                 : activeArea.id === 'astral_citadel'
                   ? 'ASTRAL SCOURGE VANQUISHED!'
                   : 'SECTOR BOSS DEFEATED!'}

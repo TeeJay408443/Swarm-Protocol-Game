@@ -3,3 +3,4 @@
 - [Astral Scourge phases](astral-scourge-phases.md) — the Wave 20 boss has a damaging tail, then returns after defeat with its specified second health phase.
 - [Boss-drop crafting](boss-drop-crafting.md) — all playable bosses and mini-bosses have three themed drops; the dev-only secret boss is excluded.
 - [Wave 15 boss identities](wave-15-boss-identities.md) — Omega Overlord and Solar Archon Seraph need separate cinematic entrances and signature encounter patterns.
+- [Infero desperation finale](infero-finale.md) — zero HP begins ten seconds of teleport rams and a gradual whiteout; death and victory must wait for full white.

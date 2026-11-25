@@ -1495,7 +1495,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getWave15BossAttackKind('primordial_starforge', 3, 0), 'singularity_grid')
   })
 
-  it('telegraphs the blazing spear lanes and fires repeated projectiles from the sides', () => {
+  it('telegraphs a screen-wide blazing spear barrage and emits fiery trails', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
     const boss = new Enemy({
@@ -1511,19 +1511,30 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.isSpawning = false
     boss.cutsceneDelayTimer = 0
 
+    const initialBossX = boss.getCenter().x
     const attack = boss.spawnTelegraphedAttack('inferno_spear_volley')!
     assert.equal(attack.warningLabel, 'BLAZING SPEAR // SIDE VOLLEY')
-    assert.equal(attack.projectileLanes?.length, 3)
-    assert.ok(attack.gridLines?.length === 3)
+    assert.ok(attack.projectileCount !== undefined && attack.projectileCount >= 15 && attack.projectileCount <= 20)
+    assert.equal(attack.projectileLanes?.length, attack.projectileCount)
+    assert.equal(attack.gridLines?.length, attack.projectileCount)
     assert.equal(attack.hasTriggered, false)
 
-    boss.update(1.46, player)
+    const launchDirection = attack.sideMode === 'left' ? -1 : 1
+    boss.update(0.05, player)
+    assert.ok((boss.getCenter().x - initialBossX) * launchDirection > 0)
+    for (let frame = 1; frame < 40; frame++) boss.update(0.05, player)
     assert.equal(attack.hasTriggered, true)
-    assert.equal(boss.projectiles.length, 3)
-    assert.ok(boss.projectiles.every((projectile) => projectile.color === '#FB923C' || projectile.color === '#FDE047'))
+    assert.equal(boss.projectiles.length, Math.ceil(attack.projectileCount! / 3))
+    assert.ok(boss.projectiles.every((projectile) => projectile.isBlazingSpear))
+    assert.ok(
+      attack.gridLines?.every((line) =>
+        attack.sideMode === 'left' ? line.x2 > line.x1 + 1300 : line.x2 < line.x1 - 1300
+      )
+    )
 
-    boss.update(0.35, player)
-    assert.equal(boss.projectiles.length, 6)
+    for (let frame = 0; frame < 16; frame++) boss.update(0.05, player)
+    assert.equal(boss.projectiles.length, attack.projectileCount)
+    assert.ok(boss.projectiles.some((projectile) => (projectile.trailParticles?.length ?? 0) > 0))
   })
 
   it('keeps Infero Champion circling outside body-contact range during its entrance and fight', () => {

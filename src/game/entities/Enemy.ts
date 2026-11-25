@@ -80,6 +80,18 @@ export interface EnemyProjectile {
   splitDone?: boolean
   splitColors?: [string, string]
   isCosmicStar?: boolean
+  isBlazingSpear?: boolean
+  trailTimer?: number
+  trailParticles?: Array<{
+    x: number
+    y: number
+    velocityX: number
+    velocityY: number
+    radius: number
+    lifetime: number
+    maxLifetime: number
+    color: string
+  }>
 }
 
 export interface EnemyAoeProjectile {
@@ -188,6 +200,7 @@ export interface BossTelegraphAttack {
     directionX: number
     directionY: number
   }>
+  projectileCount?: number
   gridPulseCount?: number
   gridPulseIndex?: number
   gridPulseTimer?: number
@@ -1118,16 +1131,26 @@ export class Enemy {
       )
     }
 
-    const direction = Math.floor(this.animTime / 5.4) % 2 === 0 ? 1 : -1
-    const turnRate = this.bossPhase >= 3 ? 1.72 : this.bossPhase === 2 ? 1.38 : 1.08
-    this.inferoOrbitAngle += direction * turnRate * deltaTime
+    const spearAttack = this.telegraphs.find((attack) => attack.kind === 'inferno_spear_volley')
+    let desiredCenter: Vector2
+    if (spearAttack?.sideMode === 'left' || spearAttack?.sideMode === 'right') {
+      const sideDirection = spearAttack.sideMode === 'left' ? -1 : 1
+      desiredCenter = {
+        x: targetCenter.x + sideDirection * 610,
+        y: targetCenter.y - 62
+      }
+    } else {
+      const direction = Math.floor(this.animTime / 5.4) % 2 === 0 ? 1 : -1
+      const turnRate = this.bossPhase >= 3 ? 1.72 : this.bossPhase === 2 ? 1.38 : 1.08
+      this.inferoOrbitAngle += direction * turnRate * deltaTime
 
-    const horizontalRadius = this.bossPhase >= 3 ? 470 : this.bossPhase === 2 ? 440 : 410
-    const verticalRadius = this.bossPhase >= 3 ? 190 : 165
-    const orbitRadius = Math.max(horizontalRadius, this.getInferoMinimumPlayerDistance() + 86)
-    const desiredCenter = {
-      x: targetCenter.x + Math.cos(this.inferoOrbitAngle) * orbitRadius,
-      y: targetCenter.y - 58 + Math.sin(this.inferoOrbitAngle) * verticalRadius
+      const horizontalRadius = this.bossPhase >= 3 ? 470 : this.bossPhase === 2 ? 440 : 410
+      const verticalRadius = this.bossPhase >= 3 ? 190 : 165
+      const orbitRadius = Math.max(horizontalRadius, this.getInferoMinimumPlayerDistance() + 86)
+      desiredCenter = {
+        x: targetCenter.x + Math.cos(this.inferoOrbitAngle) * orbitRadius,
+        y: targetCenter.y - 58 + Math.sin(this.inferoOrbitAngle) * verticalRadius
+      }
     }
     const marginX = this.width / 2 + 36
     const marginY = this.height / 2 + 36
@@ -2016,29 +2039,35 @@ export class Enemy {
 
     if (kind === 'inferno_spear_volley' && this.isInferoChampion) {
       const sideMode: ClosingSideLaserMode = this.specialAttackCounter % 2 === 0 ? 'left' : 'right'
-      const laneCount = this.bossPhase >= 3 ? 5 : 3
-      const laneSpacing = this.bossPhase >= 2 ? 105 : 130
+      const projectileCount = 15 + Math.floor(Math.random() * 6)
       const edgeX = Math.max(
         70,
-        Math.min(1930, targetCenter.x + (sideMode === 'left' ? -740 : 740))
+        Math.min(1930, targetCenter.x + (sideMode === 'left' ? -780 : 780))
       )
-      const passX = Math.max(
+      const oppositeEdgeX = Math.max(
         70,
-        Math.min(1930, targetCenter.x + (sideMode === 'left' ? 185 : -185))
+        Math.min(1930, targetCenter.x + (sideMode === 'left' ? 780 : -780))
       )
-      const projectileLanes = Array.from({ length: laneCount }, (_, index) => {
-        const offset = (index - (laneCount - 1) / 2) * laneSpacing
-        const startY = Math.max(80, Math.min(1920, targetCenter.y + offset))
-        const endY = Math.max(80, Math.min(1920, targetCenter.y + offset * 0.2))
-        const direction = Vector2.normalize({ x: passX - edgeX, y: endY - startY })
+      const horizontalDistance = Math.abs(oppositeEdgeX - edgeX)
+      const projectileLanes = Array.from({ length: projectileCount }, (_, index) => {
+        const verticalProgress = projectileCount === 1 ? 0.5 : index / (projectileCount - 1)
+        const startY = Math.max(
+          80,
+          Math.min(1920, targetCenter.y - 300 + verticalProgress * 600)
+        )
+        const verticalDrift = (Math.random() - 0.5) * 34
+        const direction = Vector2.normalize({
+          x: oppositeEdgeX - edgeX,
+          y: verticalDrift
+        })
         return { x: edgeX, y: startY, directionX: direction.x, directionY: direction.y }
       })
       const gridLines = projectileLanes.map((lane) => ({
         x1: lane.x,
         y1: lane.y,
-        x2: lane.x + lane.directionX * 980,
-        y2: lane.y + lane.directionY * 980,
-        width: 8,
+        x2: lane.x + lane.directionX * horizontalDistance,
+        y2: lane.y + lane.directionY * horizontalDistance,
+        width: 2,
         color: '#FB923C'
       }))
       telegraph = {
@@ -2048,12 +2077,13 @@ export class Enemy {
         y: bossCenter.y,
         sideMode,
         radius: 10,
+        projectileCount,
         projectileLanes,
         gridLines,
         chargeTimer: 0,
-        chargeDuration: 1.45,
+        chargeDuration: 2,
         activeTimer: 0,
-        activeDuration: 1.05,
+        activeDuration: 1.3,
         damage: Math.round(24 * Math.max(1, this.damageScale)),
         pulseTimer: 0,
         pulseCount: 0,
@@ -2686,9 +2716,9 @@ export class Enemy {
 
   private launchInferoSpearVolley(attack: BossTelegraphAttack, pulseIndex: number): void {
     if (!attack.projectileLanes?.length) return
-    const pulseSpread = (pulseIndex - (this.bossPhase >= 3 ? 1 : 0.5)) * 0.045
+    const pulseSpread = (pulseIndex - 1) * 0.018
 
-    for (let index = 0; index < attack.projectileLanes.length; index++) {
+    for (let index = pulseIndex; index < attack.projectileLanes.length; index += 3) {
       const lane = attack.projectileLanes[index]
       const direction = Vector2.normalize({
         x: lane.directionX,
@@ -2697,14 +2727,17 @@ export class Enemy {
       this.projectiles.push({
         x: lane.x,
         y: lane.y,
-        width: this.bossPhase >= 3 ? 21 : 18,
-        height: this.bossPhase >= 3 ? 17 : 14,
-        speed: this.bossPhase >= 3 ? 520 : 465,
+        width: 34,
+        height: 12,
+        speed: this.bossPhase >= 3 ? 590 : 535,
         direction,
         damage: attack.damage,
         color: index % 2 === 0 ? '#FB923C' : '#FDE047',
         lifetime: 0,
-        maxLifetime: 4.5
+        maxLifetime: 5,
+        isBlazingSpear: true,
+        trailTimer: 0,
+        trailParticles: []
       })
     }
   }
@@ -2906,7 +2939,7 @@ export class Enemy {
           t.x = bossCenter.x
           t.y = bossCenter.y
           t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
-          const maxPulses = this.bossPhase >= 3 ? 3 : 2
+          const maxPulses = 3
           while ((t.pulseCount ?? 1) < maxPulses && (t.pulseTimer ?? 0) >= 0.34) {
             t.pulseTimer = (t.pulseTimer ?? 0) - 0.34
             const pulseIndex = t.pulseCount ?? 1
@@ -3087,6 +3120,35 @@ export class Enemy {
       proj.x += proj.direction.x * proj.speed * deltaTime
       proj.y += proj.direction.y * proj.speed * deltaTime
       proj.lifetime += deltaTime
+
+      if (proj.isBlazingSpear) {
+        const trail = (proj.trailParticles ??= [])
+        for (let particleIndex = trail.length - 1; particleIndex >= 0; particleIndex--) {
+          const particle = trail[particleIndex]
+          particle.x += particle.velocityX * deltaTime
+          particle.y += particle.velocityY * deltaTime
+          particle.lifetime += deltaTime
+          if (particle.lifetime >= particle.maxLifetime) trail.splice(particleIndex, 1)
+        }
+
+        proj.trailTimer = (proj.trailTimer ?? 0) + deltaTime
+        while (proj.trailTimer >= 0.045) {
+          proj.trailTimer -= 0.045
+          const spread = (Math.random() - 0.5) * 20
+          const directionAngle = Math.atan2(proj.direction.y, proj.direction.x)
+          trail.push({
+            x: proj.x - proj.direction.x * proj.width * 0.42 + (Math.random() - 0.5) * 5,
+            y: proj.y - proj.direction.y * proj.width * 0.42 + (Math.random() - 0.5) * 5,
+            velocityX: -Math.cos(directionAngle) * (36 + Math.random() * 26) + spread,
+            velocityY: -Math.sin(directionAngle) * (36 + Math.random() * 26) - 20 - Math.random() * 28,
+            radius: 2.5 + Math.random() * 3.5,
+            lifetime: 0,
+            maxLifetime: 0.22 + Math.random() * 0.2,
+            color: Math.random() < 0.55 ? '#FB923C' : Math.random() < 0.72 ? '#FDE047' : '#FFF7ED'
+          })
+        }
+        if (trail.length > 18) trail.splice(0, trail.length - 18)
+      }
 
       // Calamity Nebula Star mid-flight radial split
       if (
@@ -5655,6 +5717,22 @@ export class Enemy {
     // Enemy Laser / Arcane / Cosmic Nebula Star Projectiles
     for (const proj of this.projectiles) {
       const { x: projX, y: projY } = camera.worldToScreen(proj.x, proj.y)
+      if (proj.isBlazingSpear && proj.trailParticles) {
+        for (const particle of proj.trailParticles) {
+          const particleScreen = camera.worldToScreen(particle.x, particle.y)
+          const alpha = Math.max(0, 1 - particle.lifetime / particle.maxLifetime)
+          ctx.save()
+          ctx.globalAlpha = alpha
+          ctx.shadowColor = particle.color
+          ctx.shadowBlur = 10
+          ctx.fillStyle = particle.color
+          ctx.beginPath()
+          ctx.arc(particleScreen.x, particleScreen.y, particle.radius * alpha, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.restore()
+        }
+      }
+
       const angle = proj.isCosmicStar
         ? this.animTime * 6.5
         : Math.atan2(proj.direction.y, proj.direction.x)
@@ -5678,6 +5756,41 @@ export class Enemy {
         ctx.fillStyle = '#FFFFFF'
         ctx.beginPath()
         ctx.arc(0, 0, starR * 0.34, 0, Math.PI * 2)
+        ctx.fill()
+      } else if (proj.isBlazingSpear) {
+        const halfLength = proj.width * 0.62
+        const halfHeight = Math.max(4, proj.height * 0.34)
+        ctx.shadowColor = '#F97316'
+        ctx.shadowBlur = 14
+        ctx.fillStyle = '#9A3412'
+        ctx.strokeStyle = '#FDE047'
+        ctx.lineWidth = 1.8
+        ctx.beginPath()
+        ctx.moveTo(-halfLength, -halfHeight * 0.45)
+        ctx.lineTo(halfLength * 0.38, -halfHeight * 0.45)
+        ctx.lineTo(halfLength * 0.38, -halfHeight)
+        ctx.lineTo(halfLength, 0)
+        ctx.lineTo(halfLength * 0.38, halfHeight)
+        ctx.lineTo(halfLength * 0.38, halfHeight * 0.45)
+        ctx.lineTo(-halfLength, halfHeight * 0.45)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.shadowBlur = 0
+        ctx.fillStyle = '#FB923C'
+        ctx.beginPath()
+        ctx.moveTo(-halfLength * 0.7, -halfHeight * 0.24)
+        ctx.lineTo(halfLength * 0.36, -halfHeight * 0.24)
+        ctx.lineTo(halfLength * 0.36, -halfHeight * 0.54)
+        ctx.lineTo(halfLength * 0.78, 0)
+        ctx.lineTo(halfLength * 0.36, halfHeight * 0.54)
+        ctx.lineTo(halfLength * 0.36, halfHeight * 0.24)
+        ctx.lineTo(-halfLength * 0.7, halfHeight * 0.24)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#FFF7ED'
+        ctx.beginPath()
+        ctx.arc(halfLength * 0.44, 0, Math.max(1.5, halfHeight * 0.22), 0, Math.PI * 2)
         ctx.fill()
       } else {
         ctx.fillStyle = proj.color

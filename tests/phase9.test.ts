@@ -1513,7 +1513,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
 
     const initialBossX = boss.getCenter().x
     const attack = boss.spawnTelegraphedAttack('inferno_spear_volley')!
-    assert.equal(attack.warningLabel, 'BLAZING SPEAR // SIDE VOLLEY')
+    assert.ok(attack.warningLabel?.startsWith('BLAZING SPEAR BARRAGE //'))
     assert.ok(attack.projectileCount !== undefined && attack.projectileCount >= 15 && attack.projectileCount <= 20)
     assert.equal(attack.projectileLanes?.length, attack.projectileCount)
     assert.equal(attack.gridLines?.length, attack.projectileCount)
@@ -1524,20 +1524,22 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok((boss.getCenter().x - initialBossX) * launchDirection > 0)
     for (let frame = 1; frame < 40; frame++) boss.update(0.05, player)
     assert.equal(attack.hasTriggered, true)
-    assert.equal(boss.projectiles.length, Math.ceil(attack.projectileCount! / 3))
-    assert.ok(boss.projectiles.every((projectile) => projectile.isBlazingSpear))
+    assert.equal(boss.projectiles.length, 0)
     assert.ok(
       attack.gridLines?.every((line) =>
         attack.sideMode === 'left' ? line.x2 > line.x1 + 1300 : line.x2 < line.x1 - 1300
       )
     )
 
-    for (let frame = 0; frame < 16; frame++) boss.update(0.05, player)
-    assert.equal(boss.projectiles.length, attack.projectileCount)
+    for (let spearIndex = 0; spearIndex < attack.projectileCount!; spearIndex++) {
+      boss.update(0.18, player)
+      assert.equal(boss.projectiles.length, spearIndex + 1, 'only one spear should launch per interval')
+    }
+    assert.ok(boss.projectiles.every((projectile) => projectile.isBlazingSpear))
     assert.ok(boss.projectiles.some((projectile) => (projectile.trailParticles?.length ?? 0) > 0))
   })
 
-  it('keeps Infero Champion circling outside body-contact range during its entrance and fight', () => {
+  it('keeps Infero Champion at a stable side distance without body contact', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
     const boss = new Enemy({

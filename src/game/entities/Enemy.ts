@@ -347,7 +347,7 @@ export class Enemy {
   private astralRamHeading: number | null = null
   private astralRamSpeed: number = 0
   private astralGridCooldownRemaining: number = 0
-  private inferoOrbitAngle: number | null = null
+  private inferoStandoffSide: -1 | 1 = 1
 
   get isInferoChampion(): boolean {
     return this.enemyId === 'boss_a3_20'
@@ -1124,32 +1124,19 @@ export class Enemy {
 
     const targetCenter = this.target.getCenter()
     const currentCenter = this.getCenter()
-    if (this.inferoOrbitAngle === null) {
-      this.inferoOrbitAngle = Math.atan2(
-        currentCenter.y - targetCenter.y,
-        currentCenter.x - targetCenter.x
-      )
-    }
-
     const spearAttack = this.telegraphs.find((attack) => attack.kind === 'inferno_spear_volley')
     let desiredCenter: Vector2
     if (spearAttack?.sideMode === 'left' || spearAttack?.sideMode === 'right') {
       const sideDirection = spearAttack.sideMode === 'left' ? -1 : 1
       desiredCenter = {
         x: targetCenter.x + sideDirection * 610,
-        y: targetCenter.y - 62
+        y: targetCenter.y - 56 + Math.sin(this.animTime * 1.7) * 18
       }
     } else {
-      const direction = Math.floor(this.animTime / 5.4) % 2 === 0 ? 1 : -1
-      const turnRate = this.bossPhase >= 3 ? 1.72 : this.bossPhase === 2 ? 1.38 : 1.08
-      this.inferoOrbitAngle += direction * turnRate * deltaTime
-
-      const horizontalRadius = this.bossPhase >= 3 ? 470 : this.bossPhase === 2 ? 440 : 410
-      const verticalRadius = this.bossPhase >= 3 ? 190 : 165
-      const orbitRadius = Math.max(horizontalRadius, this.getInferoMinimumPlayerDistance() + 86)
+      const standoffDistance = this.bossPhase >= 3 ? 535 : this.bossPhase === 2 ? 505 : 475
       desiredCenter = {
-        x: targetCenter.x + Math.cos(this.inferoOrbitAngle) * orbitRadius,
-        y: targetCenter.y - 58 + Math.sin(this.inferoOrbitAngle) * verticalRadius
+        x: targetCenter.x + this.inferoStandoffSide * standoffDistance,
+        y: targetCenter.y - 56 + Math.sin(this.animTime * 1.7) * 24
       }
     }
     const marginX = this.width / 2 + 36
@@ -2039,6 +2026,7 @@ export class Enemy {
 
     if (kind === 'inferno_spear_volley' && this.isInferoChampion) {
       const sideMode: ClosingSideLaserMode = this.specialAttackCounter % 2 === 0 ? 'left' : 'right'
+      this.inferoStandoffSide = sideMode === 'left' ? -1 : 1
       const projectileCount = 15 + Math.floor(Math.random() * 6)
       const edgeX = Math.max(
         70,
@@ -2083,11 +2071,11 @@ export class Enemy {
         chargeTimer: 0,
         chargeDuration: 2,
         activeTimer: 0,
-        activeDuration: 1.3,
+        activeDuration: projectileCount * 0.18 + 0.12,
         damage: Math.round(24 * Math.max(1, this.damageScale)),
         pulseTimer: 0,
         pulseCount: 0,
-        warningLabel: 'BLAZING SPEAR // DODGE THE SIDE VOLLEY',
+        warningLabel: `BLAZING SPEAR BARRAGE // ${projectileCount} SPEARS`,
         hasTriggered: false,
         hasDamagedPlayer: false
       }
@@ -2682,7 +2670,6 @@ export class Enemy {
 
     if (this.isInferoChampion) {
       const inferoWarningLabels: Partial<Record<BossAttackKind, string>> = {
-        inferno_spear_volley: 'BLAZING SPEAR // SIDE VOLLEY',
         tracking_strikes: 'CINDER TRACK // MOVE BEFORE THE IMPACT',
         rotating_cross_lasers: 'FURNACE CROSS // FIND THE OPEN LANE',
         pursuit_beam: 'RADIANT LANCE // BREAK THE LINE',
@@ -2690,7 +2677,10 @@ export class Enemy {
         singularity_grid: 'ASCENDANT GRID // SHIFT THROUGH THE GAPS',
         bullet_hell: 'FLAME STORM // WEAVE THROUGH THE EMBERS'
       }
-      telegraph.warningLabel = inferoWarningLabels[kind] ?? 'INFERO CHAMPION // AERIAL STRIKE'
+      telegraph.warningLabel =
+        kind === 'inferno_spear_volley'
+          ? `BLAZING SPEAR BARRAGE // ${telegraph.projectileCount ?? 15} SPEARS`
+          : inferoWarningLabels[kind] ?? 'INFERO CHAMPION // AERIAL STRIKE'
     }
 
     this.telegraphs.push(telegraph)
@@ -2715,31 +2705,27 @@ export class Enemy {
   }
 
   private launchInferoSpearVolley(attack: BossTelegraphAttack, pulseIndex: number): void {
-    if (!attack.projectileLanes?.length) return
-    const pulseSpread = (pulseIndex - 1) * 0.018
-
-    for (let index = pulseIndex; index < attack.projectileLanes.length; index += 3) {
-      const lane = attack.projectileLanes[index]
-      const direction = Vector2.normalize({
-        x: lane.directionX,
-        y: lane.directionY + pulseSpread
-      })
-      this.projectiles.push({
-        x: lane.x,
-        y: lane.y,
-        width: 34,
-        height: 12,
-        speed: this.bossPhase >= 3 ? 590 : 535,
-        direction,
-        damage: attack.damage,
-        color: index % 2 === 0 ? '#FB923C' : '#FDE047',
-        lifetime: 0,
-        maxLifetime: 5,
-        isBlazingSpear: true,
-        trailTimer: 0,
-        trailParticles: []
-      })
-    }
+    const lane = attack.projectileLanes?.[pulseIndex]
+    if (!lane) return
+    const direction = Vector2.normalize({
+      x: lane.directionX,
+      y: lane.directionY
+    })
+    this.projectiles.push({
+      x: lane.x,
+      y: lane.y,
+      width: 34,
+      height: 12,
+      speed: this.bossPhase >= 3 ? 590 : 535,
+      direction,
+      damage: attack.damage,
+      color: pulseIndex % 2 === 0 ? '#FB923C' : '#FDE047',
+      lifetime: 0,
+      maxLifetime: 5,
+      isBlazingSpear: true,
+      trailTimer: 0,
+      trailParticles: []
+    })
   }
 
   /**
@@ -2878,8 +2864,7 @@ export class Enemy {
           t.activeTimer = 0
           if (t.kind === 'inferno_spear_volley') {
             t.pulseTimer = 0
-            t.pulseCount = 1
-            this.launchInferoSpearVolley(t, 0)
+            t.pulseCount = 0
           } else if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
             // Warp worm head cleanly into the dimensional rift and unleash blazing jaw lunge
             this.x = t.portalX - this.width / 2
@@ -2939,12 +2924,18 @@ export class Enemy {
           t.x = bossCenter.x
           t.y = bossCenter.y
           t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
-          const maxPulses = 3
-          while ((t.pulseCount ?? 1) < maxPulses && (t.pulseTimer ?? 0) >= 0.34) {
-            t.pulseTimer = (t.pulseTimer ?? 0) - 0.34
-            const pulseIndex = t.pulseCount ?? 1
-            t.pulseCount = pulseIndex + 1
-            this.launchInferoSpearVolley(t, pulseIndex)
+          const shotsFired = t.pulseCount ?? 0
+          if (
+            shotsFired < (t.projectileCount ?? 0) &&
+            (t.pulseTimer ?? 0) >= 0.18
+          ) {
+            t.pulseTimer = (t.pulseTimer ?? 0) - 0.18
+            this.launchInferoSpearVolley(t, shotsFired)
+            t.pulseCount = shotsFired + 1
+            t.warningLabel =
+              shotsFired + 1 < (t.projectileCount ?? 0)
+                ? `BLAZING SPEAR ${shotsFired + 2}/${t.projectileCount}`
+                : 'FINAL BLAZING SPEAR'
           }
         } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
@@ -3573,39 +3564,54 @@ export class Enemy {
         : 0
 
       if (t.kind === 'inferno_spear_volley' && t.projectileLanes) {
-        const alpha = t.hasTriggered ? Math.max(0.12, 0.72 - impactProgress * 0.6) : 0.28 + chargeProgress * 0.48
+        const remainingAlpha = t.hasTriggered ? Math.max(0.12, 0.72 - impactProgress * 0.6) : 0.28 + chargeProgress * 0.48
+        const lines = t.gridLines ?? []
+        const nextSpearIndex = Math.min(t.pulseCount ?? 0, Math.max(0, lines.length - 1))
         ctx.save()
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
-        for (const line of t.gridLines ?? []) {
+        for (let index = 0; index < lines.length; index++) {
+          const line = lines[index]
           const start = camera.worldToScreen(line.x1, line.y1)
           const end = camera.worldToScreen(line.x2, line.y2)
-          ctx.strokeStyle = `rgba(251, 146, 60, ${alpha})`
-          ctx.lineWidth = t.hasTriggered ? 5 : 3 + chargeProgress * 3
-          ctx.setLineDash(t.hasTriggered ? [] : [14, 10])
+          const isNextSpear = index === nextSpearIndex
+          const hasFired = t.hasTriggered && index < (t.pulseCount ?? 0)
+          const lineAlpha = hasFired ? 0.06 : isNextSpear ? remainingAlpha : 0.13
+          ctx.strokeStyle = `rgba(251, 146, 60, ${lineAlpha})`
+          ctx.lineWidth = isNextSpear ? (t.hasTriggered ? 4 : 2 + chargeProgress * 2) : 1
+          ctx.setLineDash(isNextSpear ? [14, 10] : [4, 14])
           ctx.beginPath()
           ctx.moveTo(start.x, start.y)
           ctx.lineTo(end.x, end.y)
           ctx.stroke()
 
           ctx.setLineDash([])
-          ctx.fillStyle = t.hasTriggered ? '#FDE047' : '#FB923C'
+          if (!isNextSpear || hasFired) continue
+          ctx.fillStyle = '#FDE047'
           ctx.shadowColor = '#F97316'
           ctx.shadowBlur = 13
           ctx.beginPath()
-          ctx.arc(start.x, start.y, t.hasTriggered ? 8 : 7 + chargeProgress * 4, 0, Math.PI * 2)
+          ctx.arc(start.x, start.y, 7 + chargeProgress * 4, 0, Math.PI * 2)
           ctx.fill()
           ctx.shadowBlur = 0
         }
 
-        if (!t.hasTriggered && t.gridLines?.[0]) {
-          const first = camera.worldToScreen(t.gridLines[0].x1, t.gridLines[0].y1)
+        if (lines[0]) {
+          const nextLine = lines[nextSpearIndex]
+          const first = camera.worldToScreen(nextLine.x1, nextLine.y1)
+          const labelX = t.sideMode === 'right' ? first.x - 280 : first.x - 8
+          const labelAlign = t.sideMode === 'right' ? 'right' : 'left'
+          const labelY = Math.max(30, first.y - 40)
           ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
-          ctx.fillRect(first.x - 8, first.y - 40, 280, 24)
+          ctx.fillRect(labelX, labelY - 17, 280, 24)
           ctx.fillStyle = '#FEF3C7'
           ctx.font = 'bold 12px monospace'
-          ctx.textAlign = 'left'
-          ctx.fillText(`${t.warningLabel ?? 'BLAZING SPEAR'} • ${(t.chargeDuration - t.chargeTimer).toFixed(1)}s`, first.x, first.y - 23)
+          ctx.textAlign = labelAlign
+          ctx.fillText(
+            `${t.warningLabel ?? 'BLAZING SPEAR'}${t.hasTriggered ? '' : ` • ${(t.chargeDuration - t.chargeTimer).toFixed(1)}s`}`,
+            labelAlign === 'right' ? labelX + 272 : labelX + 8,
+            labelY
+          )
         }
         ctx.restore()
       } else if (t.kind === 'closing_side_lasers' && t.bounds) {

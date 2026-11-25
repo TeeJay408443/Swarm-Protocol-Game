@@ -415,6 +415,9 @@ export function shouldSpawnRegularEnemiesInWave(
   if (isDevourerActive) {
     return false
   }
+  if (areaId === 'astral_citadel' && waveNumber === 15) {
+    return false
+  }
   if (waveNumber === getAreaMaxWave(areaId) && !isEndlessMode) {
     return false
   }

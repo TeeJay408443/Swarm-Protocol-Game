@@ -1363,7 +1363,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }
   })
 
-  it('spawns dedicated Area 2 bosses every 5 waves, disables regular spawns on ~150k HP Wave 15 bosses, and enables Endless Mode in Area 2', () => {
+  it('spawns dedicated Area 2 bosses every 5 waves, disables Wave 15 adds, and enables Endless Mode in Area 2', () => {
     // 1. Area 2 defines 4 distinct bosses, including the Wave 20 final boss
     assert.equal(AREA_TWO_BOSSES.length, 4)
     assert.equal(getAreaBossTemplateForWave('astral_citadel', 5).id, 'boss_a2_05')
@@ -1390,6 +1390,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     // 3. Wave 15 and active Devourer of Gods disable regular enemy spawns; normal waves & Endless Mode allow regular spawns
     assert.equal(shouldSpawnRegularEnemiesInWave(14, false), true)
     assert.equal(shouldSpawnRegularEnemiesInWave(15, false), false)
+    assert.equal(shouldSpawnRegularEnemiesInWave(14, false, false, 'astral_citadel'), true)
+    assert.equal(shouldSpawnRegularEnemiesInWave(15, false, false, 'astral_citadel'), false)
+    assert.equal(shouldSpawnRegularEnemiesInWave(16, false, false, 'astral_citadel'), true)
     assert.equal(shouldSpawnRegularEnemiesInWave(16, true), true)
     assert.equal(shouldSpawnRegularEnemiesInWave(20, true), true)
     assert.equal(shouldSpawnRegularEnemiesInWave(5, false, true), false)

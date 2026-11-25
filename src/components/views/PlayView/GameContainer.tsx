@@ -5106,6 +5106,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 toast.success(`HERO UNLOCKED: ${unlockedHero.name}!`)
               }
 
+              if (areaRef.current.id === 'astral_citadel' && waveRef.current === 15) {
+                // Wave 15 is a dedicated Solar Archon Seraph duel; clear Wave 14 survivors too.
+                enemiesRef.current = enemiesRef.current.filter((e) => e.isBoss && e.isAlive)
+                spawnAccumulatorRef.current = 0
+              }
+
               if (waveRef.current === areaMaxWave && !endlessModeRef.current) {
                 // Disable regular spawns & remove leftover regular adds for pure Final Boss duel
                 enemiesRef.current = enemiesRef.current.filter((e) => e.isBoss && e.isAlive)

@@ -30,6 +30,7 @@ import {
   COIN_CONFIG,
   GAME_CONFIG,
   getEnemyHitDamage,
+  getRegularEnemyScaling,
   getEnemyScaling,
   getUpgradeLevelPerkHint,
   getUpgradeLevelStats,
@@ -1670,6 +1671,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
       // Overtime, wave, area & difficulty progression scaling
       const scaling = getEnemyScaling(waveNumber, timeSurvivedRef.current)
+      const regularScaling = getRegularEnemyScaling(waveNumber, timeSurvivedRef.current)
       const diffMeta = difficultyRef.current
       if (isFinalAreaBoss) {
         const finalCombat = getAreaFinalBossCombatProfile(areaMeta.id)
@@ -1717,6 +1719,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
         beginAreaBossCutscene(getAreaFinalBossCutsceneTheme(areaMeta.id))
       } else {
+        const spawnScaling =
+          forceBoss || enemy.isBoss || enemy.isMiniBoss ? scaling : regularScaling
         const bossBuff = forceBoss
           ? isAreaTwo
             ? getAreaTwoBossBuff(waveNumber)
@@ -1728,7 +1732,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           1,
           Math.round(
             enemy.maxHealth *
-              scaling.hpMultiplier *
+              spawnScaling.hpMultiplier *
               areaMeta.enemyHpMultiplier *
               diffMeta.enemyHpMultiplier *
               (bossBuff ? bossBuff.hpMultiplier : 1)
@@ -1736,7 +1740,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         )
         enemy.health = enemy.maxHealth
         enemy.baseSpeed *=
-          scaling.speedMultiplier *
+          spawnScaling.speedMultiplier *
           areaMeta.enemySpeedMultiplier *
           diffMeta.enemySpeedMultiplier *
           (bossBuff ? bossBuff.speedMultiplier : 1)
@@ -1745,7 +1749,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           1,
           Math.round(
             enemy.damage *
-              scaling.damageMultiplier *
+              spawnScaling.damageMultiplier *
               areaMeta.enemyDamageMultiplier *
               diffMeta.enemyDamageMultiplier *
               (bossBuff ? bossBuff.damageMultiplier : 1)
@@ -1758,12 +1762,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
           )
         )
         enemy.powerScale =
-          scaling.hpMultiplier *
+          spawnScaling.hpMultiplier *
           areaMeta.enemyHpMultiplier *
           diffMeta.enemyHpMultiplier *
           (bossBuff ? bossBuff.hpMultiplier : 1)
         enemy.damageScale =
-          scaling.damageMultiplier *
+          spawnScaling.damageMultiplier *
           areaMeta.enemyDamageMultiplier *
           diffMeta.enemyDamageMultiplier *
           (bossBuff ? bossBuff.damageMultiplier : 1)
@@ -2260,7 +2264,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
         const pc = player.getCenter()
         const areaMeta = areaRef.current
         const diffMeta = difficultyRef.current
-        const scaling = getEnemyScaling(waveRef.current, timeSurvivedRef.current)
+          const scaling = getEnemyScaling(waveRef.current, timeSurvivedRef.current)
+          const regularScaling = getRegularEnemyScaling(waveRef.current, timeSurvivedRef.current)
 
         if (spawnOpt.id === SECRET_DEVOURER_OF_GODS_ID) {
           const portalX = Math.max(140, Math.min(ARENA_SIZE - 140, pc.x))
@@ -2409,11 +2414,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
             spawned.spawnDelay = 0.5
             spawned.cutsceneDelayTimer = 0
           } else {
+            const spawnScaling =
+              spawned.isBoss || spawned.isMiniBoss ? scaling : regularScaling
             spawned.maxHealth = Math.max(
               1,
               Math.round(
                 spawned.maxHealth *
-                  scaling.hpMultiplier *
+                  spawnScaling.hpMultiplier *
                   areaMeta.enemyHpMultiplier *
                   diffMeta.enemyHpMultiplier *
                   (bossBuff ? bossBuff.hpMultiplier : 1)
@@ -2421,7 +2428,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
             )
             spawned.health = spawned.maxHealth
             spawned.baseSpeed *=
-              scaling.speedMultiplier *
+              spawnScaling.speedMultiplier *
               areaMeta.enemySpeedMultiplier *
               diffMeta.enemySpeedMultiplier *
               (bossBuff && 'speedMultiplier' in bossBuff ? bossBuff.speedMultiplier : 1)
@@ -2430,7 +2437,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               1,
               Math.round(
                 spawned.damage *
-                  scaling.damageMultiplier *
+                  spawnScaling.damageMultiplier *
                   areaMeta.enemyDamageMultiplier *
                   diffMeta.enemyDamageMultiplier *
                   (bossBuff ? bossBuff.damageMultiplier : 1)
@@ -2445,12 +2452,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
               )
             )
             spawned.powerScale =
-              scaling.hpMultiplier *
+              spawnScaling.hpMultiplier *
               areaMeta.enemyHpMultiplier *
               diffMeta.enemyHpMultiplier *
               (bossBuff ? bossBuff.hpMultiplier : 1)
             spawned.damageScale =
-              scaling.damageMultiplier *
+              spawnScaling.damageMultiplier *
               areaMeta.enemyDamageMultiplier *
               diffMeta.enemyDamageMultiplier *
               (bossBuff ? bossBuff.damageMultiplier : 1)
@@ -3050,15 +3057,20 @@ const GameContainer: React.FC<GameContainerProps> = ({
     const damagePlayer = (
       amount: number,
       knockbackOrigin?: { x: number; y: number },
-      source: 'enemy' | 'hazard' = 'enemy'
+      source: 'enemy' | 'boss' | 'hazard' = 'enemy'
     ): boolean => {
       const player = playerRef.current
       if (!player || !player.isAlive || player.isInvulnerable) return false
       if (dogCutsceneRef.current?.active) return false
       if (isDevUserRef.current && devSettingsRef.current.godMode) return false
-      // Covers contact, tails, projectiles, AoE and telegraphs, including boss attacks.
-      // Do not also reduce the enemy's raw stats: that would stack the reduction.
-      if (source === 'enemy') amount = getEnemyHitDamage(amount)
+      // Keep boss damage at its current level; ordinary enemies are slightly harsher.
+      if (source !== 'hazard') {
+        amount = getEnemyHitDamage(
+          amount,
+          source === 'boss',
+          source === 'enemy' ? player.maxHealth : undefined
+        )
+      }
 
       // Check Defensive Matrix / Plasma Barrier cooldown
       const shieldReady = activeUpgradesRef.current.some(
@@ -6358,15 +6370,16 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
           for (const enemy of enemiesRef.current) {
             if (!enemy.isAlive) continue
+            const hitSource = enemy.isBoss || enemy.isMiniBoss ? 'boss' : 'enemy'
             const ec = enemy.getCenter()
             const enemyCircle = { x: ec.x, y: ec.y, radius: enemy.width / 2 }
             if (!enemy.isSpawning && Collision.circleCircle(playerCircle, enemyCircle)) {
-              damagePlayer(enemy.damage, ec)
+              damagePlayer(enemy.damage, ec, hitSource)
             } else if (!enemy.isSpawning && checkAstralScourgeTailHit(enemy, playerCircle)) {
               const tail = enemy.dogSegments[enemy.dogSegments.length - 1]
-              damagePlayer(enemy.damage, tail)
+              damagePlayer(enemy.damage, tail, hitSource)
             } else if (!enemy.isSpawning && checkDevourerSegmentHit(enemy, playerCircle)) {
-              damagePlayer(Math.max(12, Math.round(enemy.damage * 0.65)), ec)
+              damagePlayer(Math.max(12, Math.round(enemy.damage * 0.65)), ec, hitSource)
             }
 
             // Enemy projectile collisions against player
@@ -6375,7 +6388,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               const epCircle = { x: ep.x, y: ep.y, radius: ep.width / 2 }
               if (Collision.circleCircle(playerCircle, epCircle)) {
                 enemy.projectiles.splice(p, 1)
-                damagePlayer(ep.damage, { x: ep.x, y: ep.y })
+                damagePlayer(ep.damage, { x: ep.x, y: ep.y }, hitSource)
               }
             }
 
@@ -6385,7 +6398,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 if (aoe.hasDetonated && !aoe.hasDamagedPlayer) {
                   aoe.hasDamagedPlayer = true
                   if (checkEnemyAoeHit(aoe, playerCircle)) {
-                    damagePlayer(aoe.damage, { x: aoe.targetX, y: aoe.targetY })
+                    damagePlayer(aoe.damage, { x: aoe.targetX, y: aoe.targetY }, hitSource)
                   }
                 }
               }
@@ -6434,7 +6447,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                       checkInferoFireColumnHit(column, playerCircle)
                     ) {
                       column.hasDamagedPlayer = true
-                      damagePlayer(telegraph.damage, { x: column.x, y: column.y })
+                      damagePlayer(telegraph.damage, { x: column.x, y: column.y }, 'boss')
                     }
                   }
                 } else if (telegraph.kind === 'infero_rebound_lances') {
@@ -6448,7 +6461,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                         Math.hypot(playerCircle.x - blast.x, playerCircle.y - blast.y) <=
                         blast.radius + playerCircle.radius * 0.65
                       ) {
-                        damagePlayer(telegraph.damage, { x: blast.x, y: blast.y })
+                        damagePlayer(telegraph.damage, { x: blast.x, y: blast.y }, 'boss')
                       }
                     }
                   }
@@ -6472,14 +6485,14 @@ const GameContainer: React.FC<GameContainerProps> = ({
                             y: playerCircle.y
                           }
                         : { x: telegraph.x, y: telegraph.y }
-                    if (damagePlayer(telegraph.damage, hitOrigin)) {
+                    if (damagePlayer(telegraph.damage, hitOrigin, 'boss')) {
                       telegraph.hasDamagedPlayer = true
                       telegraph.hitCooldown = 0
                     }
                   }
                 } else if (!telegraph.hasDamagedPlayer) {
                   if (checkBossTelegraphHit(telegraph, playerCircle)) {
-                    if (damagePlayer(telegraph.damage, { x: telegraph.x, y: telegraph.y })) {
+                    if (damagePlayer(telegraph.damage, { x: telegraph.x, y: telegraph.y }, 'boss')) {
                       telegraph.hasDamagedPlayer = true
                     }
                   } else {

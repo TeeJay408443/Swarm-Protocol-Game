@@ -10,12 +10,15 @@ import { InfernoRamTrail } from '../src/game/entities/InfernoRamTrail'
 import {
   GAME_CONFIG,
   ENEMY_DAMAGE_MULTIPLIER,
+  REGULAR_ENEMY_DAMAGE_MULTIPLIER,
+  REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO,
   getEnemyHitDamage,
   WAVE_CONFIG,
   SCORING_CONFIG,
   LEVEL_UP_CONFIG,
   MAX_WEAPON_UPGRADE_LEVEL,
   getEnemyScaling,
+  getRegularEnemyScaling,
   getWaveRangedSpawnLimit,
   getWaveSpawnConfig,
   selectEnemyTypeIndexForWave,
@@ -270,8 +273,10 @@ import {
 import { createLoadout, getExtendedLoadout } from '../src/services/loadouts'
 
 describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
-  it('reduces every enemy hit by 30% without stacking the old normal-enemy reduction', () => {
+  it('keeps regular hits moderately stronger while preserving the current boss damage reduction', () => {
     assert.equal(ENEMY_DAMAGE_MULTIPLIER, 0.7)
+    assert.equal(REGULAR_ENEMY_DAMAGE_MULTIPLIER, 0.8)
+    assert.equal(REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO, 0.4)
     const regularTemplates = [...enemies, ...AREA_TWO_ENEMIES, ...AREA_THREE_ENEMIES]
       .filter((template) => template.category !== 'Boss' && template.category !== 'Mini-Boss')
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
@@ -282,7 +287,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
         ? Math.max(12, Math.round(template.hp * 0.18))
         : Math.max(8, Math.round(template.hp * 0.2))
       assert.equal(enemy.damage, oldBase, 'raw stats retain their original baseline')
-      assert.equal(getEnemyHitDamage(enemy.damage), Math.max(1, Math.round(oldBase * 0.7)), template.name)
+      assert.equal(getEnemyHitDamage(enemy.damage), Math.max(1, Math.round(oldBase * 0.8)), template.name)
       assert.equal(enemy.maxHealth, template.hp, 'health is unchanged')
       assert.equal(enemy.coinValue, template.coin_value, 'coin rewards are unchanged')
       if (enemy.canShoot) {
@@ -296,13 +301,16 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
           ? 11 : template.id === 'ene_a2_03' ? 13 : 12
         for (const projectile of enemy.projectiles) {
           assert.equal(projectile.damage, Math.round(projectileBase * 2))
-          assert.equal(getEnemyHitDamage(projectile.damage), Math.round(projectileBase * 2 * 0.7))
+          assert.equal(getEnemyHitDamage(projectile.damage), Math.round(projectileBase * 2 * 0.8))
         }
       }
     }
-    assert.equal(getEnemyHitDamage(new Enemy({ damage: 100 }).damage), 70)
+    assert.equal(getEnemyHitDamage(new Enemy({ damage: 100 }).damage), 80)
+    assert.equal(getEnemyHitDamage(new Enemy({ damage: 100 }).damage, true), 70)
+    assert.equal(getEnemyHitDamage(1000, false, 100), 40, 'a regular hit cannot one-shot a full-health player')
+    assert.equal(getEnemyHitDamage(1000, false, 10), 4, 'the cap follows player maximum health')
     assert.equal(getEnemyHitDamage(new Enemy({ damage: 1 }).damage), 1)
-    assert.equal(getEnemyHitDamage(new Enemy({ damage: 100, isBoss: true }).damage), 140)
+    assert.equal(getEnemyHitDamage(new Enemy({ damage: 100, isBoss: true }).damage, true), 140)
     const champion = new Enemy({
       x: 500, y: 500, enemyData: AREA_THREE_BOSSES[3], target: player,
       isBoss: true, isFinalBoss: true
@@ -310,18 +318,18 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     champion.isSpawning = false
     champion.cutsceneDelayTimer = 0
     assert.equal(champion.damage, 58)
-    assert.equal(getEnemyHitDamage(champion.damage), 41)
+    assert.equal(getEnemyHitDamage(champion.damage, true), 41)
     for (const template of [...AREA_TWO_ENEMIES, ...AREA_THREE_ENEMIES]
       .filter((template) => template.category === 'Mini-Boss')) {
       const mini = new Enemy({ enemyData: template })
       const oldBase = template.id.startsWith('ene_a3_')
         ? Math.max(20, Math.round(template.hp * 0.1))
         : Math.max(16, Math.round(template.hp * 0.08))
-      assert.equal(getEnemyHitDamage(mini.damage), Math.round(oldBase * 0.7), 'mini-boss hits are reduced too')
+      assert.equal(getEnemyHitDamage(mini.damage, true), Math.round(oldBase * 0.7), 'mini-boss tuning is preserved')
     }
     const championAttack = champion.spawnTelegraphedAttack('infero_aimed_ram')!
     assert.ok(championAttack)
-    assert.equal(getEnemyHitDamage(championAttack.damage), Math.max(1, Math.round(championAttack.damage * 0.7)))
+    assert.equal(getEnemyHitDamage(championAttack.damage, true), Math.max(1, Math.round(championAttack.damage * 0.7)))
   })
 
   it('validates canonical seed data (35 entities + foreign keys)', () => {
@@ -519,6 +527,13 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(late.damageMultiplier > mid.damageMultiplier)
     assert.ok(late.hpMultiplier < 20, 'health growth stays below the previous steep curve')
     assert.ok(late.damageMultiplier < 3, 'damage growth stays gradual over early waves')
+    const regularEarly = getRegularEnemyScaling(1, 0)
+    const regularLate = getRegularEnemyScaling(10, 480)
+    assert.equal(regularEarly.hpMultiplier, early.hpMultiplier)
+    assert.ok(regularLate.hpMultiplier > late.hpMultiplier)
+    assert.ok(regularLate.damageMultiplier > late.damageMultiplier)
+    assert.ok(regularLate.speedMultiplier > late.speedMultiplier)
+    assert.equal(getEnemyScaling(10, 480).hpMultiplier, late.hpMultiplier, 'boss curve remains unchanged')
   })
 
   it('keeps cinematic main bosses, including Astral Scourge, immune to knockback', () => {

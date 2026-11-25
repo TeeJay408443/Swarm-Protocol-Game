@@ -3,11 +3,11 @@ name: Enemy damage survivability
 description: Shared damage reduction across normal enemies and boss encounters.
 ---
 
-Enemy damage should be about 30% lower than the original baseline, including normal enemies, mini-bosses, and bosses. This replaces the previous normal-enemy-only reduction; do not stack them.
+Regular enemies deal about 80% of their original hit damage, capped at 40% of player maximum health per hit. Bosses and mini-bosses retain the existing 70% hit-damage factor. Regular enemy wave growth is slightly stronger than boss scaling; boss health and damage curves remain on the gentler existing settings.
 
-**Why:** After the normal-enemy reduction, the user explicitly expanded the scope to boss damage and requested around 30%.
+**Why:** The user most recently asked for regular enemies to ramp up somewhat faster and hit harder, while explicitly keeping boss health and damage unchanged.
 
-**How to apply:** Cover contact, ranged attacks, boss telegraphs, and enemy AoE consistently. Keep environmental hazards separate. Do not compensate by raising enemy health or reducing rewards unless requested.
+**How to apply:** Apply stronger wave growth only to regular enemies. Preserve main boss/mini-boss health and damage. Keep environmental hazards separate.
 
 Wave-by-wave health, damage, and speed growth should remain gradual. Main cinematic bosses—including Astral Scourge—must ignore player knockback, pulls, and enemy collision displacement.
 

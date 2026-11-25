@@ -28,9 +28,19 @@ export const GAME_CONFIG = {
 
 // Applied once at the enemy-to-player hit boundary, before player defenses.
 export const ENEMY_DAMAGE_MULTIPLIER = 0.7
+export const REGULAR_ENEMY_DAMAGE_MULTIPLIER = 0.8
+export const REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO = 0.4
 
-export function getEnemyHitDamage(damage: number): number {
-  return Math.max(1, Math.round(damage * ENEMY_DAMAGE_MULTIPLIER))
+export function getEnemyHitDamage(
+  damage: number,
+  isBossHit = false,
+  playerMaxHealth?: number
+): number {
+  const multiplier = isBossHit ? ENEMY_DAMAGE_MULTIPLIER : REGULAR_ENEMY_DAMAGE_MULTIPLIER
+  const scaledDamage = Math.max(1, Math.round(damage * multiplier))
+  if (isBossHit || playerMaxHealth === undefined || !Number.isFinite(playerMaxHealth)) return scaledDamage
+  const nonLethalHitCap = Math.max(1, Math.floor(playerMaxHealth * REGULAR_ENEMY_MAX_HIT_HEALTH_RATIO))
+  return Math.min(scaledDamage, nonLethalHitCap)
 }
 
 export const WAVE_CONFIG = {
@@ -140,6 +150,22 @@ export function getEnemyScaling(waveNumber: number, survivalSeconds: number = 0)
     speedMultiplier,
     damageMultiplier,
     threatTier,
+  }
+}
+
+/** Slightly stronger per-wave progression for ordinary enemies; boss curves stay unchanged. */
+export function getRegularEnemyScaling(
+  waveNumber: number,
+  survivalSeconds: number = 0
+): EnemyScalingFactors {
+  const safeWave = Math.max(1, waveNumber)
+  const elapsedMinutes = Math.max(0, survivalSeconds) / 60
+  const waveFactor = safeWave - 1
+  return {
+    hpMultiplier: Number((Math.pow(1.2, waveFactor) * (1 + elapsedMinutes * 0.11)).toFixed(2)),
+    speedMultiplier: Number(Math.min(2.4, 1 + waveFactor * 0.05 + elapsedMinutes * 0.065).toFixed(2)),
+    damageMultiplier: Number((1 + waveFactor * 0.15 + elapsedMinutes * 0.12).toFixed(2)),
+    threatTier: Number((waveFactor + elapsedMinutes * 0.85).toFixed(2))
   }
 }
 

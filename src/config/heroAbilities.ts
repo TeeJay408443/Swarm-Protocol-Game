@@ -448,6 +448,10 @@ export function getSummonCountForUpgrade(
     const base = level >= 5 ? 2 : 1
     return engineerBonuses ? base + engineerBonuses.bonusOtherSummons : base
   }
+  if (upgradeId === 'upg_a3_06') {
+    const base = level >= 4 ? 3 : level >= 2 ? 2 : 1
+    return engineerBonuses ? base + engineerBonuses.bonusOtherSummons : base
+  }
   if (upgradeId === 'upg_a2_02') {
     const base = level >= 3 ? 2 : 1
     return engineerBonuses ? base + engineerBonuses.bonusOtherSummons : base

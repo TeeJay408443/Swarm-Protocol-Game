@@ -2814,7 +2814,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(grid!.gridPulseIndex, 0)
     assert.equal(grid!.gridPulseFiring, false)
     assert.equal(grid!.gridPulseWarningDuration, 0.24)
-    assert.equal(grid!.gridPulseFirstWarningDuration, 0.24)
+    assert.equal(grid!.gridPulseFirstWarningDuration, 0.74)
     assert.equal(grid!.gridPulseFollowupWarningDuration, 0.64)
     assert.equal(grid!.gridPulseFireDuration, 0.34)
     assert.equal(grid!.gridPulseGapDuration, 0.22)

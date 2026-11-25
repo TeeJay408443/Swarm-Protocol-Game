@@ -110,6 +110,72 @@ export const PLAYABLE_BOSS_DROP_SETS: BossCraftingBossSet[] = [
     ]),
     recipeId: 'recipe_astral_scourge',
     itemId: 'wpn_crafted_astral_scourge'
+  },
+  {
+    id: 'crucible_brute',
+    name: 'Crucible Brute',
+    materials: createMaterials('crucible_brute', [
+      ['Crucible Core', 'A hot iron heart recovered from the Brute’s chest furnace.', 'core', '#F97316'],
+      ['Basalt Knuckle', 'A dense basalt plate from the Brute’s armored fists.', 'knuckle', '#B45309'],
+      ['Forge Ash', 'A pouch of ember-rich ash from the Brute’s exhaust vents.', 'ash', '#FDBA74']
+    ]),
+    recipeId: 'recipe_crucible_brute',
+    itemId: 'acc_crafted_crucible_brute'
+  },
+  {
+    id: 'cinder_crown',
+    name: 'Cinder Crown',
+    materials: createMaterials('cinder_crown', [
+      ['Cinder Crown Shard', 'A glowing crown fragment from the Cinder Crown.', 'crown', '#FB923C'],
+      ['Emberglass Lens', 'A lens that focuses the boss’s molten projectiles.', 'lens', '#FBBF24'],
+      ['Ashen Signet', 'A heat-sealed signet from its command armor.', 'signet', '#C2410C']
+    ]),
+    recipeId: 'recipe_cinder_crown',
+    itemId: 'acc_crafted_cinder_crown'
+  },
+  {
+    id: 'magma_artificer',
+    name: 'Magma Artificer',
+    materials: createMaterials('magma_artificer', [
+      ['Artificer Crucible', 'A miniature crucible still holding the boss’s molten charge.', 'crucible', '#F97316'],
+      ['Runesmith Sigil', 'A carved rune from the Artificer’s spell-forging array.', 'sigil', '#FACC15'],
+      ['Magma Thread', 'A filament of hardened magma drawn from its armor seams.', 'thread', '#EA580C']
+    ]),
+    recipeId: 'recipe_magma_artificer',
+    itemId: 'acc_crafted_magma_artificer'
+  },
+  {
+    id: 'searing_juggernaut',
+    name: 'Searing Juggernaut',
+    materials: createMaterials('searing_juggernaut', [
+      ['Juggernaut Furnace Plate', 'A massive armor plate that retains the Juggernaut’s heat.', 'plate', '#C2410C'],
+      ['Searing Drive Core', 'A reactor core from the Wave 15 champion’s charge engine.', 'core', '#F97316'],
+      ['Cinderwall Rivet', 'A reinforced rivet from its layered siege armor.', 'rivet', '#FDBA74']
+    ]),
+    recipeId: 'recipe_searing_juggernaut',
+    itemId: 'acc_crafted_searing_juggernaut'
+  },
+  {
+    id: 'furnace_leviathan',
+    name: 'Furnace Leviathan',
+    materials: createMaterials('furnace_leviathan', [
+      ['Leviathan Scale', 'A heat-tempered scale from the Furnace Leviathan.', 'scale', '#F97316'],
+      ['Pyroclast Vent', 'A vent nozzle that once propelled its sweeping rushes.', 'vent', '#FDBA74'],
+      ['Foundry Heart', 'A dense heartstone from its molten reactor chamber.', 'heart', '#FACC15']
+    ]),
+    recipeId: 'recipe_furnace_leviathan',
+    itemId: 'acc_crafted_furnace_leviathan'
+  },
+  {
+    id: 'primordial_starforge',
+    name: 'Primordial Starforge',
+    materials: createMaterials('primordial_starforge', [
+      ['Primordial Starheart', 'A stable fragment of the Starforge’s living core.', 'starheart', '#FDE047'],
+      ['Solar Foundry Shard', 'A glowing shard from its stellar armor shell.', 'shard', '#FB923C'],
+      ['World-Anvil Sigil', 'A sigil formed in the oldest furnace chamber.', 'sigil', '#EA580C']
+    ]),
+    recipeId: 'recipe_primordial_starforge',
+    itemId: 'acc_crafted_primordial_starforge'
   }
 ]
 
@@ -182,5 +248,11 @@ export function getBossDropSetId(
   if (enemyId === 'boss_a2_10') return 'astral_vortex_colossus'
   if (enemyId === 'boss_a2_15') return 'solar_archon_seraph'
   if (enemyId === 'boss_a2_20') return 'astral_scourge'
+  if (enemyId === 'ene_a3_05') return 'crucible_brute'
+  if (enemyId === 'boss_a3_05') return 'cinder_crown'
+  if (enemyId === 'boss_a3_10') return 'magma_artificer'
+  if (enemyId === 'boss_a3_15') return 'searing_juggernaut'
+  if (enemyId === 'boss_a3_20') return 'furnace_leviathan'
+  if (enemyId === 'boss_a3_25') return 'primordial_starforge'
   return null
 }

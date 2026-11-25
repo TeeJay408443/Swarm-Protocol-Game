@@ -1369,9 +1369,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
           echo.cooldown = Math.max(0.28, (upgrade.cooldown_s || 2.0) / rateMult)
           echo.level = level
         })
-      } else if (upgrade.id === 'upg_20') {
+      } else if (upgrade.id === 'upg_20' || upgrade.id === 'upg_a3_06') {
         const desiredTurrets = getSummonCountForUpgrade(upgrade.id, level, heroId, heroUpgradeLv)
-        let current = summonsRef.current.filter((s) => s.kind === 'sentinel_turret')
+        let current = summonsRef.current.filter(
+          (s) => s.kind === 'sentinel_turret' && s.upgradeId === upgrade.id
+        )
         while (current.length < desiredTurrets) {
           const offsetAngle = current.length * Math.PI + 0.65
           summonsRef.current.push(
@@ -1385,7 +1387,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
               level
             })
           )
-          current = summonsRef.current.filter((s) => s.kind === 'sentinel_turret')
+          current = summonsRef.current.filter(
+            (s) => s.kind === 'sentinel_turret' && s.upgradeId === upgrade.id
+          )
         }
         current.forEach((turret, idx) => {
           turret.slotIndex = idx
@@ -1856,7 +1860,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
       hero
     })
     baseHeroSpeedRef.current = newPlayer.speed
-    const totalBonusHp = bonuses.bonusHp + masteryBonusesRef.current.bonusHp
+    const forgeheartStartingLevel = startingUpgradeIds.includes('upg_a3_04') ? 1 : 0
+    const totalBonusHp =
+      bonuses.bonusHp + masteryBonusesRef.current.bonusHp + forgeheartStartingLevel * 12
     if (totalBonusHp > 0) {
       newPlayer.maxHealth += totalBonusHp
       newPlayer.health = newPlayer.maxHealth
@@ -3041,9 +3047,16 @@ const GameContainer: React.FC<GameContainerProps> = ({
         player.hero?.id || 'hero_01',
         heroUpgradeLevelRef.current
       )
+      const forgeheartReduction = Math.min(
+        0.24,
+        (upgradeLevelsRef.current['upg_a3_04'] || 0) * 0.048
+      )
       const dmgReduction = Math.min(
         0.85,
-        equippedBonusesRef.current.damageReduction + masteryBonusesRef.current.damageReduction + heroDr
+        equippedBonusesRef.current.damageReduction +
+          masteryBonusesRef.current.damageReduction +
+          heroDr +
+          forgeheartReduction
       )
       const rawIncomingDmg = Math.max(1, Math.round(amount))
       const finalIncomingDmg = Math.max(1, Math.round(amount * (1 - dmgReduction)))
@@ -5415,6 +5428,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                     upg.id === 'upg_01' ||
                     upg.id === 'upg_14' ||
                     upg.id === 'upg_20' ||
+                    upg.id === 'upg_a3_06' ||
                     upg.id === 'upg_a2_02' ||
                     upg.id === 'wpn_grim_reaper'
                   ) {
@@ -5454,8 +5468,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
           )
 
           // Passive HP regeneration from equipped Accessories + Hero Mastery
+          const heartfireLevel = upgradeLevelsRef.current['upg_a3_05'] || 0
           const totalHpRegenPerSec =
-            equippedBonusesRef.current.hpRegenPerSec + masteryBonusesRef.current.hpRegenPerSec
+            equippedBonusesRef.current.hpRegenPerSec +
+            masteryBonusesRef.current.hpRegenPerSec +
+            player.maxHealth * heartfireLevel * 0.007
           if (totalHpRegenPerSec > 0 && player.isAlive && player.health < player.maxHealth) {
             hpRegenCarryRef.current += totalHpRegenPerSec * deltaTime
             if (hpRegenCarryRef.current >= 1) {
@@ -5476,8 +5493,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
               upg.id === 'upg_01' ||
               upg.id === 'upg_14' ||
               upg.id === 'upg_20' ||
+              upg.id === 'upg_a3_06' ||
               upg.id === 'upg_a2_02' ||
               upg.id === 'upg_a2_05' ||
+              upg.id === 'upg_a3_02' ||
+              upg.id === 'upg_a3_04' ||
+              upg.id === 'upg_a3_05' ||
               upg.id === 'wpn_grim_reaper' ||
               UNIVERSAL_CRIT_UPGRADE_IDS.has(upg.id)
             ) {
@@ -6100,8 +6121,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
           }
 
           // 4i. Prism Satellite Blades (continuous orbiting chakrams slicing nearby hostiles)
-          const prismUpg = activeUpgradesRef.current.find((u) => u.id === 'upg_a2_05')
-          const prismLv = upgradeLevelsRef.current['upg_a2_05'] || 0
+          const prismUpg = activeUpgradesRef.current.find(
+            (u) => u.id === 'upg_a2_05' || u.id === 'upg_a3_02'
+          )
+          const isMoltenOrbitals = prismUpg?.id === 'upg_a3_02'
+          const prismLv = prismUpg ? upgradeLevelsRef.current[prismUpg.id] || 0 : 0
           if (prismUpg && prismLv > 0) {
             const bladeCount = 1 + prismLv
             const orbitRadius = 92 + prismLv * 15
@@ -6129,16 +6153,26 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   if (timeSurvivedRef.current - lastHit >= 0.25) {
                     prismBladeHitCooldownsRef.current.set(enemy, timeSurvivedRef.current)
                     damageEnemy(enemy, bladeDamage, pCenter, {
-                      color: prismLv >= MAX_WEAPON_UPGRADE_LEVEL ? '#FFD700' : '#34D399'
+                      color: isMoltenOrbitals
+                        ? prismLv >= MAX_WEAPON_UPGRADE_LEVEL
+                          ? '#FDE047'
+                          : '#FB923C'
+                        : prismLv >= MAX_WEAPON_UPGRADE_LEVEL
+                          ? '#FFD700'
+                          : '#34D399'
                     })
+                    if (isMoltenOrbitals) {
+                      enemy.applyBurn(Math.max(4, Math.round(bladeDamage * 0.12)), 1.6)
+                    }
                     explosionsRef.current.push({
                       x: ec.x,
                       y: ec.y,
                       radius: 28,
                       timer: 0,
                       duration: 0.16,
-                      color:
-                        prismLv >= MAX_WEAPON_UPGRADE_LEVEL
+                      color: isMoltenOrbitals
+                        ? 'rgba(249, 115, 22, 0.65)'
+                        : prismLv >= MAX_WEAPON_UPGRADE_LEVEL
                           ? 'rgba(255, 215, 0, 0.6)'
                           : 'rgba(52, 211, 153, 0.58)'
                     })
@@ -8100,7 +8134,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
         }
 
         // Orbiting Prism Satellite Blades (spinning emerald-gold prism chakrams around player)
-        const activePrismLv = upgradeLevelsRef.current['upg_a2_05'] || 0
+        const activePrismId =
+          upgradeLevelsRef.current['upg_a3_02'] > 0
+            ? 'upg_a3_02'
+            : 'upg_a2_05'
+        const activePrismLv = upgradeLevelsRef.current[activePrismId] || 0
+        const isMoltenOrbitals = activePrismId === 'upg_a3_02'
         if (activePrismLv > 0) {
           const pScr = camera.worldToScreen(player.getCenter().x, player.getCenter().y)
           const bladeCount = 1 + activePrismLv
@@ -8110,7 +8149,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
           const isLv5Prism = activePrismLv >= MAX_WEAPON_UPGRADE_LEVEL
 
           ctx.save()
-          ctx.strokeStyle = isLv5Prism ? 'rgba(255, 215, 0, 0.32)' : 'rgba(52, 211, 153, 0.25)'
+          ctx.strokeStyle = isMoltenOrbitals
+            ? isLv5Prism
+              ? 'rgba(253, 224, 71, 0.4)'
+              : 'rgba(249, 115, 22, 0.3)'
+            : isLv5Prism
+              ? 'rgba(255, 215, 0, 0.32)'
+              : 'rgba(52, 211, 153, 0.25)'
           ctx.lineWidth = 1.4
           ctx.setLineDash([8, 8])
           ctx.beginPath()
@@ -8125,12 +8170,22 @@ const GameContainer: React.FC<GameContainerProps> = ({
             ctx.save()
             ctx.translate(bx, by)
             ctx.rotate(timeSurvivedRef.current * 14 + b)
-            ctx.fillStyle = isLv5Prism ? 'rgba(255, 215, 0, 0.28)' : 'rgba(52, 211, 153, 0.28)'
+            ctx.fillStyle = isMoltenOrbitals
+              ? 'rgba(249, 115, 22, 0.38)'
+              : isLv5Prism
+                ? 'rgba(255, 215, 0, 0.28)'
+                : 'rgba(52, 211, 153, 0.28)'
             ctx.beginPath()
             ctx.arc(0, 0, 18, 0, Math.PI * 2)
             ctx.fill()
 
-            ctx.fillStyle = isLv5Prism ? '#FFD700' : '#34D399'
+            ctx.fillStyle = isMoltenOrbitals
+              ? isLv5Prism
+                ? '#FDE047'
+                : '#FB923C'
+              : isLv5Prism
+                ? '#FFD700'
+                : '#34D399'
             ctx.strokeStyle = '#FFFFFF'
             ctx.lineWidth = 1.6
             ctx.beginPath()
@@ -8500,6 +8555,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         const selected = [
           ...seedUpgrades,
           ...AREA_TWO_UPGRADES,
+          ...AREA_THREE_UPGRADES,
           ...UNIVERSAL_CRIT_UPGRADES,
           ...shopWeaponsAsUpgrades(starOverrides)
         ].find((u) => u.id === upgradeId)
@@ -8507,6 +8563,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
           const prevLv = upgradeLevelsRef.current[selected.id] || 0
           const nextLv = Math.min(MAX_WEAPON_UPGRADE_LEVEL, prevLv + 1)
           upgradeLevelsRef.current[selected.id] = nextLv
+          if (selected.id === 'upg_a3_04' && playerRef.current) {
+            const player = playerRef.current
+            player.maxHealth += 12
+            player.heal(12)
+            setMaxHealth(player.maxHealth)
+            setHealth(player.health)
+          }
           const nextStats = getUpgradeLevelStats(selected.damage, selected.cooldown_s, nextLv)
 
           let targetUpgrade = activeUpgradesRef.current.find((u) => u.id === selected.id)
@@ -8537,6 +8600,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 activeUpg.id === 'upg_01' ||
                 activeUpg.id === 'upg_14' ||
                 activeUpg.id === 'upg_20' ||
+                activeUpg.id === 'upg_a3_06' ||
                 activeUpg.id === 'upg_a2_02' ||
                 activeUpg.id === 'wpn_grim_reaper'
               ) {

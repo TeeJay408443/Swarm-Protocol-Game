@@ -2489,7 +2489,7 @@ export class Enemy {
             t.gridPulseCount = 3 + Math.floor(Math.random() * 2)
             t.gridPulseIndex = 0
             t.gridPulseTimer = 0
-            t.gridPulseFirstWarningDuration = 0.24
+            t.gridPulseFirstWarningDuration = 0.74
             t.gridPulseFollowupWarningDuration = 0.64
             t.gridPulseWarningDuration = t.gridPulseFirstWarningDuration
             t.gridPulseFireDuration = 0.34

@@ -340,6 +340,14 @@ export class Summon {
     if (this.kind === 'sentinel_turret') {
       const muzzleDist = 16
       const turretSpeed = 540 + this.level * 30
+      const isEmberRelay = this.upgradeId === 'upg_a3_06'
+      const emberBurn = isEmberRelay
+        ? {
+            burnRadius: 24 + this.level * 5,
+            burnDuration: 1.6 + this.level * 0.2,
+            burnDamage: Math.max(3, Math.round(this.damage * 0.18))
+          }
+        : {}
       if (this.level >= 4) {
         // Level 4-5: Twin-Rail barrels (Lv 5 fires overcharged 3-pierce gold lasers)
         const perp = { x: -dir.y, y: dir.x }
@@ -353,11 +361,12 @@ export class Summon {
             direction: dir,
             speed: turretSpeed,
             damage: this.damage,
-            color: '#FACC15',
-            type: pType,
+            color: isEmberRelay ? '#FB923C' : '#FACC15',
+            type: isEmberRelay ? 'Fireball' : pType,
             maxPierces: pierces,
             width: size,
-            height: size
+            height: size,
+            ...emberBurn
           },
           extraProjectiles: [
             {
@@ -366,11 +375,12 @@ export class Summon {
               direction: dir,
               speed: turretSpeed,
               damage: this.damage,
-              color: '#FACC15',
-              type: pType,
+              color: isEmberRelay ? '#FB923C' : '#FACC15',
+              type: isEmberRelay ? 'Fireball' : pType,
               maxPierces: pierces,
               width: size,
-              height: size
+              height: size,
+              ...emberBurn
             }
           ]
         }
@@ -383,11 +393,12 @@ export class Summon {
           direction: dir,
           speed: turretSpeed,
           damage: this.damage,
-          color: '#FACC15',
-          type: 'Basic',
+          color: isEmberRelay ? '#FB923C' : '#FACC15',
+          type: isEmberRelay ? 'Fireball' : 'Basic',
           maxPierces: this.level >= 3 ? 1 : 0,
           width: 8 + this.level,
-          height: 8 + this.level
+          height: 8 + this.level,
+          ...emberBurn
         }
       }
     }

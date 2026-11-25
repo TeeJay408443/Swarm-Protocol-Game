@@ -1457,6 +1457,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getAreaBossTemplateForWave('molten_starforge', 20).name, 'Infero Champion')
     assert.equal(MOLTEN_STARFORGE_FINAL_BOSS_ID, 'boss_a3_20')
     assert.equal(getAreaFinalBossHp('molten_starforge'), 1200000)
+    assert.equal(getWave15BossCombatProfile('molten_starforge').damageReduction, 0.4)
     const areaThreeEnemyIds = AREA_THREE_ENEMIES.map((enemy) => enemy.id)
     assert.equal(new Set(areaThreeEnemyIds).size, AREA_THREE_ENEMIES.length)
     assert.ok(areaThreeEnemyIds.every((id) => id.startsWith('ene_a3_')))

@@ -591,7 +591,7 @@ export function getWave15BossCombatProfile(areaId: ArenaId): Wave15BossCombatPro
     return {
       hpMultiplier: 4.1,
       damageMultiplier: 1.82,
-      damageReduction: 0.48,
+      damageReduction: 0.4,
       shootCooldownScale: 0.62,
       specialCooldownScale: 0.64,
       coinMultiplier: 2.4,

@@ -646,7 +646,7 @@ export class Enemy {
               this.movementPattern = 'orbit'
               this.baseSpeed = 320
               this.speed = 320
-              this.damageReduction = 0.48
+              this.damageReduction = 0.4
               this.enableEnrage = true
             }
           } else if (this.enemyId === 'boss_secret_dog') {

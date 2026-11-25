@@ -26,8 +26,12 @@ export const GAME_CONFIG = {
 // WAVE SYSTEM
 // ============================================
 
-// Slightly soften normal enemy contact and ranged hits; boss encounters retain their tuning.
-export const REGULAR_ENEMY_BASE_DAMAGE_MULTIPLIER = 0.85
+// Applied once at the enemy-to-player hit boundary, before player defenses.
+export const ENEMY_DAMAGE_MULTIPLIER = 0.7
+
+export function getEnemyHitDamage(damage: number): number {
+  return Math.max(1, Math.round(damage * ENEMY_DAMAGE_MULTIPLIER))
+}
 
 export const WAVE_CONFIG = {
   // Duration of active wave (enemies spawn)

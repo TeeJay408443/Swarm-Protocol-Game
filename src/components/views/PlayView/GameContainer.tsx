@@ -29,6 +29,7 @@ import { ALL_HEROES } from '../../../config/unlockableHeroes'
 import {
   COIN_CONFIG,
   GAME_CONFIG,
+  getEnemyHitDamage,
   getEnemyScaling,
   getUpgradeLevelPerkHint,
   getUpgradeLevelStats,
@@ -3047,11 +3048,18 @@ const GameContainer: React.FC<GameContainerProps> = ({
         }
     }
 
-    const damagePlayer = (amount: number, knockbackOrigin?: { x: number; y: number }): boolean => {
+    const damagePlayer = (
+      amount: number,
+      knockbackOrigin?: { x: number; y: number },
+      source: 'enemy' | 'hazard' = 'enemy'
+    ): boolean => {
       const player = playerRef.current
       if (!player || !player.isAlive || player.isInvulnerable) return false
       if (dogCutsceneRef.current?.active) return false
       if (isDevUserRef.current && devSettingsRef.current.godMode) return false
+      // Covers contact, tails, projectiles, AoE and telegraphs, including boss attacks.
+      // Do not also reduce the enemy's raw stats: that would stack the reduction.
+      if (source === 'enemy') amount = getEnemyHitDamage(amount)
 
       // Check Defensive Matrix / Plasma Barrier cooldown
       const shieldReady = activeUpgradesRef.current.some(
@@ -6524,7 +6532,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                     hazard.radius
                   )
                 ) {
-                  damagePlayer(ENDLESS_HAZARD_CONFIG.damage, hazard)
+                  damagePlayer(ENDLESS_HAZARD_CONFIG.damage, hazard, 'hazard')
                 }
                 explosionsRef.current.push({
                   x: hazard.x,

@@ -1198,6 +1198,29 @@ export class Enemy {
         x: positioningAttack.inferoLaunchX + Math.sin(this.animTime * 1.3) * 12,
         y: positioningAttack.inferoLaunchY + Math.sin(this.animTime * 1.8) * 18
       }
+      if (positioningAttack.kind === 'infero_underflame_swoops') {
+        desiredCenter = {
+          x: positioningAttack.inferoLaunchX,
+          y: positioningAttack.inferoLaunchY
+        }
+        const clearance = this.getInferoMinimumPlayerDistance() + 30
+        // Travel around the player instead of getting stuck against the
+        // body-contact protection while approaching from above.
+        if (currentCenter.y < targetCenter.y + clearance * 0.85) {
+          const limits = this.getInferoCenterLimits()
+          const side = currentCenter.x >= targetCenter.x ? 1 : -1
+          const sideX = Math.max(
+            limits.x.min,
+            Math.min(limits.x.max, targetCenter.x + side * clearance)
+          )
+          desiredCenter = {
+            x: sideX,
+            y: Math.abs(currentCenter.x - targetCenter.x) < clearance * 0.9
+              ? currentCenter.y
+              : positioningAttack.inferoLaunchY
+          }
+        }
+      }
     } else {
       this.inferoHoverRetargetTimer -= deltaTime
       const playerDistance = Vector2.distance(currentCenter, targetCenter)
@@ -1232,7 +1255,11 @@ export class Enemy {
     const dx = desiredCenter.x - currentCenter.x
     const dy = desiredCenter.y - currentCenter.y
     const distance = Math.hypot(dx, dy)
-    const moveSpeed = this.baseSpeed * (this.bossPhase >= 3 ? 1.22 : this.bossPhase === 2 ? 1.08 : 1)
+    const moveSpeed = this.baseSpeed * (
+      positioningAttack?.kind === 'infero_underflame_swoops'
+        ? 2.4
+        : this.bossPhase >= 3 ? 1.22 : this.bossPhase === 2 ? 1.08 : 1
+    )
     const maxStep = Math.min(distance, moveSpeed * Math.max(deltaTime, 0))
     const safeDistance = Math.max(distance, 0.001)
     const nextCenter = {
@@ -2176,7 +2203,6 @@ export class Enemy {
 
     if (kind === 'infero_underflame_swoops' && this.isInferoChampion) {
       const limits = this.getInferoCenterLimits()
-      const view = this.getInferoViewportBounds()
       const swoopCount = 3 + Math.floor(Math.random() * 2)
       const targetX = Math.max(limits.x.min, Math.min(limits.x.max, targetCenter.x))
       const swoopY = Math.max(
@@ -2189,9 +2215,9 @@ export class Enemy {
       const column: InferoFireColumn = {
         x: targetX,
         y: swoopY,
-        topY: view.top,
+        topY: 0,
         width: 104,
-        height: Math.max(0, swoopY - view.top),
+        height: Math.max(0, swoopY),
         elapsed: 0,
         holdDuration: 0.42,
         windup: 0.62,
@@ -3040,7 +3066,6 @@ export class Enemy {
 
       if (t.kind === 'infero_underflame_swoops' && !t.hasTriggered && targetCenter) {
         const limits = this.getInferoCenterLimits()
-        const view = this.getInferoViewportBounds()
         const targetX = Math.max(limits.x.min, Math.min(limits.x.max, targetCenter.x))
         const targetY = Math.max(
           limits.y.min,
@@ -3060,8 +3085,8 @@ export class Enemy {
         if (firstColumn) {
           firstColumn.x = targetX
           firstColumn.y = targetY
-          firstColumn.topY = view.top
-          firstColumn.height = Math.max(0, targetY - view.top)
+          firstColumn.topY = 0
+          firstColumn.height = Math.max(0, targetY)
         }
       } else if (t.kind === 'infero_spinning_lattice') {
         t.x = bossCenter.x
@@ -3318,9 +3343,9 @@ export class Enemy {
               const nextColumn: InferoFireColumn = {
                 x: nextTargetX,
                 y: nextTargetY,
-                topY: this.getInferoViewportBounds().top,
+                topY: 0,
                 width: 104,
-                height: Math.max(0, nextTargetY - this.getInferoViewportBounds().top),
+                height: Math.max(0, nextTargetY),
                 elapsed: 0,
                 holdDuration: 0.42,
                 windup: 0.62,
@@ -3370,7 +3395,7 @@ export class Enemy {
               0,
               t.activeTimer - columnPassStart - (t.swoopDuration ?? 0.5)
             )
-            column.topY = this.getInferoViewportBounds().top
+            column.topY = 0
             column.height = Math.max(0, column.y - column.topY)
             column.hasIgnited = column.elapsed >= column.holdDuration + column.windup
           }
@@ -4159,6 +4184,13 @@ export class Enemy {
             ctx.shadowBlur = 0
             ctx.fillStyle = 'rgba(254, 240, 138, 0.78)'
             ctx.fillRect(centerX - 7, topLeft.y, 14, screenHeight)
+            for (let spark = 0; spark < 18; spark++) {
+              const travel = (this.animTime * 1.7 + spark * 0.137) % 1
+              const sparkX = centerX + Math.sin(spark * 4.1 + this.animTime * 9) * screenWidth * 0.45
+              const sparkY = topLeft.y + screenHeight * (1 - travel)
+              ctx.fillStyle = spark % 2 === 0 ? '#FFF7ED' : '#FDBA74'
+              ctx.fillRect(sparkX, sparkY, 2 + spark % 3, 9 + spark % 7)
+            }
             ctx.strokeStyle = '#FDE047'
             ctx.lineWidth = 4
             ctx.strokeRect(topLeft.x + 2, topLeft.y, screenWidth - 4, screenHeight)

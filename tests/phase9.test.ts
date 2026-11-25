@@ -1648,7 +1648,6 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }), false, 'the indicator remains safe during its warning')
 
     for (let frame = 0; frame < 180 && !attack.hasTriggered; frame++) boss.update(0.05, player)
-    console.log('UNDERFLAME DEBUG', attack.chargeDuration, attack.chargeTimer, boss.getCenter(), player.getCenter(), attack.inferoLaunchX, attack.inferoLaunchY, boss.baseSpeed, boss.velocity)
     assert.equal(attack.hasTriggered, true)
     for (let frame = 0; frame < 12; frame++) boss.update(0.05, player)
     assert.ok(firstColumn.elapsed < firstColumn.holdDuration)
@@ -1667,6 +1666,13 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(checkInferoFireColumnHit(firstColumn, {
       x: firstColumn.x, y: firstColumn.y, radius: 20
     }), true, 'the fire column becomes damaging only after its warning')
+    for (let frame = 0; frame < 4; frame++) boss.update(0.05, player)
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x, y: 10, radius: 5
+    }), true, 'the blazing beam reaches the top of the arena')
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x + firstColumn.width, y: 10, radius: 5
+    }), false, 'players can dodge outside the indicated beam lane')
     const separation = Math.hypot(
       boss.getCenter().x - player.getCenter().x,
       boss.getCenter().y - player.getCenter().y

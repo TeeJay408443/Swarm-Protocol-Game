@@ -398,15 +398,20 @@ export class Enemy {
       // Special behaviors based on type
       switch (this.type) {
         case 'Heavy Swarm':
-          this.color = '#34D399' // Armored sapphirestone emerald
-          this.baseColor = '#34D399'
+          this.color = this.enemyId.startsWith('ene_a3_') ? '#B45309' : '#34D399'
+          this.baseColor = this.color
           this.width = 36
           this.height = 36
           this.movementPattern = 'chase'
           this.damage = Math.max(12, Math.round(this.enemyData.hp * 0.18))
           break
         case 'Fast Flanker':
-          this.color = this.enemyId === 'ene_a2_02' ? '#2DD4BF' : '#FFD700'
+          this.color =
+            this.enemyId === 'ene_a2_02'
+              ? '#2DD4BF'
+              : this.enemyId === 'ene_a3_02'
+                ? '#FB923C'
+                : '#FFD700'
           this.baseColor = this.color
           if (this.enemyId === 'ene_a2_02') {
             this.width = 24
@@ -417,7 +422,12 @@ export class Enemy {
           this.zigzagFrequency = this.enemyId === 'ene_a2_02' ? 3.5 : 3
           break
         case 'Ranged Sniper':
-          this.color = this.enemyId === 'ene_a2_03' ? '#34D399' : '#00F0FF'
+          this.color =
+            this.enemyId === 'ene_a2_03'
+              ? '#34D399'
+              : this.enemyId === 'ene_a3_03'
+                ? '#FB923C'
+                : '#00F0FF'
           this.baseColor = this.color
           this.movementPattern = 'flee'
           this.canShoot = true
@@ -426,8 +436,8 @@ export class Enemy {
           this.zigzagDirection = Math.random() < 0.5 ? 1 : -1
           break
         case 'Ranged Caster':
-          this.color = '#E879F9' // Violet-gold Astral Arcanist
-          this.baseColor = '#E879F9'
+          this.color = this.enemyId === 'ene_a3_04' ? '#FACC15' : '#E879F9'
+          this.baseColor = this.color
           this.width = 32
           this.height = 32
           this.movementPattern = 'flee'
@@ -455,6 +465,23 @@ export class Enemy {
             this.shootCooldownMax = 2.0
             this.specialCooldown = 2.0
             this.specialCooldownMax = 4.2
+          } else if (this.enemyId === 'ene_a3_05' || this.enemyId === 'ene_a3_06') {
+            this.isMiniBoss = true
+            this.isBoss = Boolean(options.isBoss)
+            this.launchesAoeProjectiles = true
+            this.color = this.enemyId === 'ene_a3_06' ? '#FB923C' : '#F97316'
+            this.baseColor = this.color
+            this.width = this.enemyId === 'ene_a3_06' ? 68 : 60
+            this.height = this.width
+            this.movementPattern = this.enemyId === 'ene_a3_06' ? 'strafe' : 'chase'
+            this.damage = Math.max(20, Math.round(this.enemyData.hp * 0.1))
+            this.attackRange = 620
+            this.aoeCooldown = 0.85
+            this.aoeCooldownMax = 2.3
+            this.canShoot = true
+            this.shootCooldownMax = this.enemyId === 'ene_a3_06' ? 1.7 : 1.95
+            this.specialCooldown = 1.8
+            this.specialCooldownMax = 3.8
           } else if (this.enemyId === 'boss_a2_05') {
             this.isBoss = true
             this.color = '#10B981' // Emerald Prism Monarch
@@ -523,6 +550,27 @@ export class Enemy {
               y: headCy - (idx + 1) * 2,
               angle: Math.PI / 2
             }))
+          } else if (this.enemyId.startsWith('boss_a3_')) {
+            this.isBoss = true
+            this.launchesAoeProjectiles = true
+            const palette: Record<string, string> = {
+              boss_a3_05: '#FB923C',
+              boss_a3_10: '#FACC15',
+              boss_a3_15: '#EA580C',
+              boss_a3_20: '#FDE047'
+            }
+            this.color = palette[this.enemyId] || '#F97316'
+            this.baseColor = this.color
+            this.width = this.enemyId === 'boss_a3_20' ? 112 : this.enemyId === 'boss_a3_15' ? 100 : 82
+            this.height = this.width
+            this.damage = this.enemyId === 'boss_a3_20' ? 58 : 36
+            this.canShoot = true
+            this.shootCooldownMax = this.enemyId === 'boss_a3_20' ? 1.05 : 1.45
+            this.attackRange = 1800
+            this.aoeCooldown = 0.9
+            this.aoeCooldownMax = this.enemyId === 'boss_a3_20' ? 1.8 : 2.4
+            this.specialCooldown = 1.3
+            this.specialCooldownMax = this.enemyId === 'boss_a3_20' ? 2.4 : 3.4
           } else if (this.enemyId === 'boss_secret_dog') {
             this.isBoss = true
             this.isDevourerOfGods = true

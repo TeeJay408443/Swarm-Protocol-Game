@@ -54,7 +54,7 @@ export interface LocalPlayerTelemetry extends PlayerStatsRow {
   level: number
   wave_15_cleared: boolean
   area_2_wave20_cleared: boolean
-  area_3_wave25_cleared: boolean
+  area_3_wave20_cleared: boolean
   boss_victories: number
   favorite_hero: string
   hero_stats: Record<string, HeroAggregateStat>
@@ -201,7 +201,7 @@ function getDefaultTelemetry(userId = 'guest_user'): LocalPlayerTelemetry {
     level: 1,
     wave_15_cleared: false,
     area_2_wave20_cleared: false,
-    area_3_wave25_cleared: false,
+    area_3_wave20_cleared: false,
     boss_victories: 0,
     favorite_hero: 'hero_01',
     hero_stats: {},
@@ -231,8 +231,8 @@ export function recordAreaCompletion(
     ...previous,
     area_2_wave20_cleared:
       previous.area_2_wave20_cleared || areaId === 'astral_citadel',
-    area_3_wave25_cleared:
-      previous.area_3_wave25_cleared || areaId === 'molten_starforge',
+    area_3_wave20_cleared:
+      previous.area_3_wave20_cleared || areaId === 'molten_starforge',
     updated_at: new Date().toISOString()
   }
   safeWriteStorage(getStatsStorageKey(effectiveUserId), next)
@@ -401,7 +401,7 @@ export async function submitScore(input: SubmitScoreInput): Promise<{
     input.victory && input.areaId === 'astral_citadel' && waveReached >= 20
   )
   const didBeatAreaThree = Boolean(
-    input.victory && input.areaId === 'molten_starforge' && waveReached >= 25
+    input.victory && input.areaId === 'molten_starforge' && waveReached >= 20
   )
 
   const nextTelemetry: LocalPlayerTelemetry = {
@@ -419,7 +419,7 @@ export async function submitScore(input: SubmitScoreInput): Promise<{
     level: Math.max(1, Math.floor(nextTotalXP / 500) + 1),
     wave_15_cleared: Boolean(prevTelemetry.wave_15_cleared || didBeatWave15),
     area_2_wave20_cleared: Boolean(prevTelemetry.area_2_wave20_cleared || didBeatAreaTwo),
-    area_3_wave25_cleared: Boolean(prevTelemetry.area_3_wave25_cleared || didBeatAreaThree),
+    area_3_wave20_cleared: Boolean(prevTelemetry.area_3_wave20_cleared || didBeatAreaThree),
     boss_victories: (prevTelemetry.boss_victories || 0) + (didBeatWave15 ? 1 : 0),
     favorite_hero: favoriteHero,
     hero_stats: nextHeroStats,

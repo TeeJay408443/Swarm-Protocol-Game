@@ -13,9 +13,9 @@ export type ArenaId = 'carbon_sector' | 'astral_citadel' | 'molten_starforge'
 
 export const AREA_ONE_MAX_WAVE = WAVE_CONFIG.MAX_WAVE
 export const AREA_TWO_MAX_WAVE = 20
-export const AREA_THREE_MAX_WAVE = 25
+export const AREA_THREE_MAX_WAVE = 20
 export const WAVE_15_FINAL_BOSS_BASE_HP = 150000
-export const MOLTEN_STARFORGE_FINAL_BOSS_ID = 'boss_a3_25'
+export const MOLTEN_STARFORGE_FINAL_BOSS_ID = 'boss_a3_20'
 
 export interface ArenaDefinition {
   id: ArenaId
@@ -224,6 +224,16 @@ export const AREA_THREE_ENEMIES: EnemiesRow[] = [
     coin_value: 42,
     description:
       'A towering furnace brute that lobs clearly marked magma shells and punishes players who hold still.'
+  },
+  {
+    id: 'ene_a3_06',
+    name: 'Furnace Leviathan',
+    category: 'Mini-Boss',
+    hp: 1450,
+    speed: 0.7,
+    coin_value: 88,
+    description:
+      'A flying forge-serpent mini-boss that sweeps the arena and showers the floor with marked cinders.'
   }
 ]
 
@@ -316,16 +326,6 @@ export const AREA_THREE_BOSSES: EnemiesRow[] = [
       'Wave 15 apex threat: an armored furnace colossus that cycles through expanding rings and aimed volleys.'
   },
   {
-    id: 'boss_a3_20',
-    name: 'Furnace Leviathan',
-    category: 'Boss',
-    hp: 2400,
-    speed: 0.7,
-    coin_value: 390,
-    description:
-      'Wave 20 Starforge boss: a flying forge-serpent that sweeps the arena and showers the floor with marked cinders.'
-  },
-  {
     id: MOLTEN_STARFORGE_FINAL_BOSS_ID,
     name: 'Primordial Starforge',
     category: 'Boss',
@@ -333,7 +333,7 @@ export const AREA_THREE_BOSSES: EnemiesRow[] = [
     speed: 0.32,
     coin_value: 900,
     description:
-      'Wave 25 final boss: the living star at the center of the foundry, shifting through three increasingly volatile phases.'
+      'Wave 20 final boss: the living star at the center of the foundry, shifting through three increasingly volatile phases.'
   }
 ]
 
@@ -344,6 +344,7 @@ export function getAreaById(areaId?: string | null): ArenaDefinition {
 export interface AreaUnlockTelemetry {
   wave_15_cleared?: boolean
   area_2_wave20_cleared?: boolean
+  area_3_wave20_cleared?: boolean
 }
 
 export function isAreaUnlocked(
@@ -641,10 +642,9 @@ export function getAreaBossTemplateForWave(
 ): EnemiesRow {
   if (areaId === 'molten_starforge') {
     if (waveNumber === AREA_THREE_MAX_WAVE) {
-      return AREA_THREE_BOSSES[4]
+      return AREA_THREE_BOSSES[3]
     }
     if (waveNumber === 15) return AREA_THREE_BOSSES[2]
-    if (waveNumber === 20) return AREA_THREE_BOSSES[3]
     if (waveNumber === 10) return AREA_THREE_BOSSES[1]
     if (waveNumber === 5) return AREA_THREE_BOSSES[0]
     return (Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL) % 2 === 1)
@@ -697,7 +697,7 @@ export function selectAreaEnemyTemplateForWave(
   const canSpawnMiniBoss = options.canSpawnMiniBoss ?? false
 
   if (areaId === 'molten_starforge') {
-    const [bulwark, skater, marksman, runesmith, brute] = AREA_THREE_ENEMIES
+    const [bulwark, skater, marksman, runesmith, brute, leviathan] = AREA_THREE_ENEMIES
     if (waveNumber < 2) {
       return {
         template: roll < 0.54 ? bulwark : skater,
@@ -706,7 +706,11 @@ export function selectAreaEnemyTemplateForWave(
       }
     }
     if (waveNumber >= 3 && canSpawnMiniBoss && roll >= 0.88) {
-      return { template: brute, isRanged: false, isMiniBoss: true }
+      return {
+        template: subRoll < 0.5 ? brute : leviathan || brute,
+        isRanged: false,
+        isMiniBoss: true
+      }
     }
     if (canSpawnRanged && roll >= 0.68) {
       return {
@@ -940,7 +944,7 @@ export type BossCutsceneKind =
   | 'w15_seraph'
   | 'w15_starforge'
   | 'w20_area2'
-  | 'w25_area3'
+  | 'w20_area3'
 
 export type BossCutscenePresentation = 'dialogue' | 'warning'
 
@@ -1113,7 +1117,7 @@ export function getAreaFinalBossCutsceneTheme(areaId: ArenaId): BossCutsceneThem
   }
   if (areaId === 'molten_starforge') {
     return {
-      kind: 'w25_area3',
+      kind: 'w20_area3',
       durationSeconds: 6.4,
       revealDelaySeconds: 2.3,
       presentation: 'warning',
@@ -1122,7 +1126,7 @@ export function getAreaFinalBossCutsceneTheme(areaId: ArenaId): BossCutsceneThem
       line1: '',
       line2: '',
       warningTitle: 'FINAL BOSS // PRIMORDIAL STARFORGE',
-      warningSubtitle: 'MOLTEN STARFORGE WAVE 25 CORE AWAKENING',
+      warningSubtitle: 'MOLTEN STARFORGE WAVE 20 CORE AWAKENING',
       warningCriticalText: 'STELLAR CORE COLLAPSE IMMINENT',
       primaryColor: '#FB923C',
       secondaryColor: '#FDE047',

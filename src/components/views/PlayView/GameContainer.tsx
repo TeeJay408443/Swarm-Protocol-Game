@@ -1689,7 +1689,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
         enemy.bossTier = isAreaThree ? 5 : isAreaTwo ? 4 : 3
         enemy.bossTitle =
           isAreaThree
-            ? 'PRIMORDIAL STARFORGE — FINAL BOSS (W25)'
+            ? 'PRIMORDIAL STARFORGE — FINAL BOSS (W20)'
             : areaMeta.id === 'astral_citadel'
             ? 'ASTRAL SCOURGE — FINAL BOSS (W20)'
             : 'OMEGA OVERLORD — FINAL BOSS (W15)'
@@ -5304,7 +5304,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   spawnEnemyForWave(areaMaxWave, true)
                   toast.warning(
                     areaRef.current.id === 'molten_starforge'
-                      ? 'FINAL WAVE 25 — PRIMORDIAL STARFORGE: Watch the marked cinder lanes and expanding core rings!'
+                      ? 'FINAL WAVE 20 — PRIMORDIAL STARFORGE: Watch the marked cinder lanes and expanding core rings!'
                       : areaRef.current.id === 'astral_citadel'
                         ? 'FINAL WAVE 20 — ASTRAL SCOURGE: Evade laser grids, portal lunges & splitting astral orbs!'
                         : 'FINAL WAVE 15: Dodge closing side lasers, tracking strikes & bullet hell!'

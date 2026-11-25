@@ -252,7 +252,7 @@ export function getBossDropSetId(
   if (enemyId === 'boss_a3_05') return 'cinder_crown'
   if (enemyId === 'boss_a3_10') return 'magma_artificer'
   if (enemyId === 'boss_a3_15') return 'searing_juggernaut'
-  if (enemyId === 'boss_a3_20') return 'furnace_leviathan'
-  if (enemyId === 'boss_a3_25') return 'primordial_starforge'
+  if (enemyId === 'ene_a3_06') return 'furnace_leviathan'
+  if (enemyId === 'boss_a3_20') return 'primordial_starforge'
   return null
 }

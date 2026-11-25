@@ -906,6 +906,84 @@ export const CRAFTED_ACCESSORIES: ShopAccessoryItem[] = [
       'A Warden-plated harness powered by the Colossus singularity drive for durable, rapid strikes.',
     accentColor: '#38BDF8',
     bonuses: { bonusHp: 70, damageReduction: 0.12, cooldownReduction: 0.08 }
+  },
+  {
+    id: 'acc_crafted_crucible_brute',
+    kind: 'accessory',
+    name: 'Crucible Heartguard',
+    slotLabel: 'Crucible Core',
+    rarity: 'epic',
+    price: 0,
+    salvageValue: 480,
+    statSummary: '+80 Max HP • -10% Damage Taken',
+    function_desc: 'A Brute-forged guard that reinforces the hull and absorbs molten impact.',
+    accentColor: '#F97316',
+    bonuses: { bonusHp: 80, damageReduction: 0.1 }
+  },
+  {
+    id: 'acc_crafted_cinder_crown',
+    kind: 'accessory',
+    name: 'Cinder Crown Relay',
+    slotLabel: 'Cinder Crown',
+    rarity: 'legendary',
+    price: 0,
+    salvageValue: 640,
+    statSummary: '+20% Damage • +10% Fire Rate',
+    function_desc: 'A crown relay that converts Cinder Crown energy into faster, stronger attacks.',
+    accentColor: '#FB923C',
+    bonuses: { damageMultiplier: 0.2, cooldownReduction: 0.1 }
+  },
+  {
+    id: 'acc_crafted_magma_artificer',
+    kind: 'accessory',
+    name: 'Artificer’s Ember Matrix',
+    slotLabel: 'Ember Matrix',
+    rarity: 'legendary',
+    price: 0,
+    salvageValue: 700,
+    statSummary: '+18% Damage • +20% XP Gain',
+    function_desc: 'Runic forge circuitry strengthens weapons and accelerates upgrade progress.',
+    accentColor: '#FACC15',
+    bonuses: { damageMultiplier: 0.18, xpMultiplier: 0.2 }
+  },
+  {
+    id: 'acc_crafted_searing_juggernaut',
+    kind: 'accessory',
+    name: 'Juggernaut Bulwark',
+    slotLabel: 'Siege Plating',
+    rarity: 'mythic',
+    price: 0,
+    salvageValue: 900,
+    statSummary: '+120 Max HP • -16% Damage Taken',
+    function_desc: 'Layered furnace armor built to withstand the Juggernaut’s crushing charges.',
+    accentColor: '#C2410C',
+    bonuses: { bonusHp: 120, damageReduction: 0.16 }
+  },
+  {
+    id: 'acc_crafted_furnace_leviathan',
+    kind: 'accessory',
+    name: 'Leviathan Vector Fins',
+    slotLabel: 'Vector Fins',
+    rarity: 'legendary',
+    price: 0,
+    salvageValue: 760,
+    statSummary: '+18% Move Speed • +12% Fire Rate',
+    function_desc: 'A set of forged fins that redirect heat into agile movement and faster attacks.',
+    accentColor: '#FDBA74',
+    bonuses: { speedMultiplier: 0.18, cooldownReduction: 0.12 }
+  },
+  {
+    id: 'acc_crafted_primordial_starforge',
+    kind: 'accessory',
+    name: 'Primordial Starheart',
+    slotLabel: 'Starheart Core',
+    rarity: 'mythic',
+    price: 0,
+    salvageValue: 1200,
+    statSummary: '+150 Max HP • +20% Damage • -12% Damage Taken',
+    function_desc: 'A perfected core that channels the Starforge’s power into offense and armor.',
+    accentColor: '#FDE047',
+    bonuses: { bonusHp: 150, damageMultiplier: 0.2, damageReduction: 0.12 }
   }
 ]
 

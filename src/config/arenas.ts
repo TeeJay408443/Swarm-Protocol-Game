@@ -2,17 +2,20 @@
  * Arena / Area Definitions & Unlock Logic
  * Area 1 (Carbon Sector - Black Arena) is unlocked from the start.
  * Area 2 (Astral Citadel) unlocks once the player beats Wave 15.
+ * Area 3 (Molten Starforge) unlocks after Astral Scourge is defeated.
  */
 
 import type { EnemiesRow } from '../types/database'
 import { enemies as seedEnemies } from '../db/seedData'
 import { selectEnemyTypeIndexForWave, WAVE_CONFIG } from './gameConstants'
 
-export type ArenaId = 'carbon_sector' | 'astral_citadel'
+export type ArenaId = 'carbon_sector' | 'astral_citadel' | 'molten_starforge'
 
 export const AREA_ONE_MAX_WAVE = WAVE_CONFIG.MAX_WAVE
 export const AREA_TWO_MAX_WAVE = 20
+export const AREA_THREE_MAX_WAVE = 25
 export const WAVE_15_FINAL_BOSS_BASE_HP = 150000
+export const MOLTEN_STARFORGE_FINAL_BOSS_ID = 'boss_a3_25'
 
 export interface ArenaDefinition {
   id: ArenaId
@@ -22,6 +25,7 @@ export interface ArenaDefinition {
   description: string
   maxWave: number
   unlockWaveRequirement: number | null
+  unlockAreaId: ArenaId | null
   difficultyLabel: string
   coinBonusPercent: number
   enemyHpMultiplier: number
@@ -45,6 +49,7 @@ export const GAME_AREAS: ArenaDefinition[] = [
       'Classic obsidian cyber-grid arena. Survive 15 escalating swarm waves and defeat the 150K HP Omega Overlord.',
     maxWave: AREA_ONE_MAX_WAVE,
     unlockWaveRequirement: null,
+    unlockAreaId: null,
     difficultyLabel: 'Standard',
     coinBonusPercent: 0,
     enemyHpMultiplier: 1.0,
@@ -66,6 +71,7 @@ export const GAME_AREAS: ArenaDefinition[] = [
       'High-threat sapphire sanctuary with 5 Citadel hostiles, 20 escalating waves ending with the Wave 20 Astral Scourge leviathan, Endless Mode after Wave 20, and +35% Battle Coins.',
     maxWave: AREA_TWO_MAX_WAVE,
     unlockWaveRequirement: 15,
+    unlockAreaId: 'carbon_sector',
     difficultyLabel: 'Elite (+55% Threat)',
     coinBonusPercent: 35,
     enemyHpMultiplier: 1.55,
@@ -77,11 +83,33 @@ export const GAME_AREAS: ArenaDefinition[] = [
     gridColor: 'rgba(52, 211, 153, 0.14)',
     borderColor: 'rgba(250, 204, 21, 0.72)',
     accentHex: '#34D399'
+  },
+  {
+    id: 'molten_starforge',
+    order: 3,
+    name: 'Molten Starforge',
+    subtitle: 'Heart of the Dying Star',
+    description:
+      'A superheated orbital foundry with 25 escalating waves, new Starforge weapons, a final battle against the Primordial Starforge, and +75% Battle Coins.',
+    maxWave: AREA_THREE_MAX_WAVE,
+    unlockWaveRequirement: AREA_TWO_MAX_WAVE,
+    unlockAreaId: 'astral_citadel',
+    difficultyLabel: 'Cataclysmic (+100% Threat)',
+    coinBonusPercent: 75,
+    enemyHpMultiplier: 2.15,
+    enemySpeedMultiplier: 1.32,
+    enemyDamageMultiplier: 1.72,
+    enemySpawnRateMultiplier: 1.34,
+    coinBonusMultiplier: 1.75,
+    floorColor: '#1B0D0A',
+    gridColor: 'rgba(251, 100, 36, 0.16)',
+    borderColor: 'rgba(251, 146, 60, 0.82)',
+    accentHex: '#FB923C'
   }
 ]
 
 export function getAreaMaxWave(areaId?: ArenaId | string | null): number {
-  return areaId === 'astral_citadel' ? AREA_TWO_MAX_WAVE : AREA_ONE_MAX_WAVE
+  return GAME_AREAS.find((area) => area.id === areaId)?.maxWave ?? AREA_ONE_MAX_WAVE
 }
 
 /**
@@ -145,6 +173,60 @@ export const AREA_TWO_ENEMIES: EnemiesRow[] = [
   }
 ]
 
+/** Molten Starforge enemies; the last entry is the area's recurring mini-boss. */
+export const AREA_THREE_ENEMIES: EnemiesRow[] = [
+  {
+    id: 'ene_a3_01',
+    name: 'Basalt Bulwark',
+    category: 'Heavy Swarm',
+    hp: 190,
+    speed: 0.46,
+    coin_value: 5,
+    description:
+      'A hulking foundry guardian plated in cooled star-metal. Slow to turn, but built to absorb sustained fire.'
+  },
+  {
+    id: 'ene_a3_02',
+    name: 'Cinder Skater',
+    category: 'Fast Flanker',
+    hp: 62,
+    speed: 1.62,
+    coin_value: 5,
+    description:
+      'A glassy ember-creature that darts in sudden zigzags, leaving a short-lived trail of sparks.'
+  },
+  {
+    id: 'ene_a3_03',
+    name: 'Furnace Marksman',
+    category: 'Ranged Sniper',
+    hp: 150,
+    speed: 0.96,
+    coin_value: 11,
+    description:
+      'A long-range forge construct that backs away before firing a thin, fast-moving molten lance.'
+  },
+  {
+    id: 'ene_a3_04',
+    name: 'Searing Runesmith',
+    category: 'Ranged Caster',
+    hp: 172,
+    speed: 0.82,
+    coin_value: 13,
+    description:
+      'A hovering runesmith that fans three bright slag-orbs across the arena.'
+  },
+  {
+    id: 'ene_a3_05',
+    name: 'Crucible Brute',
+    category: 'Mini-Boss',
+    hp: 720,
+    speed: 0.42,
+    coin_value: 42,
+    description:
+      'A towering furnace brute that lobs clearly marked magma shells and punishes players who hold still.'
+  }
+]
+
 export const ASTRAL_SCOURGE_BOSS_ID = 'boss_a2_20'
 export const ASTRAL_SCOURGE_PHASE_ONE_HP = 1_000_000
 export const ASTRAL_SCOURGE_PHASE_TWO_HP = 2_500_000
@@ -202,21 +284,83 @@ export const AREA_TWO_BOSSES: EnemiesRow[] = [
   }
 ]
 
+export const AREA_THREE_BOSSES: EnemiesRow[] = [
+  {
+    id: 'boss_a3_05',
+    name: 'Cinder Crown',
+    category: 'Boss',
+    hp: 980,
+    speed: 0.62,
+    coin_value: 175,
+    description:
+      'Wave 5 Starforge boss: a ringed ember monarch that alternates wide radial bursts with a marked core slam.'
+  },
+  {
+    id: 'boss_a3_10',
+    name: 'Magma Artificer',
+    category: 'Boss',
+    hp: 1650,
+    speed: 0.54,
+    coin_value: 260,
+    description:
+      'Wave 10 Starforge boss: a walking foundry that lays down warning-marked molten lanes before firing.'
+  },
+  {
+    id: 'boss_a3_15',
+    name: 'Searing Juggernaut',
+    category: 'Boss',
+    hp: 225000,
+    speed: 0.4,
+    coin_value: 500,
+    description:
+      'Wave 15 apex threat: an armored furnace colossus that cycles through expanding rings and aimed volleys.'
+  },
+  {
+    id: 'boss_a3_20',
+    name: 'Furnace Leviathan',
+    category: 'Boss',
+    hp: 2400,
+    speed: 0.7,
+    coin_value: 390,
+    description:
+      'Wave 20 Starforge boss: a flying forge-serpent that sweeps the arena and showers the floor with marked cinders.'
+  },
+  {
+    id: MOLTEN_STARFORGE_FINAL_BOSS_ID,
+    name: 'Primordial Starforge',
+    category: 'Boss',
+    hp: 360000,
+    speed: 0.32,
+    coin_value: 900,
+    description:
+      'Wave 25 final boss: the living star at the center of the foundry, shifting through three increasingly volatile phases.'
+  }
+]
+
 export function getAreaById(areaId?: string | null): ArenaDefinition {
   return GAME_AREAS.find((a) => a.id === areaId) ?? GAME_AREAS[0]
 }
 
+export interface AreaUnlockTelemetry {
+  wave_15_cleared?: boolean
+  area_2_wave20_cleared?: boolean
+}
+
 export function isAreaUnlocked(
   areaId: ArenaId,
-  telemetry?: { wave_15_cleared?: boolean } | null
+  telemetry?: AreaUnlockTelemetry | null
 ): boolean {
   const area = GAME_AREAS.find((a) => a.id === areaId)
-  if (!area || area.unlockWaveRequirement === null) return true
-  return Boolean(telemetry?.wave_15_cleared)
+  if (!area || area.unlockAreaId === null) return true
+  if (area.id === 'astral_citadel') return Boolean(telemetry?.wave_15_cleared)
+  if (area.id === 'molten_starforge') return Boolean(telemetry?.area_2_wave20_cleared)
+  return false
 }
 
 export function getAreaEnemies(areaId: ArenaId): EnemiesRow[] {
-  return areaId === 'astral_citadel' ? AREA_TWO_ENEMIES : seedEnemies
+  if (areaId === 'astral_citadel') return AREA_TWO_ENEMIES
+  if (areaId === 'molten_starforge') return AREA_THREE_ENEMIES
+  return seedEnemies
 }
 
 export function getWave15FinalBossHp(areaId: ArenaId): number {
@@ -227,6 +371,9 @@ export function getWave15FinalBossHp(areaId: ArenaId): number {
 export function getAreaFinalBossHp(areaId: ArenaId): number {
   if (areaId === 'astral_citadel') {
     return 240000
+  }
+  if (areaId === 'molten_starforge') {
+    return 360000
   }
   return getWave15FinalBossHp(areaId)
 }
@@ -373,6 +520,56 @@ export function getAreaTwoBossBuff(waveNumber: number): AreaOneBossBuffProfile {
   }
 }
 
+export function getAreaThreeBossBuff(waveNumber: number): AreaOneBossBuffProfile {
+  const tier = Math.max(1, Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL))
+  if (tier === 1) {
+    return {
+      hpMultiplier: 4.4,
+      damageMultiplier: 1.52,
+      speedMultiplier: 1.22,
+      damageReduction: 0.3,
+      shootCooldownScale: 0.72,
+      specialCooldownScale: 0.72,
+      coinMultiplier: 1.7,
+      enableEnrage: true
+    }
+  }
+  if (tier === 2) {
+    return {
+      hpMultiplier: 5.8,
+      damageMultiplier: 1.72,
+      speedMultiplier: 1.26,
+      damageReduction: 0.38,
+      shootCooldownScale: 0.66,
+      specialCooldownScale: 0.68,
+      coinMultiplier: 1.9,
+      enableEnrage: true
+    }
+  }
+  if (tier === 3) {
+    return {
+      hpMultiplier: 0.18,
+      damageMultiplier: 1.82,
+      speedMultiplier: 1.3,
+      damageReduction: 0.42,
+      shootCooldownScale: 0.62,
+      specialCooldownScale: 0.64,
+      coinMultiplier: 2,
+      enableEnrage: true
+    }
+  }
+  return {
+    hpMultiplier: 7.4,
+    damageMultiplier: 2,
+    speedMultiplier: 1.34,
+    damageReduction: 0.46,
+    shootCooldownScale: 0.58,
+    specialCooldownScale: 0.6,
+    coinMultiplier: 2.2,
+    enableEnrage: true
+  }
+}
+
 /**
  * Unified Area Final Boss combat profile (Wave 15 Omega Overlord for Carbon Sector,
  * Wave 20 Astral Scourge for Astral Citadel) ensuring high durability across 3 phases.
@@ -386,6 +583,17 @@ export function getWave15BossCombatProfile(areaId: ArenaId): Wave15BossCombatPro
       shootCooldownScale: 0.72,
       specialCooldownScale: 0.74,
       coinMultiplier: 1.5,
+      totalPhases: 3
+    }
+  }
+  if (areaId === 'molten_starforge') {
+    return {
+      hpMultiplier: 4.1,
+      damageMultiplier: 1.82,
+      damageReduction: 0.48,
+      shootCooldownScale: 0.62,
+      specialCooldownScale: 0.64,
+      coinMultiplier: 2.4,
       totalPhases: 3
     }
   }
@@ -415,7 +623,10 @@ export function shouldSpawnRegularEnemiesInWave(
   if (isDevourerActive) {
     return false
   }
-  if (areaId === 'astral_citadel' && waveNumber === 15) {
+  if (
+    (areaId === 'astral_citadel' || areaId === 'molten_starforge') &&
+    waveNumber === 15
+  ) {
     return false
   }
   if (waveNumber === getAreaMaxWave(areaId) && !isEndlessMode) {
@@ -428,6 +639,18 @@ export function getAreaBossTemplateForWave(
   areaId: ArenaId,
   waveNumber: number
 ): EnemiesRow {
+  if (areaId === 'molten_starforge') {
+    if (waveNumber === AREA_THREE_MAX_WAVE) {
+      return AREA_THREE_BOSSES[4]
+    }
+    if (waveNumber === 15) return AREA_THREE_BOSSES[2]
+    if (waveNumber === 20) return AREA_THREE_BOSSES[3]
+    if (waveNumber === 10) return AREA_THREE_BOSSES[1]
+    if (waveNumber === 5) return AREA_THREE_BOSSES[0]
+    return (Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL) % 2 === 1)
+      ? AREA_THREE_BOSSES[0]
+      : AREA_THREE_BOSSES[1]
+  }
   if (areaId !== 'astral_citadel') {
     return seedEnemies.find((e) => e.id === 'ene_04') || seedEnemies[3]
   }
@@ -472,6 +695,32 @@ export function selectAreaEnemyTemplateForWave(
   const subRoll = options.subRoll ?? Math.random()
   const canSpawnRanged = options.canSpawnRanged ?? true
   const canSpawnMiniBoss = options.canSpawnMiniBoss ?? false
+
+  if (areaId === 'molten_starforge') {
+    const [bulwark, skater, marksman, runesmith, brute] = AREA_THREE_ENEMIES
+    if (waveNumber < 2) {
+      return {
+        template: roll < 0.54 ? bulwark : skater,
+        isRanged: false,
+        isMiniBoss: false
+      }
+    }
+    if (waveNumber >= 3 && canSpawnMiniBoss && roll >= 0.88) {
+      return { template: brute, isRanged: false, isMiniBoss: true }
+    }
+    if (canSpawnRanged && roll >= 0.68) {
+      return {
+        template: subRoll < 0.52 ? marksman : runesmith,
+        isRanged: true,
+        isMiniBoss: false
+      }
+    }
+    return {
+      template: roll < 0.48 ? bulwark : skater,
+      isRanged: false,
+      isMiniBoss: false
+    }
+  }
 
   if (areaId !== 'astral_citadel') {
     const idx = selectEnemyTypeIndexForWave(waveNumber, roll, canSpawnRanged)
@@ -557,7 +806,7 @@ export function isSecretDevOnlyBossId(enemyId?: string | null): boolean {
 export interface DevSpawnableEnemyOption {
   id: string
   name: string
-  group: 'Area 1' | 'Area 2' | 'Bosses' | 'Secret Boss'
+  group: 'Area 1' | 'Area 2' | 'Area 3' | 'Bosses' | 'Secret Boss'
   category: string
   isBoss: boolean
   isSecretDevOnly?: boolean
@@ -583,6 +832,14 @@ export const DEV_SPAWNABLE_ENEMIES: DevSpawnableEnemyOption[] = [
     isBoss: false,
     template
   })),
+  ...AREA_THREE_ENEMIES.map((template) => ({
+    id: template.id,
+    name: template.name,
+    group: 'Area 3' as const,
+    category: template.category,
+    isBoss: false,
+    template
+  })),
   {
     id: 'ene_04',
     name: 'Aegis Commander Drone',
@@ -596,6 +853,14 @@ export const DEV_SPAWNABLE_ENEMIES: DevSpawnableEnemyOption[] = [
     name: template.name,
     group: 'Bosses' as const,
     category: 'Boss (Area 2)',
+    isBoss: true,
+    template
+  })),
+  ...AREA_THREE_BOSSES.map((template) => ({
+    id: template.id,
+    name: template.name,
+    group: 'Bosses' as const,
+    category: 'Boss (Area 3)',
     isBoss: true,
     template
   })),
@@ -669,7 +934,13 @@ export function computeDevourerCutsceneCameraFrame(params: {
 
 export const WAVE_15_CUTSCENE_DURATION_SECONDS = 4.6
 
-export type BossCutsceneKind = 'dog' | 'w15_omega' | 'w15_seraph' | 'w20_area2'
+export type BossCutsceneKind =
+  | 'dog'
+  | 'w15_omega'
+  | 'w15_seraph'
+  | 'w15_starforge'
+  | 'w20_area2'
+  | 'w25_area3'
 
 export type BossCutscenePresentation = 'dialogue' | 'warning'
 
@@ -756,6 +1027,34 @@ export function getWave15CutsceneTheme(areaId: ArenaId): BossCutsceneTheme {
       line2Class: 'text-emerald-200 drop-shadow-[0_0_10px_rgba(52,211,153,0.65)]'
     }
   }
+  if (areaId === 'molten_starforge') {
+    return {
+      kind: 'w15_starforge',
+      durationSeconds: 5.8,
+      revealDelaySeconds: 2.1,
+      presentation: 'warning',
+      particleStyle: 'carbon_inferno',
+      speaker: 'Searing Juggernaut',
+      line1: '',
+      line2: '',
+      warningTitle: 'BOSS WARNING // SEARING JUGGERNAUT',
+      warningSubtitle: 'MOLTEN STARFORGE WAVE 15 APEX THREAT DETECTED',
+      warningCriticalText: 'CRUCIBLE CONTAINMENT FAILURE IMMINENT',
+      primaryColor: '#F97316',
+      secondaryColor: '#FACC15',
+      coreColor: '#FFF7ED',
+      palette: ['#F97316', '#FB923C', '#FACC15', '#EF4444', '#FDBA74'],
+      stripeHex: '#F97316',
+      flashBuildColor: '#FED7AA',
+      flashDropColor: '#FFF7ED',
+      vignetteInnerRgba: 'rgba(124, 45, 18, 1)',
+      vignetteOuterRgba: 'rgba(249, 115, 22, 1)',
+      borderClass: 'border-orange-400/90 shadow-[0_0_34px_rgba(249,115,22,0.48)]',
+      speakerClass: 'text-amber-300',
+      line1Class: 'text-orange-200 drop-shadow-[0_0_14px_rgba(249,115,22,0.8)]',
+      line2Class: 'text-yellow-100 drop-shadow-[0_0_10px_rgba(250,204,21,0.7)]'
+    }
+  }
 
   return {
     kind: 'w15_omega',
@@ -810,6 +1109,34 @@ export function getAreaFinalBossCutsceneTheme(areaId: ArenaId): BossCutsceneThem
       speakerClass: 'text-amber-300',
       line1Class: 'text-emerald-300 drop-shadow-[0_0_14px_rgba(52,211,153,0.8)]',
       line2Class: 'text-amber-200 drop-shadow-[0_0_10px_rgba(250,204,21,0.7)]'
+    }
+  }
+  if (areaId === 'molten_starforge') {
+    return {
+      kind: 'w25_area3',
+      durationSeconds: 6.4,
+      revealDelaySeconds: 2.3,
+      presentation: 'warning',
+      particleStyle: 'carbon_inferno',
+      speaker: 'Primordial Starforge',
+      line1: '',
+      line2: '',
+      warningTitle: 'FINAL BOSS // PRIMORDIAL STARFORGE',
+      warningSubtitle: 'MOLTEN STARFORGE WAVE 25 CORE AWAKENING',
+      warningCriticalText: 'STELLAR CORE COLLAPSE IMMINENT',
+      primaryColor: '#FB923C',
+      secondaryColor: '#FDE047',
+      coreColor: '#FFF7ED',
+      palette: ['#FB923C', '#F97316', '#FDE047', '#EF4444', '#FFF7ED'],
+      stripeHex: '#FB923C',
+      flashBuildColor: '#FED7AA',
+      flashDropColor: '#FFF7ED',
+      vignetteInnerRgba: 'rgba(124, 45, 18, 1)',
+      vignetteOuterRgba: 'rgba(251, 146, 60, 1)',
+      borderClass: 'border-orange-300/90 shadow-[0_0_42px_rgba(251,146,60,0.55)]',
+      speakerClass: 'text-yellow-200',
+      line1Class: 'text-orange-200 drop-shadow-[0_0_16px_rgba(251,146,60,0.85)]',
+      line2Class: 'text-yellow-100 drop-shadow-[0_0_12px_rgba(253,224,71,0.75)]'
     }
   }
   return getWave15CutsceneTheme('carbon_sector')

@@ -5,7 +5,7 @@ import { Button } from '../../ui/Button'
 import { Badge } from '../../ui/Badge'
 import { upgrades } from '../../../db/seedData'
 import { ALL_HEROES, getUnlockableHeroSpec } from '../../../config/unlockableHeroes'
-import { AREA_TWO_UPGRADES } from '../../../config/areaUpgrades'
+import { AREA_THREE_UPGRADES, AREA_TWO_UPGRADES } from '../../../config/areaUpgrades'
 import { UNIVERSAL_CRIT_UPGRADES } from '../../../config/critSystem'
 import { GAME_CONFIG } from '../../../config/gameConstants'
 import { ArenaId, GAME_AREAS, getAreaById, isAreaUnlocked } from '../../../config/arenas'
@@ -47,7 +47,13 @@ export function PlayView() {
   const { equippedWeapon, equippedAccessories, shopState } = useShopState(user?.id)
   const { getProgress: getMasteryProgress } = useHeroMastery(user?.id)
   const { getLevel: getHeroUpgradeLv, getNextCost, upgradeHero } = useHeroUpgrades(user?.id)
-  const allUpgrades = [...shopWeaponsAsUpgrades(), ...upgrades, ...AREA_TWO_UPGRADES, ...UNIVERSAL_CRIT_UPGRADES]
+  const allUpgrades = [
+    ...shopWeaponsAsUpgrades(),
+    ...upgrades,
+    ...AREA_TWO_UPGRADES,
+    ...AREA_THREE_UPGRADES,
+    ...UNIVERSAL_CRIT_UPGRADES
+  ]
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [selectedAreaId, setSelectedAreaId] = useState<ArenaId>('carbon_sector')
@@ -60,6 +66,7 @@ export function PlayView() {
     return getStoredDifficultyId()
   })
   const [wave15Cleared, setWave15Cleared] = useState(false)
+  const [area2Wave20Cleared, setArea2Wave20Cleared] = useState(false)
   const [highestWave, setHighestWave] = useState(0)
   const { isUnlocked: isHeroAvailable, unlockWithCoins } = useHeroUnlocks(user?.id, highestWave)
   const [selectedHeroId, setSelectedHeroId] = useState<string>(ALL_HEROES[0].id)
@@ -73,12 +80,13 @@ export function PlayView() {
       if (!active) return
       const cleared = Boolean(telemetry.wave_15_cleared)
       setWave15Cleared(cleared)
+      setArea2Wave20Cleared(Boolean(telemetry.area_2_wave20_cleared))
       setHighestWave(telemetry.highest_wave || 0)
 
       const requestedArea = searchParams.get('area') as ArenaId | null
       if (requestedArea && isAreaUnlocked(requestedArea, telemetry)) {
         setSelectedAreaId(requestedArea)
-      } else if (requestedArea === 'astral_citadel' && !cleared) {
+      } else if (requestedArea) {
         setSelectedAreaId('carbon_sector')
       }
     })
@@ -122,7 +130,12 @@ export function PlayView() {
   }, [searchParams])
 
   const handleSelectArea = (areaId: ArenaId) => {
-    if (!isAreaUnlocked(areaId, { wave_15_cleared: wave15Cleared })) return
+    if (
+      !isAreaUnlocked(areaId, {
+        wave_15_cleared: wave15Cleared,
+        area_2_wave20_cleared: area2Wave20Cleared
+      })
+    ) return
     setSelectedAreaId(areaId)
     const nextParams = new URLSearchParams(searchParams)
     nextParams.set('area', areaId)
@@ -223,9 +236,12 @@ export function PlayView() {
 
       <main className="max-w-6xl mx-auto space-y-8">
         {/* Arena / Area Switcher */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {GAME_AREAS.map((area) => {
-            const unlocked = isAreaUnlocked(area.id, { wave_15_cleared: wave15Cleared })
+            const unlocked = isAreaUnlocked(area.id, {
+              wave_15_cleared: wave15Cleared,
+              area_2_wave20_cleared: area2Wave20Cleared
+            })
             const selected = selectedAreaId === area.id
             return (
               <button
@@ -251,7 +267,12 @@ export function PlayView() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs text-gray-400">
-                    Area {area.order} · {unlocked ? `${area.difficultyLabel} · ${area.maxWave} Waves` : `Locked · Beat Wave 15 (${highestWave}/15)`}
+                    Area {area.order} ·{' '}
+                    {unlocked
+                      ? `${area.difficultyLabel} · ${area.maxWave} Waves`
+                      : area.id === 'molten_starforge'
+                        ? 'Locked · Beat Area 2 Wave 20'
+                        : `Locked · Beat Wave 15 (${highestWave}/15)`}
                   </div>
                   <div className="font-bold text-white font-display truncate">
                     {area.name} <span className="text-sm font-normal text-gray-400">({area.subtitle})</span>
@@ -263,7 +284,9 @@ export function PlayView() {
                         ? area.coinBonusPercent > 0
                           ? `+${area.coinBonusPercent}% Battle Coins · Click to select`
                           : 'Standard Rules · Click to select'
-                        : 'Defeat Wave 15 Final Boss to unlock'}
+                        : area.id === 'molten_starforge'
+                          ? 'Defeat Astral Scourge to unlock'
+                          : 'Defeat Wave 15 Final Boss to unlock'}
                   </div>
                 </div>
               </button>

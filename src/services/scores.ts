@@ -53,6 +53,8 @@ export interface LocalPlayerTelemetry extends PlayerStatsRow {
   total_xp: number
   level: number
   wave_15_cleared: boolean
+  area_2_wave20_cleared: boolean
+  area_3_wave25_cleared: boolean
   boss_victories: number
   favorite_hero: string
   hero_stats: Record<string, HeroAggregateStat>
@@ -76,6 +78,7 @@ export interface SubmitScoreInput {
   damageFreeWaveStreak: number
   waveReached?: number
   victory?: boolean
+  areaId?: string
   heroUsed: string
   coinsAlreadyBanked?: boolean
 }
@@ -197,6 +200,8 @@ function getDefaultTelemetry(userId = 'guest_user'): LocalPlayerTelemetry {
     total_xp: 0,
     level: 1,
     wave_15_cleared: false,
+    area_2_wave20_cleared: false,
+    area_3_wave25_cleared: false,
     boss_victories: 0,
     favorite_hero: 'hero_01',
     hero_stats: {},
@@ -214,6 +219,24 @@ export function getLocalPlayerTelemetry(userId = 'guest_user'): LocalPlayerTelem
     ...stored,
     user_id: userId
   }
+}
+
+export function recordAreaCompletion(
+  areaId: 'astral_citadel' | 'molten_starforge',
+  userId = 'guest_user'
+): LocalPlayerTelemetry {
+  const effectiveUserId = userId || 'guest_user'
+  const previous = getLocalPlayerTelemetry(effectiveUserId)
+  const next: LocalPlayerTelemetry = {
+    ...previous,
+    area_2_wave20_cleared:
+      previous.area_2_wave20_cleared || areaId === 'astral_citadel',
+    area_3_wave25_cleared:
+      previous.area_3_wave25_cleared || areaId === 'molten_starforge',
+    updated_at: new Date().toISOString()
+  }
+  safeWriteStorage(getStatsStorageKey(effectiveUserId), next)
+  return next
 }
 
 /**
@@ -374,6 +397,12 @@ export async function submitScore(input: SubmitScoreInput): Promise<{
   const nextTotalXP = prevTelemetry.total_xp + earnedXP
 
   const didBeatWave15 = Boolean(input.victory && waveReached >= 15)
+  const didBeatAreaTwo = Boolean(
+    input.victory && input.areaId === 'astral_citadel' && waveReached >= 20
+  )
+  const didBeatAreaThree = Boolean(
+    input.victory && input.areaId === 'molten_starforge' && waveReached >= 25
+  )
 
   const nextTelemetry: LocalPlayerTelemetry = {
     user_id: input.userId || prevTelemetry.user_id || 'guest_user',
@@ -389,6 +418,8 @@ export async function submitScore(input: SubmitScoreInput): Promise<{
     total_xp: nextTotalXP,
     level: Math.max(1, Math.floor(nextTotalXP / 500) + 1),
     wave_15_cleared: Boolean(prevTelemetry.wave_15_cleared || didBeatWave15),
+    area_2_wave20_cleared: Boolean(prevTelemetry.area_2_wave20_cleared || didBeatAreaTwo),
+    area_3_wave25_cleared: Boolean(prevTelemetry.area_3_wave25_cleared || didBeatAreaThree),
     boss_victories: (prevTelemetry.boss_victories || 0) + (didBeatWave15 ? 1 : 0),
     favorite_hero: favoriteHero,
     hero_stats: nextHeroStats,

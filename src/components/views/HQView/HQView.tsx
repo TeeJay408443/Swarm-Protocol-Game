@@ -88,6 +88,7 @@ export function HQView() {
   }, [])
 
   const wave15Cleared = Boolean(telemetry?.wave_15_cleared)
+  const area2Wave20Cleared = Boolean(telemetry?.area_2_wave20_cleared)
   const highestWave = telemetry?.highest_wave ?? 0
   const selectedArea = getAreaById(selectedAreaId)
   const selectedDifficulty = getDifficultyById(selectedDifficultyId)
@@ -114,7 +115,9 @@ export function HQView() {
       setLockMessage(null)
     } else {
       setLockMessage(
-        `Beat Wave 15 in Area 1 to unlock ${getAreaById(areaId).name} (Current best: Wave ${highestWave}/15)`
+        areaId === 'molten_starforge'
+          ? 'Defeat Astral Scourge at Area 2 Wave 20 to unlock the Molten Starforge.'
+          : `Beat Wave 15 in Area 1 to unlock ${getAreaById(areaId).name} (Current best: Wave ${highestWave}/15)`
       )
     }
   }
@@ -122,7 +125,9 @@ export function HQView() {
   const handlePlayArea = (areaId: ArenaId) => {
     if (!isAreaUnlocked(areaId, telemetry)) {
       setLockMessage(
-        `Beat Wave 15 in Area 1 to unlock ${getAreaById(areaId).name} (Current best: Wave ${highestWave}/15)`
+        areaId === 'molten_starforge'
+          ? 'Defeat Astral Scourge at Area 2 Wave 20 to unlock the Molten Starforge.'
+          : `Beat Wave 15 in Area 1 to unlock ${getAreaById(areaId).name} (Current best: Wave ${highestWave}/15)`
       )
       return
     }
@@ -197,13 +202,18 @@ export function HQView() {
           </div>
 
           {/* Center Two Areas Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full max-w-4xl">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 w-full max-w-6xl">
             {GAME_AREAS.map((area) => {
               const unlocked = isAreaUnlocked(area.id, telemetry)
               const isSelected = selectedAreaId === area.id
-              const progressPct = wave15Cleared
-                ? 100
-                : Math.min(100, Math.round((highestWave / 15) * 100))
+              const progressPct =
+                area.id === 'molten_starforge'
+                  ? area2Wave20Cleared
+                    ? 100
+                    : 0
+                  : wave15Cleared
+                    ? 100
+                    : Math.min(100, Math.round((highestWave / 15) * 100))
 
               return (
                 <button
@@ -248,7 +258,9 @@ export function HQView() {
                           Beat Wave 15 to Unlock
                         </span>
                         <span className="text-xs text-slate-300 mt-0.5 tabular-nums">
-                          Progress: Wave {highestWave} / 15 ({progressPct}%)
+                          {area.id === 'molten_starforge'
+                            ? `Defeat Astral Scourge in Area 2 (${progressPct}% complete)`
+                            : `Progress: Wave ${highestWave} / 15 (${progressPct}%)`}
                         </span>
                       </div>
                     )}
@@ -397,7 +409,9 @@ export function HQView() {
                             ? area.coinBonusPercent > 0
                               ? `${area.subtitle} · +${area.coinBonusPercent}% Coins`
                               : `${area.subtitle} · Click to Play`
-                            : `Beat Wave 15 to unlock (${highestWave}/15)`}
+                            : area.id === 'molten_starforge'
+                              ? 'Defeat Astral Scourge · Area 2 Wave 20'
+                              : `Beat Wave 15 to unlock (${highestWave}/15)`}
                         </div>
                       </div>
                       <span className="text-xs font-bold shrink-0">

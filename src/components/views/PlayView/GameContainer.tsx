@@ -49,8 +49,10 @@ import {
 } from '../../../config/endlessModifiers'
 import {
   AREA_TWO_ENEMIES,
+  AREA_THREE_ENEMIES,
   ArenaId,
   ASTRAL_SCOURGE_BOSS_ID,
+  MOLTEN_STARFORGE_FINAL_BOSS_ID,
   ASTRAL_SCOURGE_PHASE_ONE_HP,
   ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
   BossCutsceneKind,
@@ -68,6 +70,8 @@ import {
   getAreaMiniBossCap,
   getAreaOneBossBuff,
   getAreaTwoBossBuff,
+  getAreaThreeBossBuff,
+  getAreaEnemies,
   getAstralScourgePhaseTwoCutsceneTheme,
   getDevSpawnableEnemyById,
   getWave15CutsceneTheme,
@@ -108,6 +112,7 @@ import {
   shouldApplyHomingForHero
 } from '../../../config/heroAbilities'
 import {
+  AREA_THREE_UPGRADES,
   AREA_TWO_UPGRADES,
   getAvailableRunUpgrades
 } from '../../../config/areaUpgrades'
@@ -126,6 +131,7 @@ import {
   calculateScoreFormula,
   getLocalPlayerTelemetry,
   getOperativeProfile,
+  recordAreaCompletion,
   submitScore
 } from '../../../services/scores'
 import {
@@ -288,6 +294,9 @@ interface StarfallMeteorFx {
   damage: number
   isLv5: boolean
   isCloneCast: boolean
+  isStarforge?: boolean
+  burnDuration?: number
+  burnDamage?: number
 }
 
 interface TempestSphereFx {
@@ -1242,6 +1251,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
           damageFreeWaveStreak: longestDamageFreeStreakRef.current,
           waveReached: waveRef.current,
           victory,
+          areaId: areaRef.current.id,
           heroUsed: heroId,
           coinsAlreadyBanked: true
         })
@@ -1253,9 +1263,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
             )
             toast.success(
               victory
-                ? areaRef.current.id === 'astral_citadel'
-                  ? `VICTORY! Astral Scourge Vanquished — Wave ${areaMaxWave} Cleared! Score: ${computedScore.toLocaleString()}`
-                  : `VICTORY! Wave ${areaMaxWave} Cleared — Area 2 Unlocked! Score: ${computedScore.toLocaleString()}`
+                ? areaRef.current.id === 'molten_starforge'
+                  ? `VICTORY! Primordial Starforge Defeated — Area 3 Wave ${areaMaxWave} Cleared! Score: ${computedScore.toLocaleString()}`
+                  : areaRef.current.id === 'astral_citadel'
+                    ? `VICTORY! Astral Scourge Vanquished — Wave ${areaMaxWave} Cleared! Molten Starforge unlocked!`
+                    : `VICTORY! Wave ${areaMaxWave} Cleared — Area 2 Unlocked! Score: ${computedScore.toLocaleString()}`
                 : `Mission logged! Final Score: ${computedScore.toLocaleString()}`
             )
             for (const unlockedHero of heroUnlocks) {
@@ -1462,13 +1474,17 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
       const areaMeta = areaRef.current
       const isAreaTwo = areaMeta.id === 'astral_citadel'
+      const isAreaThree = areaMeta.id === 'molten_starforge'
       const areaMaxWave = getAreaMaxWave(areaMeta.id)
       const bossTemplate = forceBoss ? getAreaBossTemplateForWave(areaMeta.id, waveNumber) : null
       const isWave15AreaTwoBoss =
         isAreaTwo && forceBoss && waveNumber === 15 && bossTemplate?.id === 'boss_a2_15'
+      const isWave15AreaThreeBoss =
+        isAreaThree && forceBoss && waveNumber === 15 && bossTemplate?.id === 'boss_a3_15'
+      const isWave15SpecialBoss = isWave15AreaTwoBoss || isWave15AreaThreeBoss
       const isFinalAreaBoss = forceBoss && waveNumber === areaMaxWave && !endlessModeRef.current
       const isWormBoss = bossTemplate?.id === ASTRAL_SCOURGE_BOSS_ID
-      const isStationaryArenaBoss = (isFinalAreaBoss || isWave15AreaTwoBoss) && !isWormBoss
+      const isStationaryArenaBoss = (isFinalAreaBoss || isWave15SpecialBoss) && !isWormBoss
       const bossArena = bossArenaRef.current
       const playerCenter = player.getCenter()
 
@@ -1487,16 +1503,17 @@ const GameContainer: React.FC<GameContainerProps> = ({
         spawnY = Math.max(40, Math.min(ARENA_SIZE - 80, playerCenter.y + Math.sin(angle) * distance))
       }
 
-      let template = isAreaTwo ? AREA_TWO_ENEMIES[0] : seedEnemies[0]
+      let template = getAreaEnemies(areaMeta.id)[0] || seedEnemies[0]
       if (bossTemplate) {
         template = bossTemplate
       } else {
-        const rangedLimit = getWaveRangedSpawnLimit(waveNumber) + (isAreaTwo ? 3 : 0)
+        const rangedLimit =
+          getWaveRangedSpawnLimit(waveNumber) + (isAreaTwo ? 3 : isAreaThree ? 4 : 0)
         const underRangedCap = allowRanged && rangedSpawnedInWaveRef.current < rangedLimit
         const waveProgress = Math.min(1, waveElapsedRef.current / WAVE_CONFIG.WAVE_DURATION_SECONDS)
         const expectedRangedSoFar = Math.floor(waveProgress * rangedLimit)
 
-        if (isAreaTwo) {
+        if (isAreaTwo || isAreaThree) {
           const activeMiniBossCount = enemiesRef.current.filter(
             (e) => e.isAlive && e.isMiniBoss && !e.isBoss
           ).length
@@ -1505,14 +1522,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
             allowRanged && waveNumber >= 3 && waveElapsedRef.current >= 5 && activeMiniBossCount === 0
 
           if (needsGuaranteedMiniBoss && miniBossCap > 0) {
-            template = AREA_TWO_ENEMIES[4]
+            template = isAreaThree ? AREA_THREE_ENEMIES[4] : AREA_TWO_ENEMIES[4]
           } else if (underRangedCap && rangedSpawnedInWaveRef.current < expectedRangedSoFar) {
-            template = Math.random() < 0.5 ? AREA_TWO_ENEMIES[2] : AREA_TWO_ENEMIES[3]
+            const roster = isAreaThree ? AREA_THREE_ENEMIES : AREA_TWO_ENEMIES
+            template = Math.random() < 0.5 ? roster[2] : roster[3]
             rangedSpawnedInWaveRef.current += 1
           } else {
             const canRollRanged =
               underRangedCap && rangedSpawnedInWaveRef.current <= expectedRangedSoFar + 1
-            const pick = selectAreaEnemyTemplateForWave('astral_citadel', waveNumber, {
+            const pick = selectAreaEnemyTemplateForWave(areaMeta.id, waveNumber, {
               roll: Math.random(),
               subRoll: Math.random(),
               canSpawnRanged: canRollRanged,
@@ -1653,7 +1671,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
           diffMeta.enemyDamageMultiplier *
           finalCombat.damageMultiplier
         enemy.coinValue = Math.round(
-          (isWormBoss ? 450 : 250) * areaMeta.coinBonusMultiplier * finalCombat.coinMultiplier
+          (isWormBoss ? 450 : enemy.enemyData?.coin_value || 250) *
+            areaMeta.coinBonusMultiplier *
+            finalCombat.coinMultiplier
         )
         enemy.damageReduction = finalCombat.damageReduction
         enemy.enableEnrage = true
@@ -1662,9 +1682,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
           2.0,
           enemy.specialCooldownMax * finalCombat.specialCooldownScale
         )
-        enemy.bossTier = isAreaTwo ? 4 : 3
+        enemy.bossTier = isAreaThree ? 5 : isAreaTwo ? 4 : 3
         enemy.bossTitle =
-          areaMeta.id === 'astral_citadel'
+          isAreaThree
+            ? 'PRIMORDIAL STARFORGE — FINAL BOSS (W25)'
+            : areaMeta.id === 'astral_citadel'
             ? 'ASTRAL SCOURGE — FINAL BOSS (W20)'
             : 'OMEGA OVERLORD — FINAL BOSS (W15)'
 
@@ -1673,6 +1695,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
         const bossBuff = forceBoss
           ? isAreaTwo
             ? getAreaTwoBossBuff(waveNumber)
+            : isAreaThree
+              ? getAreaThreeBossBuff(waveNumber)
             : getAreaOneBossBuff(waveNumber, false)
           : null
         enemy.maxHealth = Math.max(
@@ -1729,7 +1753,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
         if (forceBoss) {
           const tier = Math.max(1, Math.floor(waveNumber / WAVE_CONFIG.BOSS_WAVE_INTERVAL))
           enemy.bossTier = tier
-          enemy.bossTitle = isAreaTwo
+          enemy.bossTitle = isAreaThree
+            ? `${template.name.toUpperCase()} (W${waveNumber})`
+            : isAreaTwo
             ? template.id === ASTRAL_SCOURGE_BOSS_ID
               ? `ASTRAL SCOURGE (W${waveNumber})`
               : template.id === 'boss_a2_15'
@@ -1747,6 +1773,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
         if (isWave15AreaTwoBoss) {
           enemy.bossTitle = 'SOLAR ARCHON SERAPH — WAVE 15 APEX'
           beginAreaBossCutscene(getWave15CutsceneTheme('astral_citadel'))
+        } else if (isWave15AreaThreeBoss) {
+          enemy.bossTitle = 'SEARING JUGGERNAUT — WAVE 15 APEX'
+          beginAreaBossCutscene(getWave15CutsceneTheme('molten_starforge'))
         }
       }
 
@@ -1792,11 +1821,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
     const telemetry = getLocalPlayerTelemetry(effectiveUserId)
     area2UnlockedRef.current =
-      areaRef.current.id === 'astral_citadel' || Boolean(telemetry.wave_15_cleared)
+      areaRef.current.id !== 'carbon_sector' || Boolean(telemetry.wave_15_cleared)
 
     const allKnownUpgrades = [
       ...seedUpgrades,
       ...AREA_TWO_UPGRADES,
+      ...AREA_THREE_UPGRADES,
       ...UNIVERSAL_CRIT_UPGRADES,
       ...shopWeaponsAsUpgrades(starOverrides)
     ]
@@ -2912,6 +2942,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
           })
           clearedWave15BossRef.current = true
           area2UnlockedRef.current = true
+          if (areaRef.current.id === 'astral_citadel') {
+            recordAreaCompletion('astral_citadel', user?.id || 'guest_user')
+          } else if (areaRef.current.id === 'molten_starforge') {
+            recordAreaCompletion('molten_starforge', user?.id || 'guest_user')
+          }
           const heroIdForMastery = playerRef.current?.hero?.id || selectedHeroId || 'hero_01'
           const bossMastery = recordHeroRoundsCompleted(
             user?.id || 'guest_user',
@@ -2924,7 +2959,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               `Mastery Tier ${bossMastery.unlockedNewTier.tier} Unlocked: ${bossMastery.unlockedNewTier.title} (${bossMastery.unlockedNewTier.summary})`
             )
           }
-          if (areaRef.current.id === 'astral_citadel') {
+          if (areaRef.current.id !== 'carbon_sector') {
             playSoundRef.current('levelup')
             setEngineState('victory_choice')
           } else {
@@ -4376,6 +4411,77 @@ const GameContainer: React.FC<GameContainerProps> = ({
           playSoundRef.current('shoot')
           return
         }
+        case 'upg_a3_01': {
+          // Cinderrail Lance: fast piercing shots that leave a short-lived ember burn.
+          if (!nearest) return
+          const ec = nearest.getCenter()
+          const baseAngle = Math.atan2(ec.y - pc.y, ec.x - pc.x)
+          const count = isLv5 ? 3 : lv >= 3 ? 2 : 1
+          const spread = count === 1 ? 0 : 0.18
+          for (let i = 0; i < count; i++) {
+            const angle = baseAngle + (count === 1 ? 0 : i === 0 ? -spread : spread)
+            playerProjectilesRef.current.push(
+              new Projectile({
+                x: pc.x,
+                y: pc.y,
+                width: 13 + lv,
+                height: 8 + lv * 0.5,
+                speed: 690 + lv * 28,
+                direction: { x: Math.cos(angle), y: Math.sin(angle) },
+                damage: weaponDmg,
+                color: isLv5 ? '#FDE047' : '#FB923C',
+                maxLifetime: 0.86,
+                maxPierces: 2 + lv * 2,
+                burnRadius: 28 + lv * 7,
+                burnDuration: 1.8 + lv * 0.22,
+                burnDamage: Math.max(3, Math.round(weaponDmg * 0.16)),
+                type: 'Fireball'
+              })
+            )
+          }
+          triggerMount(baseAngle)
+          playSoundRef.current('shoot')
+          return
+        }
+        case 'upg_a3_03': {
+          // Crucible Starfall: marked impact zones erupt into lingering molten burns.
+          const meteorCount = Math.min(5, lv)
+          const meteorRadius = 70 + lv * 15
+          const candidates = [...aliveEnemies].sort((a, b) => {
+            const da = Math.hypot(a.getCenter().x - pc.x, a.getCenter().y - pc.y)
+            const db = Math.hypot(b.getCenter().x - pc.x, b.getCenter().y - pc.y)
+            return da - db
+          })
+          for (let m = 0; m < meteorCount; m++) {
+            const pick =
+              candidates.length > 0
+                ? candidates[(m * 2) % candidates.length].getCenter()
+                : {
+                    x: pc.x + Math.cos(m * 1.4) * 150,
+                    y: pc.y + Math.sin(m * 1.4) * 150
+                  }
+            meteorsRef.current.push({
+              targetX: pick.x + (m > 0 ? Math.cos(m * 2.1) * 30 : 0),
+              targetY: pick.y + (m > 0 ? Math.sin(m * 2.1) * 30 : 0),
+              radius: meteorRadius,
+              timer: -m * 0.08,
+              impactTime: 0.3,
+              damage: weaponDmg,
+              isLv5,
+              isCloneCast,
+              isStarforge: true,
+              burnDuration: 2.2 + lv * 0.28,
+              burnDamage: Math.max(4, Math.round(weaponDmg * 0.22))
+            })
+          }
+          triggerMount(
+            candidates.length > 0
+              ? Math.atan2(candidates[0].getCenter().y - pc.y, candidates[0].getCenter().x - pc.x)
+              : player.facingAngle
+          )
+          playSoundRef.current('shoot')
+          return
+        }
         case 'upg_a2_06': {
           // Permafrost Cryo-Nova: launches frost orbs that detonate in freezing cryo-novas
           if (!nearest) return
@@ -5146,8 +5252,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 toast.success(`HERO UNLOCKED: ${unlockedHero.name}!`)
               }
 
-              if (areaRef.current.id === 'astral_citadel' && waveRef.current === 15) {
-                // Wave 15 is a dedicated Solar Archon Seraph duel; clear Wave 14 survivors too.
+              if (
+                (areaRef.current.id === 'astral_citadel' ||
+                  areaRef.current.id === 'molten_starforge') &&
+                waveRef.current === 15
+              ) {
+                // Area 2 and 3 Wave 15 are dedicated boss duels; clear prior-wave survivors.
                 enemiesRef.current = enemiesRef.current.filter((e) => e.isBoss && e.isAlive)
                 spawnAccumulatorRef.current = 0
               }
@@ -5180,9 +5290,11 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   bossSpawnedWaveRef.current = areaMaxWave
                   spawnEnemyForWave(areaMaxWave, true)
                   toast.warning(
-                    areaRef.current.id === 'astral_citadel'
-                      ? 'FINAL WAVE 20 — ASTRAL SCOURGE: Evade laser grids, portal lunges & splitting astral orbs!'
-                      : 'FINAL WAVE 15: Dodge closing side lasers, tracking strikes & bullet hell!'
+                    areaRef.current.id === 'molten_starforge'
+                      ? 'FINAL WAVE 25 — PRIMORDIAL STARFORGE: Watch the marked cinder lanes and expanding core rings!'
+                      : areaRef.current.id === 'astral_citadel'
+                        ? 'FINAL WAVE 20 — ASTRAL SCOURGE: Evade laser grids, portal lunges & splitting astral orbs!'
+                        : 'FINAL WAVE 15: Dodge closing side lasers, tracking strikes & bullet hell!'
                   )
                 }
               } else {
@@ -5235,7 +5347,12 @@ const GameContainer: React.FC<GameContainerProps> = ({
                     ? 1.08
                     : diffMeta.id === 'easy'
                       ? 0.85
-                      : 1) * (areaMeta.id === 'astral_citadel' ? 1.15 : 1)
+                      : 1) *
+                (areaMeta.id === 'molten_starforge'
+                  ? 1.28
+                  : areaMeta.id === 'astral_citadel'
+                    ? 1.15
+                    : 1)
               const effectiveMaxActive = Math.min(380, Math.round(waveCfg.maxActiveEnemies * capMult))
               spawnAccumulatorRef.current +=
                 waveCfg.spawnRate *
@@ -5868,10 +5985,24 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 duration: 0.42,
                 color: meteor.isCloneCast
                   ? 'rgba(192, 132, 252, 0.7)'
+                  : meteor.isStarforge
+                    ? 'rgba(249, 115, 22, 0.78)'
                   : meteor.isLv5
                     ? 'rgba(255, 215, 0, 0.78)'
                     : 'rgba(52, 211, 153, 0.72)'
               })
+              if (meteor.isStarforge && (meteor.burnDuration || 0) > 0) {
+                burnZonesRef.current.push({
+                  x: meteor.targetX,
+                  y: meteor.targetY,
+                  radius: meteor.radius * 0.78,
+                  timer: 0,
+                  duration: meteor.burnDuration || 2,
+                  tickTimer: 0,
+                  damagePerTick: meteor.burnDamage || Math.max(4, Math.round(meteor.damage * 0.2)),
+                  isLv5: meteor.isLv5
+                })
+              }
               for (const enemy of enemiesRef.current) {
                 if (!enemy.isAlive || enemy.isSpawning) continue
                 const ec = enemy.getCenter()
@@ -5883,7 +6014,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
                     enemy,
                     meteor.damage,
                     { x: meteor.targetX, y: meteor.targetY },
-                    { color: meteor.isLv5 ? '#FDE047' : '#34D399' }
+                    {
+                      color: meteor.isStarforge
+                        ? '#FB923C'
+                        : meteor.isLv5
+                          ? '#FDE047'
+                          : '#34D399'
+                    }
                   )
                 }
               }
@@ -7623,6 +7760,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
           const startY = mp.y - 340 * (1 - frac)
           const accent = meteor.isCloneCast
             ? '#C084FC'
+            : meteor.isStarforge
+              ? '#FB923C'
             : meteor.isLv5
               ? '#FFD700'
               : '#34D399'

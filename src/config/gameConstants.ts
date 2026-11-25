@@ -548,6 +548,30 @@ export function getUpgradeLevelPerkHint(upgradeId: string, targetLevel: number):
       2: 'Fires twin frost orbs + 1.65s solid freeze',
       3: 'Twin piercing Cryo-Nova orbs (114px freeze blast)',
       4: 'Launches 3 frost orbs freezing swarms for 2.0s'
+    },
+    upg_a3_01: {
+      1: 'Fires a piercing cinderrail slug with a burning impact burst',
+      2: 'Adds a second slug and widens the cinder burst',
+      3: 'Fires three staggered rail slugs with longer burn',
+      4: 'Twin overcharged rail slugs pierce deep into enemy lines'
+    },
+    upg_a3_02: {
+      1: '2 molten orbitals cut nearby enemies and ignite survivors',
+      2: 'Adds a 3rd orbital and widens the blade ring',
+      3: '4 high-heat blades with stronger burn damage',
+      4: '5 furnace blades orbit at maximum reach'
+    },
+    upg_a3_03: {
+      1: 'Calls 1 burning Starforge meteor onto the nearest threat',
+      2: 'Calls twin meteors and widens their impact fields',
+      3: 'Drops 3 staggered meteors onto enemy clusters',
+      4: 'Calls 4 heavy meteors with lingering cinder zones'
+    },
+    upg_a3_06: {
+      1: 'Deploys 1 Ember Relay turret',
+      2: 'Turret fires faster and hits harder',
+      3: 'Deploys a second Ember Relay turret',
+      4: 'Twin overcharged turrets fire piercing ember rounds'
     }
   }
 
@@ -603,7 +627,13 @@ export function getUpgradeOverdriveHint(upgradeId: string): string {
     upg_a2_03: 'LV 5 OVERDRIVE: Hurls 4 Golden Astral Spears (14 pierces) erupting in 160px supernovas',
     upg_a2_04: 'LV 5 OVERDRIVE: 5 Starfall Meteors bombard the arena leaving 164px super-craters',
     upg_a2_05: 'LV 5 OVERDRIVE: 6 Golden Prism Chakrams orbit at hypersonic speed shredding swarms',
-    upg_a2_06: 'LV 5 OVERDRIVE: 4 Permafrost Cryo-Nova orbs freeze entire waves solid for 2.2s'
+    upg_a2_06: 'LV 5 OVERDRIVE: 4 Permafrost Cryo-Nova orbs freeze entire waves solid for 2.2s',
+    upg_a3_01: 'LV 5 OVERDRIVE: A twin-barrel cinderrail pierces 18 targets and ignites the impact zone',
+    upg_a3_02: 'LV 5 OVERDRIVE: 6 orbiting magma blades shred swarms in a wide burning ring',
+    upg_a3_03: 'LV 5 OVERDRIVE: 5 star-metal meteors create massive overlapping cinder fields',
+    upg_a3_04: 'LV 5 OVERDRIVE: Maximum armor and +60 bonus maximum health',
+    upg_a3_05: 'LV 5 OVERDRIVE: Rapid reactor regeneration restores 3.5% max health per second',
+    upg_a3_06: 'LV 5 OVERDRIVE: 3 paired Ember Relay turrets fire overcharged piercing rounds'
   }
   return hints[upgradeId] || 'LV 5 OVERDRIVE: Massive damage, speed, and evolved weapon pattern'
 }

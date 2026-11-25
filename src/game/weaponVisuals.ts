@@ -224,6 +224,54 @@ const WEAPON_BEHAVIORS: Record<string, WeaponVisualBehavior> = {
     accentColor: '#E0F2FE',
     label: 'Cryo-Nova Orb'
   },
+  upg_a3_01: {
+    kind: 'ranged_recoil',
+    duration: 0.18,
+    primaryColor: '#F97316',
+    secondaryColor: '#7C2D12',
+    accentColor: '#FDE047',
+    label: 'Cinderrail Lance'
+  },
+  upg_a3_02: {
+    kind: 'glaive_spin',
+    duration: 0.28,
+    primaryColor: '#FB923C',
+    secondaryColor: '#7C2D12',
+    accentColor: '#FEF3C7',
+    label: 'Magma Orbitals'
+  },
+  upg_a3_03: {
+    kind: 'hammer_swing',
+    duration: 0.32,
+    primaryColor: '#F97316',
+    secondaryColor: '#451A03',
+    accentColor: '#FDE047',
+    label: 'Crucible Starfall'
+  },
+  upg_a3_04: {
+    kind: 'catalyst_pulse',
+    duration: 0.3,
+    primaryColor: '#FB923C',
+    secondaryColor: '#431407',
+    accentColor: '#FDBA74',
+    label: 'Forgeheart Aegis'
+  },
+  upg_a3_05: {
+    kind: 'catalyst_pulse',
+    duration: 0.28,
+    primaryColor: '#FACC15',
+    secondaryColor: '#7C2D12',
+    accentColor: '#FFF7ED',
+    label: 'Heartfire Reactor'
+  },
+  upg_a3_06: {
+    kind: 'ranged_recoil',
+    duration: 0.2,
+    primaryColor: '#F97316',
+    secondaryColor: '#451A03',
+    accentColor: '#FACC15',
+    label: 'Ember Relay'
+  },
 
   // Shop / Crate Weapons
   wpn_rusty_pistol: {

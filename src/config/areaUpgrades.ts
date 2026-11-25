@@ -70,17 +70,89 @@ export const AREA_TWO_UPGRADES: UpgradesRow[] = [
   }
 ]
 
+export const AREA_THREE_UPGRADES: UpgradesRow[] = [
+  {
+    id: 'upg_a3_01',
+    name: 'Cinderrail Lance',
+    category: 'Projectile',
+    damage: 82,
+    cooldown_s: 1.35,
+    special: 'Area 3 · Piercing burn rounds',
+    function_desc:
+      'Fires a blazing rail slug through enemy lines, then scorches the final target with a compact cinder burst.'
+  },
+  {
+    id: 'upg_a3_02',
+    name: 'Magma Orbitals',
+    category: 'Melee Weapon',
+    damage: 58,
+    cooldown_s: 0.38,
+    special: 'Area 3 · Orbiting molten blades',
+    function_desc:
+      'Summons a growing ring of molten blades that cuts through nearby enemies and ignites survivors.'
+  },
+  {
+    id: 'upg_a3_03',
+    name: 'Crucible Starfall',
+    category: 'Heavy AoE',
+    damage: 126,
+    cooldown_s: 2.6,
+    special: 'Area 3 · Burning impact fields',
+    function_desc:
+      'Calls staggered star-metal meteors down onto enemy clusters, leaving short-lived burning impact zones.'
+  },
+  {
+    id: 'upg_a3_04',
+    name: 'Forgeheart Aegis',
+    category: 'Defense',
+    damage: 0,
+    cooldown_s: 0,
+    special: 'Area 3 · Armor and max health',
+    function_desc:
+      'A reinforced core adds bonus maximum health and reduces incoming damage while equipped.'
+  },
+  {
+    id: 'upg_a3_05',
+    name: 'Heartfire Reactor',
+    category: 'Support',
+    damage: 0,
+    cooldown_s: 0,
+    special: 'Area 3 · Continuous health recovery',
+    function_desc:
+      'A self-regulating reactor restores health over time, with stronger recovery at higher levels.'
+  },
+  {
+    id: 'upg_a3_06',
+    name: 'Ember Relay',
+    category: 'Summon',
+    damage: 48,
+    cooldown_s: 0.62,
+    special: 'Area 3 · Companion forge turret',
+    function_desc:
+      'Deploys autonomous forge turrets that fire piercing ember rounds at the nearest enemy.'
+  }
+]
+
 export const AREA_TWO_UPGRADE_IDS = new Set<string>(AREA_TWO_UPGRADES.map((u) => u.id))
+export const AREA_THREE_UPGRADE_IDS = new Set<string>(AREA_THREE_UPGRADES.map((u) => u.id))
 
 export function isAreaTwoUpgrade(upgradeId: string): boolean {
   return AREA_TWO_UPGRADE_IDS.has(upgradeId)
+}
+
+export function isAreaThreeUpgrade(upgradeId: string): boolean {
+  return AREA_THREE_UPGRADE_IDS.has(upgradeId)
 }
 
 export function isAreaTwoUpgradesUnlocked(options: {
   areaId?: string | null
   wave15Cleared?: boolean | null
 }): boolean {
-  return options.areaId === 'astral_citadel' || Boolean(options.wave15Cleared)
+  return (
+    options.areaId === 'astral_citadel' ||
+    options.areaId === 'molten_starforge' ||
+    Boolean(options.wave15Cleared)
+  )
 }
 
 export function getAvailableRunUpgrades(options: {
@@ -88,7 +160,12 @@ export function getAvailableRunUpgrades(options: {
   wave15Cleared?: boolean | null
 }): UpgradesRow[] {
   if (isAreaTwoUpgradesUnlocked(options)) {
-    return [...seedUpgrades, ...UNIVERSAL_CRIT_UPGRADES, ...AREA_TWO_UPGRADES]
+    return [
+      ...seedUpgrades,
+      ...UNIVERSAL_CRIT_UPGRADES,
+      ...AREA_TWO_UPGRADES,
+      ...(options.areaId === 'molten_starforge' ? AREA_THREE_UPGRADES : [])
+    ]
   }
   return [...seedUpgrades, ...UNIVERSAL_CRIT_UPGRADES]
 }

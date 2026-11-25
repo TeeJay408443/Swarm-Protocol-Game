@@ -13,8 +13,13 @@ import {
   upgrades as defaultUpgrades,
   achievements as defaultAchievements
 } from '../db/seedData'
-import { AREA_TWO_BOSSES, AREA_TWO_ENEMIES } from '../config/arenas'
-import { AREA_TWO_UPGRADES } from '../config/areaUpgrades'
+import {
+  AREA_THREE_BOSSES,
+  AREA_THREE_ENEMIES,
+  AREA_TWO_BOSSES,
+  AREA_TWO_ENEMIES
+} from '../config/arenas'
+import { AREA_THREE_UPGRADES, AREA_TWO_UPGRADES } from '../config/areaUpgrades'
 import { UNIVERSAL_CRIT_UPGRADES } from '../config/critSystem'
 import { UNLOCKABLE_HEROES } from '../config/unlockableHeroes'
 import type { 
@@ -76,8 +81,13 @@ export const getHero = async (id: string): Promise<HeroesRow | null> => {
 export const getEnemies = async (): Promise<EnemiesRow[]> => {
   const mergeWithAreaTwo = (base: EnemiesRow[]): EnemiesRow[] => {
     const seen = new Set(base.map((e) => e.id))
-    const areaTwoRoster = [...AREA_TWO_ENEMIES, ...AREA_TWO_BOSSES]
-    return [...base, ...areaTwoRoster.filter((e) => !seen.has(e.id))]
+    const areaRoster = [
+      ...AREA_TWO_ENEMIES,
+      ...AREA_TWO_BOSSES,
+      ...AREA_THREE_ENEMIES,
+      ...AREA_THREE_BOSSES
+    ]
+    return [...base, ...areaRoster.filter((e) => !seen.has(e.id))]
   }
 
   if (!supabase) return mergeWithAreaTwo(defaultEnemies)
@@ -120,6 +130,7 @@ export const getUpgrades = async (): Promise<UpgradesRow[]> => {
     return [
       ...base,
       ...AREA_TWO_UPGRADES.filter((u) => !seen.has(u.id)),
+      ...AREA_THREE_UPGRADES.filter((u) => !seen.has(u.id)),
       ...UNIVERSAL_CRIT_UPGRADES.filter((u) => !seen.has(u.id))
     ]
   }
@@ -141,7 +152,12 @@ export const getUpgrades = async (): Promise<UpgradesRow[]> => {
  * Fetch a single upgrade by ID
  */
 export const getUpgrade = async (id: string): Promise<UpgradesRow | null> => {
-  const localPool = [...defaultUpgrades, ...AREA_TWO_UPGRADES, ...UNIVERSAL_CRIT_UPGRADES]
+  const localPool = [
+    ...defaultUpgrades,
+    ...AREA_TWO_UPGRADES,
+    ...AREA_THREE_UPGRADES,
+    ...UNIVERSAL_CRIT_UPGRADES
+  ]
   if (!supabase) return localPool.find(u => u.id === id) || null
   try {
     const { data, error } = await supabase

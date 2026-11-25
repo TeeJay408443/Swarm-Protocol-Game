@@ -39,6 +39,7 @@ import {
   getStackCount,
   getStarScaledWeaponStats,
   isBadGearRarity,
+  getBossDropJournal,
   MAX_EQUIPPED_ACCESSORIES,
   MAX_GEAR_STARS,
   RARITY_META,
@@ -53,7 +54,7 @@ import {
   type FusionRepeatAction
 } from './FusionAnimationOverlay'
 
-type ArmoryTab = 'inventory' | 'forge' | 'crafting' | 'loadouts' | 'builder'
+type ArmoryTab = 'inventory' | 'forge' | 'crafting' | 'journal' | 'loadouts' | 'builder'
 type InventoryFilter = 'all' | 'weapon' | 'accessory' | 'fusable'
 
 const ARMORY_SORT_OPTIONS: ReadonlyArray<{ value: ArmorySortOption; label: string }> = [
@@ -189,6 +190,10 @@ export function ArmoryView() {
       setActiveTab('crafting')
       return
     }
+    if (tabParam === 'journal') {
+      setActiveTab('journal')
+      return
+    }
     if (tabParam === 'loadouts') {
       setActiveTab('loadouts')
       return
@@ -221,6 +226,15 @@ export function ArmoryView() {
         (entry) => entry.stars < MAX_GEAR_STARS && entry.count >= FUSION_COPIES_REQUIRED
       ),
     [inventoryStacks]
+  )
+  const bossDropJournal = useMemo(() => getBossDropJournal(shopState), [shopState])
+  const bossDropJournalCollectedCount = useMemo(
+    () => bossDropJournal.reduce((total, boss) => total + boss.collectedCount, 0),
+    [bossDropJournal]
+  )
+  const bossDropJournalTotalCount = bossDropJournal.reduce(
+    (total, boss) => total + boss.materials.length,
+    0
   )
 
   const nonFusableStacks = useMemo(
@@ -775,6 +789,15 @@ export function ArmoryView() {
             Crafting ({ALL_CRAFTING_RECIPES.length} Recipes)
           </Button>
           <Button
+            variant={activeTab === 'journal' ? 'primary' : 'secondary'}
+            onClick={() => {
+              setActiveTab('journal')
+              resetBuilder()
+            }}
+          >
+            Boss Drop Journal ({bossDropJournalCollectedCount}/{bossDropJournalTotalCount})
+          </Button>
+          <Button
             variant={activeTab === 'loadouts' ? 'primary' : 'secondary'}
             onClick={() => {
               setActiveTab('loadouts')
@@ -804,6 +827,180 @@ export function ArmoryView() {
           <Card className="bg-gray-900 border border-alert-red mb-6">
             <p className="text-alert-red">{error}</p>
           </Card>
+        )}
+
+        {/* BOSS DROP JOURNAL TAB */}
+        {!loading && activeTab === 'journal' && (
+          <section className="space-y-5">
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">
+                    Playable Bosses & Mini-Bosses
+                  </p>
+                  <h2 className="text-2xl font-bold text-cyan-accent mt-1">Boss Drop Journal</h2>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Track every boss material, your collection, and the gear each drop can help craft.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-emerald-400/30 bg-emerald-950/30 px-4 py-3">
+                  <p className="text-[11px] uppercase tracking-wider text-emerald-200">
+                    Unique drops collected
+                  </p>
+                  <p className="text-xl font-bold font-mono text-white">
+                    {bossDropJournalCollectedCount}
+                    <span className="text-gray-400"> / {bossDropJournalTotalCount}</span>
+                  </p>
+                </div>
+              </div>
+              {bossDropJournalCollectedCount === 0 && (
+                <div className="mt-5 rounded-lg border border-cyan-400/20 bg-slate-950/60 p-4">
+                  <p className="font-semibold text-white">No boss materials collected yet</p>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Defeat bosses and mini-bosses to fill in your collection. Their materials are
+                    saved to this account.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {bossDropJournal.map((boss) => (
+                <article
+                  key={boss.id}
+                  className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-gray-500">
+                        Boss Material Set
+                      </p>
+                      <h3 className="text-lg font-bold text-white mt-0.5">{boss.name}</h3>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${
+                        boss.collectedCount === boss.materials.length
+                          ? 'border-emerald-400/50 bg-emerald-950/50 text-emerald-200'
+                          : 'border-gray-700 bg-gray-950 text-gray-300'
+                      }`}
+                    >
+                      {boss.collectedCount}/{boss.materials.length} collected
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {boss.materials.map((material) => (
+                      <div
+                        key={material.id}
+                        className="min-w-0 rounded-lg border bg-gray-950/65 p-3"
+                        style={{ borderColor: `${material.accentColor}55` }}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span
+                            className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{
+                              backgroundColor: material.accentColor,
+                              boxShadow: `0 0 12px ${material.accentColor}99`
+                            }}
+                            aria-hidden="true"
+                          />
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-mono ${
+                              material.owned > 0
+                                ? 'bg-emerald-400/15 text-emerald-200'
+                                : 'bg-gray-800 text-gray-400'
+                            }`}
+                          >
+                            ×{material.owned}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm font-semibold leading-snug text-white">
+                          {material.name}
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-gray-400">
+                          {material.description}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border-t border-gray-800 pt-4">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <h4 className="text-xs uppercase tracking-wider text-gray-400">
+                        Related Crafting Recipes
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('crafting')}
+                        className="text-xs font-semibold text-cyan-accent hover:text-cyan-200"
+                      >
+                        Open Crafting
+                      </button>
+                    </div>
+                    {boss.recipes.length === 0 ? (
+                      <p className="text-xs text-gray-500">No recipe is currently tied to this set.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {boss.recipes.map((recipe) => {
+                          const materialInputs = recipe.materialRequirements.length
+                          const ownedMaterialInputs = recipe.materialRequirements.filter(
+                            (input) => input.owned >= input.quantity
+                          ).length
+                          const gearInputs = recipe.gearRequirements.length
+                          const ownedGearInputs = recipe.gearRequirements.filter(
+                            (input) => input.owned >= input.quantity
+                          ).length
+                          const totalInputs = materialInputs + gearInputs
+                          const ownedInputs = ownedMaterialInputs + ownedGearInputs
+
+                          return (
+                            <div
+                              key={recipe.id}
+                              className="rounded-lg border bg-gray-950/60 p-3"
+                              style={{ borderColor: `${recipe.accentColor}44` }}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold text-white">
+                                    {recipe.itemName}
+                                  </p>
+                                  <p className="text-xs text-gray-400 mt-0.5">
+                                    Inputs met: {ownedInputs}/{totalInputs} · Owned: ×
+                                    {recipe.ownedResultCount}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`rounded px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                                    recipe.canCraft
+                                      ? 'bg-emerald-400/15 text-emerald-200'
+                                      : 'bg-gray-800 text-gray-400'
+                                  }`}
+                                >
+                                  {recipe.canCraft ? 'Ready to craft' : 'In progress'}
+                                </span>
+                              </div>
+                              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-400">
+                                {recipe.materialRequirements.map((input) => (
+                                  <p key={input.materialId}>
+                                    {input.name}: {input.owned}/{input.quantity}
+                                  </p>
+                                ))}
+                                {recipe.gearRequirements.map((input) => (
+                                  <p key={input.itemId}>
+                                    {input.name}: {input.owned}/{input.quantity}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
         )}
 
         {/* INVENTORY TAB */}

@@ -68,6 +68,7 @@ export class Player {
   /** Health */
   health: number
   maxHealth: number
+  healingMultiplier: number = 1
   
   /** Hero data */
   hero: HeroesRow | null
@@ -271,7 +272,7 @@ export class Player {
   heal(amount: number): void {
     if (!this.isAlive) return
     
-    this.health += amount
+    this.health += Math.max(0, amount) * Math.max(0, this.healingMultiplier)
     if (this.health > this.maxHealth) this.health = this.maxHealth
   }
 

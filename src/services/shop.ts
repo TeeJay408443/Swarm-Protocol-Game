@@ -125,6 +125,31 @@ export interface ShopAccountState {
   updatedAt: string
 }
 
+export interface BossDropJournalRecipeProgress {
+  id: string
+  itemId: string
+  itemName: string
+  accentColor: string
+  ownedResultCount: number
+  materialRequirements: Array<{ materialId: string; name: string; quantity: number; owned: number }>
+  gearRequirements: Array<{ itemId: string; name: string; quantity: number; owned: number }>
+  canCraft: boolean
+}
+
+export interface BossDropJournalBossProgress {
+  id: string
+  name: string
+  materials: Array<{
+    id: string
+    name: string
+    description: string
+    accentColor: string
+    owned: number
+  }>
+  collectedCount: number
+  recipes: BossDropJournalRecipeProgress[]
+}
+
 export interface ComputedAccessoryBonuses {
   bonusHp: number
   damageReduction: number
@@ -1213,6 +1238,69 @@ export function getTotalStackCount(state: ShopAccountState, itemId: string): num
   const arr = state.gearStacks?.[itemId]
   if (!arr) return 0
   return arr.reduce((sum, n) => sum + (n > 0 ? n : 0), 0)
+}
+
+export function getBossDropJournal(state: ShopAccountState): BossDropJournalBossProgress[] {
+  return PLAYABLE_BOSS_DROP_SETS.map((boss) => {
+    const materials = boss.materials.map((material) => ({
+      ...material,
+      owned: state.bossMaterials[material.id] || 0
+    }))
+    const recipes = ALL_CRAFTING_RECIPES.filter((recipe) => recipe.bossId === boss.id).map(
+      (recipe): BossDropJournalRecipeProgress => {
+        const result = getShopItemById(recipe.itemId)
+        if (!result) {
+          throw new Error(`Boss journal recipe ${recipe.id} has missing result item ${recipe.itemId}.`)
+        }
+
+        const materialRequirements = recipe.materials.map(({ materialId, quantity }) => {
+          const material = boss.materials.find((entry) => entry.id === materialId)
+          if (!material) {
+            throw new Error(`Boss journal recipe ${recipe.id} references unknown material ${materialId}.`)
+          }
+          return {
+            materialId,
+            name: material.name,
+            quantity,
+            owned: state.bossMaterials[materialId] || 0
+          }
+        })
+        const gearRequirements = (recipe.gearIngredients || []).map(({ itemId, quantity }) => {
+          const item = getShopItemById(itemId)
+          if (!item) {
+            throw new Error(`Boss journal recipe ${recipe.id} has missing gear ingredient ${itemId}.`)
+          }
+          return {
+            itemId,
+            name: item.name,
+            quantity,
+            owned: getTotalStackCount(state, itemId)
+          }
+        })
+
+        return {
+          id: recipe.id,
+          itemId: result.id,
+          itemName: result.name,
+          accentColor: result.accentColor,
+          ownedResultCount: getTotalStackCount(state, result.id),
+          materialRequirements,
+          gearRequirements,
+          canCraft:
+            materialRequirements.every((entry) => entry.owned >= entry.quantity) &&
+            gearRequirements.every((entry) => entry.owned >= entry.quantity)
+        }
+      }
+    )
+
+    return {
+      id: boss.id,
+      name: boss.name,
+      materials,
+      collectedCount: materials.filter((material) => material.owned > 0).length,
+      recipes
+    }
+  })
 }
 
 export function getHighestOwnedStar(state: ShopAccountState, itemId: string): number | null {

@@ -22,6 +22,13 @@ import {
   getXpForNextLevel
 } from '../src/config/gameConstants'
 import {
+  ENDLESS_BOSS_ATTACK_RATE,
+  ENDLESS_HAZARD_CONFIG,
+  ENDLESS_MODIFIERS,
+  ENDLESS_SCARCE_HEALING_MULTIPLIER,
+  isPlayerInsideEndlessHazard
+} from '../src/config/endlessModifiers'
+import {
   AREA_TWO_BOSSES,
   AREA_TWO_ENEMIES,
   ASTRAL_SCOURGE_PHASE_ONE_HP,
@@ -195,6 +202,7 @@ import {
   getStarScaledWeaponStats,
   getSupplyCrateById,
   getTotalStackCount,
+  getBossDropJournal,
   isBadGearRarity,
   MAX_EQUIPPED_ACCESSORIES,
   MAX_GEAR_STARS,
@@ -293,6 +301,41 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const spore = enemies.find(e => e.id === 'ene_01')!
     const enemy = new Enemy({ enemyData: spore })
     assert.equal(enemy.speed, spore.speed * 220)
+  })
+
+  it('applies optional Endless modifier effects to boss cooldowns, healing, and dodge zones', () => {
+    assert.deepEqual(
+      ENDLESS_MODIFIERS.map((modifier) => modifier.id),
+      ['boss_tempo', 'scarce_repairs', 'hazard_pulse']
+    )
+
+    const player = new Player({ x: 0, y: 0 })
+    player.health = 50
+    player.healingMultiplier = ENDLESS_SCARCE_HEALING_MULTIPLIER
+    player.heal(40)
+    assert.equal(player.health, 70, 'Scarce Repairs should halve restored health')
+
+    const enemyData = enemies.find((entry) => entry.id === 'ene_01')!
+    const boss = new Enemy({ x: 700, y: 700, enemyData, target: player })
+    boss.isBoss = true
+    boss.isSpawning = false
+    boss.canShoot = false
+    boss.launchesAoeProjectiles = true
+    boss.attackRateMultiplier = ENDLESS_BOSS_ATTACK_RATE
+    boss.attackCooldown = 1
+    boss.shootCooldown = 1
+    boss.aoeCooldown = 1
+    boss.specialCooldown = 1
+    boss.update(0.25, player)
+    assert.ok(Math.abs(boss.attackCooldown - 0.7) < 0.001)
+    assert.ok(Math.abs(boss.shootCooldown - 0.7) < 0.001)
+    assert.ok(Math.abs(boss.aoeCooldown - 0.7) < 0.001)
+    assert.ok(Math.abs(boss.specialCooldown - 0.7) < 0.001)
+
+    assert.equal(ENDLESS_HAZARD_CONFIG.intervalSeconds, 22)
+    assert.equal(ENDLESS_HAZARD_CONFIG.warningSeconds, 1.25)
+    assert.equal(isPlayerInsideEndlessHazard({ x: 0, y: 0 }, { x: 100, y: 0 }, 20), true)
+    assert.equal(isPlayerInsideEndlessHazard({ x: 0, y: 0 }, { x: 170, y: 0 }, 20), false)
   })
 
   it('enforces exact circle-to-circle collision detection', () => {
@@ -3814,6 +3857,34 @@ describe('Boss drop crafting', () => {
     assert.equal(getTotalStackCount(state, 'acc_crafted_solar_archon_seraph'), 0)
     assert.equal(getTotalStackCount(state, 'acc_crafted_eclipse_aegis'), 1)
     assert.equal(getShopAccessoryById('acc_crafted_vortex_harness')?.id, 'acc_crafted_vortex_harness')
+  })
+
+  it('builds the boss drop journal from playable loot and account-owned materials', () => {
+    const userId = 'boss_drop_journal_account_test'
+    assert.equal(awardBossDropsForEnemy(userId, 'boss_a2_20').success, true)
+
+    const state = getShopAccountState(userId)
+    const journal = getBossDropJournal(state)
+    assert.equal(journal.length, PLAYABLE_BOSS_DROP_SETS.length)
+    assert.equal(journal.some((boss) => boss.name.includes('Devourer of Gods')), false)
+    assert.ok(journal.every((boss) => boss.materials.length === 3))
+
+    const scourge = journal.find((boss) => boss.id === 'astral_scourge')!
+    assert.equal(scourge.collectedCount, 3)
+    assert.ok(scourge.materials.every((material) => material.owned === 1))
+    assert.equal(
+      scourge.recipes.find((recipe) => recipe.itemId === 'wpn_crafted_astral_scourge')?.canCraft,
+      true
+    )
+    const solarVoidReaper = scourge.recipes.find(
+      (recipe) => recipe.itemId === 'wpn_crafted_solar_void_reaper'
+    )!
+    assert.equal(solarVoidReaper.canCraft, false, 'owned materials alone do not satisfy gear inputs')
+    assert.equal(solarVoidReaper.materialRequirements[0].owned, 1)
+    assert.equal(solarVoidReaper.gearRequirements.length, 2)
+
+    const otherAccount = getBossDropJournal(getShopAccountState('boss_drop_journal_empty_account'))
+    assert.equal(otherAccount.find((boss) => boss.id === 'astral_scourge')?.collectedCount, 0)
   })
 })
 

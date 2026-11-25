@@ -243,6 +243,7 @@ export class Enemy {
   attackCooldown: number = 0
   attackCooldownMax: number = 1 // seconds
   attackRange: number = 150
+  attackRateMultiplier: number = 1
   
   /** Enemy data */
   enemyData: EnemiesRow | null
@@ -733,12 +734,13 @@ export class Enemy {
       this.slowMultiplier = Math.min(this.slowMultiplier, 0.55)
     }
 
+    const combatDeltaTime = deltaTime * Math.max(1, this.attackRateMultiplier)
     if (this.attackCooldown > 0) {
-      this.attackCooldown -= deltaTime
+      this.attackCooldown = Math.max(0, this.attackCooldown - combatDeltaTime)
     }
     
     if (this.shootCooldown > 0) {
-      this.shootCooldown -= deltaTime
+      this.shootCooldown = Math.max(0, this.shootCooldown - combatDeltaTime)
     }
     
     // Movement pattern (stationary Wave 15 boss stays anchored; Worm bosses slither & dash)
@@ -829,7 +831,7 @@ export class Enemy {
     if (this.launchesAoeProjectiles) {
       this.updateAoeProjectiles(deltaTime)
       if (this.aoeCooldown > 0) {
-        this.aoeCooldown -= deltaTime
+        this.aoeCooldown = Math.max(0, this.aoeCooldown - combatDeltaTime)
       }
       if (this.aoeCooldown <= 0 && this.target && this.target.isAlive) {
         const distToTarget = Vector2.distance(this.getCenter(), this.target.getCenter())
@@ -851,7 +853,7 @@ export class Enemy {
     if (this.isBoss) {
       this.updateTelegraphs(deltaTime)
       if (this.specialCooldown > 0) {
-        this.specialCooldown -= deltaTime
+        this.specialCooldown = Math.max(0, this.specialCooldown - combatDeltaTime)
       }
       const hasPendingMajorPattern =
         (this.isStationaryBoss || this.isWormBoss) &&

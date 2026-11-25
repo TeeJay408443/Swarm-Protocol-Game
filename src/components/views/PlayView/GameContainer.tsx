@@ -40,6 +40,14 @@ import {
   WAVE_CONFIG
 } from '../../../config/gameConstants'
 import {
+  ENDLESS_BOSS_ATTACK_RATE,
+  ENDLESS_HAZARD_CONFIG,
+  ENDLESS_MODIFIERS,
+  ENDLESS_SCARCE_HEALING_MULTIPLIER,
+  isPlayerInsideEndlessHazard,
+  type EndlessModifierId
+} from '../../../config/endlessModifiers'
+import {
   AREA_TWO_ENEMIES,
   ArenaId,
   ASTRAL_SCOURGE_BOSS_ID,
@@ -161,7 +169,14 @@ export interface GameContainerProps {
   autoStart?: boolean
 }
 
-type EngineState = 'menu' | 'playing' | 'paused' | 'gameover' | 'levelup' | 'victory_choice'
+type EngineState =
+  | 'menu'
+  | 'playing'
+  | 'paused'
+  | 'levelup'
+  | 'victory_choice'
+  | 'endless_setup'
+  | 'gameover'
 
 interface ExplosionFx {
   x: number
@@ -291,6 +306,14 @@ interface TempestSphereFx {
   isPairedHero: boolean
   isLv5: boolean
   isCloneCast: boolean
+}
+
+interface EndlessHazardPulseFx {
+  x: number
+  y: number
+  radius: number
+  timer: number
+  hasTriggered: boolean
 }
 
 type AttackFx =
@@ -900,6 +923,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const [finalScore, setFinalScore] = useState<number>(0)
   const [isVictory, setIsVictory] = useState<boolean>(false)
   const [isEndlessMode, setIsEndlessMode] = useState<boolean>(false)
+  const [selectedEndlessModifiers, setSelectedEndlessModifiers] = useState<EndlessModifierId[]>([])
+  const [activeEndlessModifiers, setActiveEndlessModifiers] = useState<EndlessModifierId[]>([])
   const [dogCutsceneUi, setDogCutsceneUi] = useState<{
     active: boolean
     showSecondLine: boolean
@@ -963,6 +988,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
   const breatherElapsedRef = useRef<number>(0)
   const isBreatherRef = useRef<boolean>(false)
   const endlessModeRef = useRef<boolean>(false)
+  const endlessModifiersRef = useRef<EndlessModifierId[]>([])
+  const endlessHazardTimerRef = useRef<number>(0)
+  const endlessHazardRef = useRef<EndlessHazardPulseFx | null>(null)
   const clearedWave15BossRef = useRef<boolean>(false)
   const spawnAccumulatorRef = useRef<number>(0)
   const rangedSpawnedInWaveRef = useRef<number>(0)
@@ -1532,6 +1560,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
         anchorPos,
         arenaBounds: isStationaryArenaBoss ? bossArena : null
       })
+      if (
+        endlessModeRef.current &&
+        enemy.isBoss &&
+        endlessModifiersRef.current.includes('boss_tempo')
+      ) {
+        enemy.attackRateMultiplier = ENDLESS_BOSS_ATTACK_RATE
+      }
 
       const beginAreaBossCutscene = (theme: BossCutsceneTheme) => {
         if (dogBossActiveRef.current) return
@@ -1878,8 +1913,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
     breatherElapsedRef.current = 0
     isBreatherRef.current = false
     endlessModeRef.current = false
+    endlessModifiersRef.current = []
+    endlessHazardTimerRef.current = 0
+    endlessHazardRef.current = null
     clearedWave15BossRef.current = false
     setIsEndlessMode(false)
+    setSelectedEndlessModifiers([])
+    setActiveEndlessModifiers([])
     spawnAccumulatorRef.current = 0
     rangedSpawnedInWaveRef.current = 0
     bossSpawnedWaveRef.current = 0
@@ -6178,6 +6218,71 @@ const GameContainer: React.FC<GameContainerProps> = ({
             }
           }
 
+          if (
+            endlessModeRef.current &&
+            endlessModifiersRef.current.includes('hazard_pulse') &&
+            player.isAlive
+          ) {
+            if (!endlessHazardRef.current) {
+              endlessHazardTimerRef.current += deltaTime
+              if (endlessHazardTimerRef.current >= ENDLESS_HAZARD_CONFIG.intervalSeconds) {
+                const hazardCenter = player.getCenter()
+                endlessHazardTimerRef.current = 0
+                endlessHazardRef.current = {
+                  x: hazardCenter.x,
+                  y: hazardCenter.y,
+                  radius: ENDLESS_HAZARD_CONFIG.radius,
+                  timer: 0,
+                  hasTriggered: false
+                }
+                floatingTextsRef.current.push({
+                  x: hazardCenter.x,
+                  y: hazardCenter.y - 54,
+                  text: 'HAZARD PULSE — MOVE OUT',
+                  color: '#FCA5A5',
+                  timer: ENDLESS_HAZARD_CONFIG.warningSeconds
+                })
+                playSoundRef.current('wave')
+              }
+            }
+
+            const hazard = endlessHazardRef.current
+            if (hazard) {
+              hazard.timer += deltaTime
+              if (!hazard.hasTriggered && hazard.timer >= ENDLESS_HAZARD_CONFIG.warningSeconds) {
+                hazard.hasTriggered = true
+                const hazardPlayerCenter = player.getCenter()
+                if (
+                  isPlayerInsideEndlessHazard(
+                    hazardPlayerCenter,
+                    hazard,
+                    player.width / 2,
+                    hazard.radius
+                  )
+                ) {
+                  damagePlayer(ENDLESS_HAZARD_CONFIG.damage, hazard)
+                }
+                explosionsRef.current.push({
+                  x: hazard.x,
+                  y: hazard.y,
+                  radius: hazard.radius,
+                  timer: 0,
+                  duration: ENDLESS_HAZARD_CONFIG.impactSeconds,
+                  color: 'rgba(248, 113, 113, 0.72)'
+                })
+              }
+              if (
+                hazard.timer >=
+                ENDLESS_HAZARD_CONFIG.warningSeconds + ENDLESS_HAZARD_CONFIG.impactSeconds
+              ) {
+                endlessHazardRef.current = null
+              }
+            }
+          } else {
+            endlessHazardTimerRef.current = 0
+            endlessHazardRef.current = null
+          }
+
           // 6. Update Player Projectiles & Check Circle-to-Circle Enemy Hits
           const heroHoming = shouldApplyHomingForHero(player.hero?.id || 'hero_01')
           const homingCfg = getRangerHomingConfig(heroUpgradeLevelRef.current)
@@ -6480,6 +6585,57 @@ const GameContainer: React.FC<GameContainerProps> = ({
           galaxyVignette.addColorStop(1, 'rgba(2, 3, 16, 0.5)')
           ctx.fillStyle = galaxyVignette
           ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.restore()
+        }
+
+        const endlessHazard = endlessHazardRef.current
+        if (endlessHazard) {
+          const hazardScreen = camera.worldToScreen(endlessHazard.x, endlessHazard.y)
+          const warningProgress = Math.min(
+            1,
+            endlessHazard.timer / ENDLESS_HAZARD_CONFIG.warningSeconds
+          )
+          ctx.save()
+          if (endlessHazard.timer < ENDLESS_HAZARD_CONFIG.warningSeconds) {
+            const pulse = 0.82 + Math.sin(endlessHazard.timer * 16) * 0.12
+            ctx.globalAlpha = 0.42 + warningProgress * 0.45
+            ctx.fillStyle = 'rgba(248, 113, 113, 0.12)'
+            ctx.beginPath()
+            ctx.arc(hazardScreen.x, hazardScreen.y, endlessHazard.radius * pulse, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.strokeStyle = '#F87171'
+            ctx.lineWidth = 3
+            ctx.setLineDash([12, 8])
+            ctx.beginPath()
+            ctx.arc(hazardScreen.x, hazardScreen.y, endlessHazard.radius, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.setLineDash([])
+            ctx.globalAlpha = 0.95
+            ctx.fillStyle = '#FECACA'
+            ctx.font = 'bold 13px monospace'
+            ctx.textAlign = 'center'
+            ctx.fillText('MOVE OUT', hazardScreen.x, hazardScreen.y - endlessHazard.radius - 10)
+          } else {
+            const impactProgress = Math.min(
+              1,
+              (endlessHazard.timer - ENDLESS_HAZARD_CONFIG.warningSeconds) /
+                ENDLESS_HAZARD_CONFIG.impactSeconds
+            )
+            ctx.globalAlpha = 1 - impactProgress
+            ctx.strokeStyle = '#FCA5A5'
+            ctx.lineWidth = 7 - impactProgress * 5
+            ctx.shadowColor = '#F87171'
+            ctx.shadowBlur = 24
+            ctx.beginPath()
+            ctx.arc(
+              hazardScreen.x,
+              hazardScreen.y,
+              endlessHazard.radius * (0.35 + impactProgress * 0.9),
+              0,
+              Math.PI * 2
+            )
+            ctx.stroke()
+          }
           ctx.restore()
         }
 
@@ -8286,6 +8442,15 @@ const GameContainer: React.FC<GameContainerProps> = ({
   }, [setEngineState])
 
   const handleContinueEndless = useCallback(() => {
+    setSelectedEndlessModifiers([])
+    setEngineState('endless_setup')
+  }, [setEngineState])
+
+  const handleStartEndless = useCallback(() => {
+    const modifiers = [...selectedEndlessModifiers]
+    endlessModifiersRef.current = modifiers
+    setActiveEndlessModifiers(modifiers)
+
     const player = playerRef.current
     const endlessStartWave = getAreaMaxWave(areaRef.current.id) + 1
     endlessModeRef.current = true
@@ -8299,6 +8464,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
     isBreatherRef.current = false
     rangedSpawnedInWaveRef.current = 0
     spawnAccumulatorRef.current = 0
+    endlessHazardTimerRef.current = 0
+    endlessHazardRef.current = null
     waveTookDamageRef.current = false
     setWave(waveRef.current)
     setDevRunStatus({ currentWave: waveRef.current })
@@ -8307,6 +8474,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
     if (player) {
       player.heal(player.maxHealth)
+      player.healingMultiplier = modifiers.includes('scarce_repairs')
+        ? ENDLESS_SCARCE_HEALING_MULTIPLIER
+        : 1
       player.isInvulnerable = true
       player.invulnerabilityTimer = 2.0
       setHealth(player.health)
@@ -8325,9 +8495,19 @@ const GameContainer: React.FC<GameContainerProps> = ({
     playMusicRef.current('gameplay')
     playSoundRef.current('wave')
     toast.success(
-      `ENDLESS MODE ENGAGED! Wave ${endlessStartWave}+ unlocked — bosses arrive every 5 waves!`
+      modifiers.length > 0
+        ? `ENDLESS MODE ENGAGED with ${modifiers.length} modifier${modifiers.length === 1 ? '' : 's'}! Wave ${endlessStartWave}+ unlocked.`
+        : `ENDLESS MODE ENGAGED! Wave ${endlessStartWave}+ unlocked — bosses arrive every 5 waves!`
     )
-  }, [setEngineState, spawnEnemyForWave, toast])
+  }, [selectedEndlessModifiers, setEngineState, spawnEnemyForWave, toast])
+
+  const toggleSelectedEndlessModifier = (modifierId: EndlessModifierId) => {
+    setSelectedEndlessModifiers((current) =>
+      current.includes(modifierId)
+        ? current.filter((id) => id !== modifierId)
+        : [...current, modifierId]
+    )
+  }
 
   const setTouchVector = (x: number, y: number) => {
     touchDirRef.current = { x, y }
@@ -8382,6 +8562,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
           difficultyName={activeDifficulty.name}
           difficultyCoinLabel={formatDifficultyCoinLabel(activeDifficulty)}
           activeUpgrades={activeUpgradeNames}
+          activeModifiers={ENDLESS_MODIFIERS.filter((modifier) =>
+            activeEndlessModifiers.includes(modifier.id)
+          ).map((modifier) => modifier.name)}
           shieldActive={shieldActive}
           activeBoss={activeBossHud}
           onPause={handlePauseToggle}
@@ -8634,6 +8817,102 @@ const GameContainer: React.FC<GameContainerProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {gameState === 'endless_setup' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/90 backdrop-blur-md z-50 p-4 overflow-y-auto">
+          <section className="bg-slate-900 border-2 border-emerald-400/80 rounded-2xl p-6 sm:p-7 max-w-3xl w-full shadow-[0_0_50px_rgba(52,211,153,0.22)]">
+            <div className="text-center">
+              <p className="text-xs font-mono tracking-[0.2em] uppercase text-emerald-300">
+                Optional Run Challenges
+              </p>
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-white mt-2">
+                ENDLESS MODE
+              </h2>
+              <p className="text-sm text-slate-300 mt-2">
+                Choose any combination, or start with no modifiers. These rules last only for this run.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-6">
+              {ENDLESS_MODIFIERS.map((modifier) => {
+                const selected = selectedEndlessModifiers.includes(modifier.id)
+                return (
+                  <button
+                    key={modifier.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => toggleSelectedEndlessModifier(modifier.id)}
+                    className={`text-left rounded-xl border p-4 transition-all ${
+                      selected
+                        ? 'bg-slate-800 shadow-lg'
+                        : 'bg-slate-950/70 border-slate-700 hover:border-slate-500'
+                    }`}
+                    style={
+                      selected
+                        ? {
+                            borderColor: `${modifier.accentColor}CC`,
+                            boxShadow: `0 0 22px ${modifier.accentColor}22`
+                          }
+                        : undefined
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-white">{modifier.name}</span>
+                      <span
+                        className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-mono uppercase ${
+                          selected ? 'text-white' : 'text-slate-400 border-slate-700'
+                        }`}
+                        style={selected ? { borderColor: `${modifier.accentColor}99` } : undefined}
+                      >
+                        {selected ? 'Selected' : 'Optional'}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-300">
+                      {modifier.description}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-5 text-xs text-slate-400">
+              <span>
+                {selectedEndlessModifiers.length === 0
+                  ? 'No modifiers selected'
+                  : `${selectedEndlessModifiers.length} modifier${selectedEndlessModifiers.length === 1 ? '' : 's'} selected`}
+              </span>
+              {selectedEndlessModifiers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedEndlessModifiers([])}
+                  className="font-semibold text-cyan-300 hover:text-cyan-100"
+                >
+                  Clear selection
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+              <button
+                type="button"
+                onClick={handleStartEndless}
+                className="px-5 py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold text-base rounded-xl transition-all"
+              >
+                {selectedEndlessModifiers.length === 0
+                  ? `START ENDLESS WAVE ${getAreaMaxWave(activeArea.id) + 1}`
+                  : `START ENDLESS WITH ${selectedEndlessModifiers.length} MODIFIER${selectedEndlessModifiers.length === 1 ? '' : 'S'}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEngineState('victory_choice')}
+                className="px-5 py-4 bg-slate-700 hover:bg-slate-600 text-white font-bold text-base rounded-xl border border-slate-500 transition-colors"
+              >
+                Back to Victory Screen
+              </button>
+            </div>
+          </section>
         </div>
       )}
 

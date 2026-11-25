@@ -38,6 +38,7 @@ export interface HUDProps {
   difficultyName?: string
   difficultyCoinLabel?: string
   activeUpgrades?: string[]
+  activeModifiers?: string[]
   shieldActive?: boolean
   hasSpaceDash?: boolean
   dashCooldown?: number
@@ -66,6 +67,7 @@ const HUD: React.FC<HUDProps> = ({
   difficultyName,
   difficultyCoinLabel,
   activeUpgrades = [],
+  activeModifiers = [],
   shieldActive = false,
   hasSpaceDash = false,
   dashCooldown = 0,
@@ -326,6 +328,11 @@ const HUD: React.FC<HUDProps> = ({
           {activeUpgrades.length > 0 && (
             <span className="hidden sm:inline text-cyan-accent max-w-xl truncate">
               · {activeUpgrades.join(' • ')}
+            </span>
+          )}
+          {activeModifiers.length > 0 && (
+            <span className="hidden sm:inline text-amber-300 max-w-md truncate">
+              · MODIFIERS: {activeModifiers.join(' • ')}
             </span>
           )}
         </div>

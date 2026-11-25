@@ -6,6 +6,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { InfernoRamTrail } from '../src/game/entities/InfernoRamTrail'
+import { DEFAULT_ACCESSIBILITY_SETTINGS } from '../src/themes/accessibility'
 
 import {
   GAME_CONFIG,
@@ -553,6 +554,22 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     resolveEnemyCollisions([scourge, add])
     assert.deepEqual({ x: scourge.x, y: scourge.y }, bossPosition)
     assert.notDeepEqual({ x: add.x, y: add.y }, bossPosition, 'collision force moves the regular enemy instead')
+  })
+
+  it('defaults damage numbers on and prevents bosses and mini-bosses from being frozen', () => {
+    assert.equal(DEFAULT_ACCESSIBILITY_SETTINGS.showDamageNumbers, true)
+
+    const boss = new Enemy()
+    boss.isBoss = true
+    boss.isSpawning = false
+    boss.applyFreeze(2)
+    assert.equal(boss.freezeTimer, 0)
+
+    const miniBoss = new Enemy()
+    miniBoss.isMiniBoss = true
+    miniBoss.isSpawning = false
+    miniBoss.applyFreeze(2)
+    assert.equal(miniBoss.freezeTimer, 0)
   })
 
   it('activates Companion Robot and Temporal Echo summon attacks', () => {
@@ -3462,7 +3479,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(computeHeroBurnPerTick(100, 5) > computeHeroBurnPerTick(100, 0))
   })
 
-  it('buffs Area 1 bosses with massive HP multipliers, armored damage reduction, Phase 2 Enrage, and freeze resistance', () => {
+  it('buffs Area 1 bosses with massive HP multipliers, armored damage reduction, Phase 2 Enrage, and freeze immunity', () => {
     const w5Buff = getAreaOneBossBuff(5, false)
     const w10Buff = getAreaOneBossBuff(10, false)
     const w15Buff = getAreaOneBossBuff(15, true)
@@ -3514,10 +3531,13 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     buffedW10Boss.update(0.05, player)
     assert.equal(buffedW10Boss.projectiles.length, 5)
 
-    // 4. Armored Area 1 bosses resist long frost stunlocks
+    // 4. Bosses cannot be frozen or stunlocked
     buffedW10Boss.applyFreeze(2.2)
-    assert.ok(buffedW10Boss.freezeTimer <= 0.6)
-    assert.ok(buffedW10Boss.freezeImmuneTimer >= 1.2)
+    assert.equal(buffedW10Boss.freezeTimer, 0)
+    assert.equal(buffedW10Boss.freezeImmuneTimer, 0)
+    buffedW10Boss.freezeTimer = 1
+    buffedW10Boss.update(0.05, player)
+    assert.equal(buffedW10Boss.freezeTimer, 0)
   })
 
   it('gives Wave 15 Final Boss massively boosted HP and 2 new combat phases with new attacks', () => {

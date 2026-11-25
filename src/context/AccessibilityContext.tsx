@@ -21,6 +21,7 @@ export interface AccessibilityContextType {
   toggleHighContrast: () => void
   toggleLargeText: () => void
   toggleReducedMotion: () => void
+  toggleDamageNumbers: () => void
   setSettings: (settings: AccessibilitySettings) => void
   resetSettings: () => void
 }
@@ -92,6 +93,13 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({
     }))
   }, [])
 
+  const toggleDamageNumbers = useCallback(() => {
+    setSettings(prev => ({
+      ...prev,
+      showDamageNumbers: !prev.showDamageNumbers
+    }))
+  }, [])
+
   const resetSettings = useCallback(() => {
     setSettings(DEFAULT_ACCESSIBILITY_SETTINGS)
   }, [])
@@ -104,6 +112,7 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({
     toggleHighContrast,
     toggleLargeText,
     toggleReducedMotion,
+    toggleDamageNumbers,
     setSettings,
     resetSettings
   }

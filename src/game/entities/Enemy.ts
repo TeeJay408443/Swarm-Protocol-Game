@@ -928,6 +928,12 @@ export class Enemy {
       }
     }
 
+    // Bosses never remain hard-frozen, including any status carried over when
+    // an enemy is promoted into a boss encounter.
+    if (this.isBoss || this.isMiniBoss) {
+      this.freezeTimer = 0
+      this.freezeImmuneTimer = 0
+    }
     // Advance active frost freeze timer (frozen non-stationary enemies cannot move or attack)
     if (this.freezeImmuneTimer > 0) {
       this.freezeImmuneTimer = Math.max(0, this.freezeImmuneTimer - deltaTime)
@@ -5062,7 +5068,14 @@ export class Enemy {
    * Freeze enemy temporarily in solid ice (halting movement & attacks)
    */
   applyFreeze(duration = 1.6): void {
-    if (!this.isAlive || this.isSpawning || this.isInferoDesperationPhase || duration <= 0) return
+    if (
+      !this.isAlive ||
+      this.isSpawning ||
+      this.isInferoDesperationPhase ||
+      this.isBoss ||
+      this.isMiniBoss ||
+      duration <= 0
+    ) return
     if (this.freezeTimer <= 0 && this.freezeImmuneTimer > 0) return
     const effectiveDuration = this.isStationaryBoss
       ? Math.min(0.45, duration * 0.25)

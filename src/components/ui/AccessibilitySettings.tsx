@@ -22,6 +22,7 @@ const AccessibilitySettings: React.FC<AccessibilitySettingsProps> = ({ isOpen, o
     toggleHighContrast,
     toggleLargeText,
     toggleReducedMotion,
+    toggleDamageNumbers,
     resetSettings
   } = useAccessibility()
 
@@ -112,6 +113,14 @@ const AccessibilitySettings: React.FC<AccessibilitySettingsProps> = ({ isOpen, o
           isActive={isReducedMotion}
           onToggle={handleToggleReducedMotion}
           icon="🚫"
+        />
+
+        <ToggleSwitch
+          label="Damage Numbers"
+          description="Hide hit numbers to reduce visual load during combat"
+          isActive={settings.showDamageNumbers}
+          onToggle={toggleDamageNumbers}
+          icon="🔢"
         />
 
         {/* Preview Section */}

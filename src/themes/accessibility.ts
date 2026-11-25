@@ -12,6 +12,7 @@ export interface AccessibilitySettings {
   highContrast: boolean
   largeText: boolean
   reducedMotion: boolean
+  showDamageNumbers: boolean
 }
 
 /**
@@ -20,7 +21,8 @@ export interface AccessibilitySettings {
 export const DEFAULT_ACCESSIBILITY_SETTINGS: AccessibilitySettings = {
   highContrast: false,
   largeText: false,
-  reducedMotion: false
+  reducedMotion: false,
+  showDamageNumbers: true
 }
 
 /**

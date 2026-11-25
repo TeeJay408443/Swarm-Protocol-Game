@@ -160,6 +160,7 @@ import {
 } from '../../../services/devTools'
 import { useSupabase } from '../../../hooks/useSupabase'
 import { useAudio } from '../../../context/AudioContext'
+import { useAccessibility } from '../../../context/AccessibilityContext'
 import { useToast } from '../../ui/ToastContainer'
 import YouTubeBossMusicPlayer from '../../ui/YouTubeBossMusicPlayer'
 import GameCanvas from './GameCanvas'
@@ -884,6 +885,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
   const { user } = useSupabase()
   const { authorized: isDevUser, settings: devSettings } = useDevSettings(user?.email)
+  const { settings: accessibilitySettings } = useAccessibility()
+  const showDamageNumbersRef = useRef(accessibilitySettings.showDamageNumbers)
+  showDamageNumbersRef.current = accessibilitySettings.showDamageNumbers
   const {
     playSound,
     playMusic,
@@ -2775,18 +2779,20 @@ const GameContainer: React.FC<GameContainerProps> = ({
       const textDuration = critRoll.isCrit
         ? CRIT_CONFIG.CRIT_TEXT_DURATION
         : CRIT_CONFIG.NORMAL_TEXT_DURATION
-      floatingTextsRef.current.push({
-        x: enemy.getCenter().x,
-        y: enemy.y - 6,
-        text: formatDamageFloatingText(displayedDamage, critRoll.isCrit),
-        color: critRoll.isCrit
-          ? CRIT_CONFIG.CRIT_TEXT_COLOR
-          : options?.color || (devMult > 1 ? '#FACC15' : '#FFFFFF'),
-        timer: textDuration,
-        maxTimer: textDuration,
-        isCrit: critRoll.isCrit,
-        swayPhase: critRoll.isCrit ? Math.random() * Math.PI * 2 : 0
-      })
+      if (showDamageNumbersRef.current) {
+        floatingTextsRef.current.push({
+          x: enemy.getCenter().x,
+          y: enemy.y - 6,
+          text: formatDamageFloatingText(displayedDamage, critRoll.isCrit),
+          color: critRoll.isCrit
+            ? CRIT_CONFIG.CRIT_TEXT_COLOR
+            : options?.color || (devMult > 1 ? '#FACC15' : '#FFFFFF'),
+          timer: textDuration,
+          maxTimer: textDuration,
+          isCrit: critRoll.isCrit,
+          swayPhase: critRoll.isCrit ? Math.random() * Math.PI * 2 : 0
+        })
+      }
 
       // Storm Assassin: Critical hits trigger Storm Overload lightning arcs, shockwave burst, and solo Thunderstrike
       if (

@@ -168,9 +168,9 @@ export const PLAYABLE_BOSS_DROP_SETS: BossCraftingBossSet[] = [
   },
   {
     id: 'primordial_starforge',
-    name: 'Infero Champion',
+    name: 'Inferno Champion',
     materials: createMaterials('primordial_starforge', [
-      ['Infero Flameheart', 'A burning core fragment from Infero Champion.', 'starheart', '#FDE047'],
+      ['Inferno Flameheart', 'A burning core fragment from Inferno Champion.', 'starheart', '#FDE047'],
       ['Molten Wing Shard', 'A basalt feather shard still glowing with furnace heat.', 'shard', '#FB923C'],
       ['Champion’s Cinder Sigil', 'A victory mark forged in the Starforge’s final chamber.', 'sigil', '#EA580C']
     ]),

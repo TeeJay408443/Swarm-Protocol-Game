@@ -1456,7 +1456,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
       getAreaBossTemplateForWave('molten_starforge', 20).id,
       MOLTEN_STARFORGE_FINAL_BOSS_ID
     )
-    assert.equal(getAreaBossTemplateForWave('molten_starforge', 20).name, 'Infero Champion')
+    assert.equal(getAreaBossTemplateForWave('molten_starforge', 20).name, 'Inferno Champion')
     assert.equal(MOLTEN_STARFORGE_FINAL_BOSS_ID, 'boss_a3_20')
     assert.equal(getAreaFinalBossHp('molten_starforge'), 1000000)
     assert.equal(
@@ -1832,6 +1832,39 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
   })
 
+  it('finishes the cross-lane spear when the player blocks its launch point or the viewport changes', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    for (const shiftedViewport of [false, true]) {
+      const player = new Player({ x: 900, y: 900, hero })
+      const boss = new Enemy({
+        x: 1200, y: 900, enemyData: AREA_THREE_BOSSES[3],
+        target: player, isBoss: true, isFinalBoss: true
+      })
+      boss.isSpawning = false
+      boss.bossPhase = 2
+      boss.specialCooldown = 100
+      boss.shootCooldown = 100
+      boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1300 })
+      const attack = boss.spawnTelegraphedAttack('infero_spear_cascade')!
+      player.x = attack.inferoLaunchX! - player.width / 2
+      player.y = attack.inferoLaunchY! - player.height / 2
+      if (shiftedViewport) {
+        boss.setVisibleWorldBounds({ left: 1700, right: 2500, top: 1700, bottom: 2500 })
+      }
+      for (let frame = 0; frame < 160 && !attack.hasTriggered; frame++) {
+        boss.update(0.05, player)
+      }
+      assert.equal(attack.hasTriggered, true, 'a blocked launch point must not stall the fight')
+      if (shiftedViewport) assert.equal(attack.inferoPositionFallback, true)
+      assert.ok(boss.projectiles.some((projectile) => projectile.width === 84))
+      for (let frame = 0; frame < 160 && boss.telegraphs.includes(attack); frame++) {
+        boss.update(0.05, player)
+      }
+      assert.equal(boss.telegraphs.includes(attack), false, 'the attack releases the boss for its next attack')
+      assert.ok(boss.spawnTelegraphedAttack('infero_aimed_ram'))
+    }
+  })
+
   it('keeps Infero’s original spinning lances and curved fire grid in Phase 1', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
@@ -1983,6 +2016,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
 
     const initialPosition = boss.getCenter()
     const firstPortal = { ...boss.inferoDesperationPortalPosition! }
+    const lockedTarget = player.getCenter()
+    const portalDistance = Math.hypot(firstPortal.x - lockedTarget.x, firstPortal.y - lockedTarget.y)
+    assert.ok(portalDistance >= 240 && portalDistance <= 350, 'portals open near the player, not distant corners')
     assert.notDeepEqual(firstPortal, initialPosition, 'the portal opens at a remote arena location')
     boss.update(0.25, player)
     assert.deepEqual(boss.getCenter(), initialPosition, 'Infero waits briefly for the portal to open')
@@ -1990,16 +2026,29 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.deepEqual(boss.getCenter(), firstPortal, 'teleportation occurs at the launch frame')
     assert.ok(Math.hypot(boss.velocity.x, boss.velocity.y) > 1000, 'the ram starts simultaneously')
     const launchVelocity = { ...boss.velocity }
+    assert.ok(Math.hypot(launchVelocity.x, launchVelocity.y) >= 1699, 'desperation rams move faster')
     player.x += 170
     player.y += 120
     boss.update(0.05, player)
     assert.deepEqual(boss.velocity, launchVelocity, 'the launched ram does not follow the player')
     assert.notDeepEqual(boss.getCenter(), firstPortal)
     assert.equal(boss.takeDamage(500), false, 'the finale cannot be interrupted by more damage')
+    let passedLockedTarget = false
+    const direction = {
+      x: launchVelocity.x / 1700,
+      y: launchVelocity.y / 1700
+    }
+    for (let frame = 0; frame < 20 && Math.hypot(boss.velocity.x, boss.velocity.y) > 0; frame++) {
+      boss.update(0.025, player)
+      const center = boss.getCenter()
+      const traveled = (center.x - firstPortal.x) * direction.x + (center.y - firstPortal.y) * direction.y
+      if (traveled >= portalDistance) passedLockedTarget = true
+    }
+    assert.equal(passedLockedTarget, true, 'the boss reaches the locked player position before its ram ends')
 
     const portals = new Set([`${firstPortal.x},${firstPortal.y}`])
     while (boss.inferoDesperationTimer < 5 - 1e-7) {
-      boss.update(0.05, player)
+      boss.update(Math.min(0.05, 5 - boss.inferoDesperationTimer), player)
       if (boss.inferoDesperationPortalPosition) {
         const portal = boss.inferoDesperationPortalPosition
         portals.add(`${portal.x},${portal.y}`)
@@ -2247,7 +2296,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(attack.swoopIndex, (attack.swoopCount ?? 3) - 1)
   })
 
-  it('keeps Infero Champion at a stable side distance without body contact', () => {
+  it('keeps Inferno Champion at a stable side distance without body contact', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
     const boss = new Enemy({
@@ -4476,7 +4525,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(audio.isExternalYouTubeActive(), true)
     audio.stopMusic()
     assert.ok(audio.getMusicTypes().includes('infero_champion'))
-    assert.equal(MUSIC_TRACK_METADATA.infero_champion.title, 'Infero Champion')
+    assert.equal(MUSIC_TRACK_METADATA.infero_champion.title, 'Inferno Champion')
     assert.equal(MUSIC_TRACK_METADATA.infero_champion.youtubeVideoId, INFERO_CHAMPION_YOUTUBE_VIDEO_ID)
     assert.equal(MUSIC_TRACK_METADATA.infero_champion.youtubeUrl, INFERO_CHAMPION_YOUTUBE_URL)
     assert.equal(parseYouTubeVideoId(INFERO_CHAMPION_YOUTUBE_URL), INFERO_CHAMPION_YOUTUBE_VIDEO_ID)
@@ -4612,7 +4661,7 @@ describe('Boss drop crafting', () => {
     assert.equal(PLAYABLE_BOSS_DROP_SETS.length, 13)
     assert.equal(
       PLAYABLE_BOSS_DROP_SETS.find((boss) => boss.id === 'primordial_starforge')?.name,
-      'Infero Champion'
+      'Inferno Champion'
     )
     assert.equal(BOSS_CRAFTING_RECIPES.length, PLAYABLE_BOSS_DROP_SETS.length)
 

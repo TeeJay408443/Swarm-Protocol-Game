@@ -27,7 +27,7 @@ export const INFERO_DESPERATION_DURATION_SECONDS = 10
 const INFERO_DESPERATION_PORTAL_SECONDS = 0.3
 const INFERO_DESPERATION_RAM_SECONDS = 0.62
 const INFERO_DESPERATION_RECOVERY_SECONDS = 0.18
-const INFERO_DESPERATION_RAM_SPEED = 1120
+const INFERO_DESPERATION_RAM_SPEED = 1700
 
 export type EnemyType =
   | 'Swarm'
@@ -256,6 +256,7 @@ export interface BossTelegraphAttack {
   projectileCount?: number
   inferoLaunchX?: number
   inferoLaunchY?: number
+  inferoPositionFallback?: boolean
   lanceWaypoints?: Vector2[]
   lanceRoundCount?: number
   lanceRoundIndex?: number
@@ -452,6 +453,7 @@ export class Enemy {
   private inferoDesperationCycleTimer: number = 0
   private inferoDesperationDirection: Vector2 = { x: 1, y: 0 }
   private inferoDesperationPortalIndex: number = 0
+  private inferoDesperationRamDuration: number = INFERO_DESPERATION_RAM_SECONDS
   private visibleWorldBounds: { left: number; right: number; top: number; bottom: number } | null = null
 
   get isInferoChampion(): boolean {
@@ -1242,7 +1244,7 @@ export class Enemy {
   }
 
   /**
-   * Infero Champion travels between fixed arena waypoints and gently hovers.
+   * Inferno Champion travels between fixed arena waypoints and gently hovers.
    * Its separation correction prevents body contact even if the player closes in.
    */
   private updateInferoChampionMovement(deltaTime: number, applyPosition = false): void {
@@ -1413,6 +1415,11 @@ export class Enemy {
           const dy = targetCenter.y - portalCenter.y
           const distance = Math.hypot(dx, dy) || 1
           this.inferoDesperationDirection = { x: dx / distance, y: dy / distance }
+          // Keep the dash active until it passes the locked target, not a fixed early reset.
+          this.inferoDesperationRamDuration = Math.min(
+            INFERO_DESPERATION_RAM_SECONDS,
+            Math.max(0.22, (distance + 110) / INFERO_DESPERATION_RAM_SPEED)
+          )
         }
         this.facingAngle = Math.atan2(
           this.inferoDesperationDirection.y,
@@ -1435,7 +1442,7 @@ export class Enemy {
       this.x = clampedCenter.x - this.width / 2
       this.y = clampedCenter.y - this.height / 2
 
-      if (this.inferoDesperationCycleTimer >= INFERO_DESPERATION_RAM_SECONDS) {
+      if (this.inferoDesperationCycleTimer >= this.inferoDesperationRamDuration) {
         this.velocity = Vector2.zero()
         this.inferoDesperationCycleMode = 'recover'
         this.inferoDesperationCycleTimer = 0
@@ -1455,17 +1462,22 @@ export class Enemy {
   private openInferoDesperationPortal(): void {
     const limits = this.getInferoCenterLimits()
     const target = this.target?.getCenter() ?? this.getInferoArenaCenter()
-    const positions = [
-      { x: limits.x.min, y: limits.y.min },
-      { x: limits.x.max, y: limits.y.max },
-      { x: limits.x.max, y: limits.y.min },
-      { x: limits.x.min, y: limits.y.max }
-    ]
-    // Alternate arena corners rather than spawning a portal beneath the boss.
-    const index = this.inferoDesperationPortalIndex++ % positions.length
-    let portal = positions[index]
-    if (Vector2.distance(portal, target) < 200) {
-      portal = positions[(index + 1) % positions.length]
+    const baseAngle = this.inferoDesperationPortalIndex++ * 2.399963
+    let portal = this.clampInferoCenter(target)
+    let bestScore = Infinity
+    // Nearby approach positions replace distant corners, including near arena edges.
+    for (let index = 0; index < 16; index++) {
+      const angle = baseAngle + index * Math.PI / 8
+      const candidate = {
+        x: Math.max(limits.x.min, Math.min(limits.x.max, target.x + Math.cos(angle) * 340)),
+        y: Math.max(limits.y.min, Math.min(limits.y.max, target.y + Math.sin(angle) * 340))
+      }
+      const distance = Vector2.distance(candidate, target)
+      const score = Math.abs(340 - distance) + index * 0.01
+      if (score < bestScore) {
+        portal = candidate
+        bestScore = score
+      }
     }
     this.inferoDesperationPortalPosition = { ...portal }
   }
@@ -2832,11 +2844,13 @@ export class Enemy {
       const directionX = sideMode === 'left' ? 1 : -1
       const startX = sideMode === 'left' ? view.left + 16 : view.right - 16
       const endX = sideMode === 'left' ? view.right - 16 : view.left + 16
-      const inferoLaunchX =
+      const inferoLaunchX = Math.max(centerLimits.x.min, Math.min(
+        centerLimits.x.max,
         sideMode === 'left' ? centerLimits.x.min + 46 : centerLimits.x.max - 46
+      ))
       const inferoLaunchY = Math.max(
-        view.top + 56,
-        Math.min(view.bottom - 56, targetCenter.y + (Math.random() - 0.5) * 220)
+        centerLimits.y.min,
+        Math.min(centerLimits.y.max, targetCenter.y + (Math.random() - 0.5) * 220)
       )
       const sideSpearCount = 6
       const spearSpeed = 820
@@ -3501,7 +3515,7 @@ export class Enemy {
       telegraph.warningLabel =
         kind === 'inferno_spear_volley'
           ? `BLAZING SPEAR BARRAGE // ${telegraph.projectileCount ?? 15} SPEARS`
-          : inferoWarningLabels[kind] ?? 'INFERO CHAMPION // AERIAL STRIKE'
+          : inferoWarningLabels[kind] ?? 'INFERNO CHAMPION // AERIAL STRIKE'
     }
 
     if (this.isInferoChampion && this.bossPhase >= 2) {
@@ -4081,10 +4095,28 @@ export class Enemy {
 
       if (!t.hasTriggered) {
         t.chargeTimer += deltaTime
+        if (
+          t.kind === 'infero_spear_cascade' &&
+          (t.inferoPositionFallback || t.chargeTimer >= t.chargeDuration + 1.2)
+        ) {
+          if (!t.inferoPositionFallback) {
+            // Player separation or a moving viewport may block the original side point.
+            // Use the current safe position, then show a fresh warning before throwing.
+            t.inferoPositionFallback = true
+            t.chargeTimer = Math.max(0, t.chargeDuration - 0.35)
+          }
+          t.inferoLaunchX = bossCenter.x
+          t.inferoLaunchY = bossCenter.y
+          if (t.projectileLanes?.[0]) t.projectileLanes[0].y = bossCenter.y
+          if (t.gridLines?.[0]) {
+            t.gridLines[0].y1 = bossCenter.y
+            t.gridLines[0].y2 = bossCenter.y
+          }
+        }
         const needsInferoPosition =
           t.kind === 'infero_underflame_swoops' ||
           t.kind === 'infero_rebound_lances' ||
-          t.kind === 'infero_spear_cascade'
+          (t.kind === 'infero_spear_cascade' && !t.inferoPositionFallback)
         const inferoHasReachedLaunchPoint =
           !needsInferoPosition ||
           Math.hypot(

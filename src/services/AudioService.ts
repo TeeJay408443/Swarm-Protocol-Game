@@ -131,7 +131,7 @@ export const MUSIC_TRACK_METADATA: Record<MusicTrackName, MusicTrackMetadata> = 
   },
   infero_champion: {
     id: 'infero_champion',
-    title: 'Infero Champion',
+    title: 'Inferno Champion',
     youtubeVideoId: INFERO_CHAMPION_YOUTUBE_VIDEO_ID,
     youtubeUrl: INFERO_CHAMPION_YOUTUBE_URL
   },

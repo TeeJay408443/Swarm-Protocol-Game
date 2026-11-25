@@ -1536,8 +1536,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const launchDirection = attack.sideMode === 'left' ? -1 : 1
     boss.update(0.05, player)
     assert.ok((boss.getCenter().x - initialBossX) * launchDirection > 0)
-    for (let frame = 1; frame < 40; frame++) boss.update(0.05, player)
+    for (let frame = 1; frame < 100 && !attack.hasTriggered; frame++) boss.update(0.05, player)
     assert.equal(attack.hasTriggered, true)
+    assert.ok(Math.abs(boss.getCenter().x - attack.inferoLaunchX!) < 70)
     assert.equal(boss.projectiles.length, 0)
     assert.ok(
       attack.gridLines?.every((line) =>
@@ -1673,13 +1674,21 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(checkInferoFireColumnHit(firstColumn, {
       x: firstColumn.x + firstColumn.width, y: 10, radius: 5
     }), false, 'players can dodge outside the indicated beam lane')
+    for (let frame = 0; frame < 7; frame++) boss.update(0.05, player)
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x, y: firstColumn.y, radius: 20
+    }), true, 'the column remains active for its extended burn window')
+    for (let frame = 0; frame < 4; frame++) boss.update(0.05, player)
+    assert.equal(checkInferoFireColumnHit(firstColumn, {
+      x: firstColumn.x, y: firstColumn.y, radius: 20
+    }), false, 'the column clears after its active window')
     const separation = Math.hypot(
       boss.getCenter().x - player.getCenter().x,
       boss.getCenter().y - player.getCenter().y
     )
     assert.ok(separation >= 120, 'Infero should pass below rather than touch the player')
 
-    const remainingPasses = (attack.swoopCount ?? 3) * (attack.swoopInterval ?? 2.1)
+    const remainingPasses = (attack.swoopCount ?? 3) * (attack.swoopInterval ?? 2)
     for (let frame = 0; frame < Math.ceil(remainingPasses / 0.05); frame++) {
       if (!boss.telegraphs.includes(attack)) break
       boss.update(0.05, player)

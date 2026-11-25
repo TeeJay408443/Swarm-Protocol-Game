@@ -1256,9 +1256,11 @@ export class Enemy {
     const dy = desiredCenter.y - currentCenter.y
     const distance = Math.hypot(dx, dy)
     const moveSpeed = this.baseSpeed * (
-      positioningAttack?.kind === 'infero_underflame_swoops'
-        ? 2.4
-        : this.bossPhase >= 3 ? 1.22 : this.bossPhase === 2 ? 1.08 : 1
+      positioningAttack?.kind === 'inferno_spear_volley'
+        ? 6
+        : positioningAttack?.kind === 'infero_underflame_swoops'
+          ? 2.4
+          : this.bossPhase >= 3 ? 1.22 : this.bossPhase === 2 ? 1.08 : 1
     )
     const maxStep = Math.min(distance, moveSpeed * Math.max(deltaTime, 0))
     const safeDistance = Math.max(distance, 0.001)
@@ -2219,9 +2221,9 @@ export class Enemy {
         width: 104,
         height: Math.max(0, swoopY),
         elapsed: 0,
-        holdDuration: 0.42,
-        windup: 0.62,
-        active: 0.48,
+        holdDuration: 0.28,
+        windup: 0.48,
+        active: 0.68,
         hasIgnited: false,
         hasDamagedPlayer: false,
         number: 1
@@ -2241,15 +2243,15 @@ export class Enemy {
         swoopTargetY: swoopY,
         swoopY,
         swoopDuration: 0.5,
-        swoopInterval: 2.1,
+        swoopInterval: 2,
         fireColumns: [column],
         radius: 52,
         chargeTimer: 0,
         chargeDuration:
           Math.hypot(bossCenter.x - targetX, bossCenter.y - swoopY) /
-            Math.max(1, this.baseSpeed) + 0.4,
+            Math.max(1, this.baseSpeed * 2.4) + 0.2,
         activeTimer: 0,
-        activeDuration: swoopCount * 2.1 + 0.12,
+        activeDuration: swoopCount * 2 + 0.12,
         damage: Math.round(32 * Math.max(1, this.damageScale)),
         warningLabel: `UNDERFLAME DIVE // ${swoopCount} PASSES`,
         hasTriggered: false,
@@ -2361,7 +2363,9 @@ export class Enemy {
         projectileLanes,
         gridLines,
         chargeTimer: 0,
-        chargeDuration: 2,
+        chargeDuration:
+          Math.hypot(bossCenter.x - inferoLaunchX, bossCenter.y - inferoLaunchY) /
+            Math.max(1, this.baseSpeed * 6) + 0.12,
         activeTimer: 0,
         activeDuration: barrageDuration,
         damage: Math.round(24 * Math.max(1, this.damageScale)),
@@ -3315,7 +3319,7 @@ export class Enemy {
 
         if (t.kind === 'infero_underflame_swoops') {
           const swoopCount = t.swoopCount ?? 3
-          const interval = t.swoopInterval ?? 2.1
+          const interval = t.swoopInterval ?? 2
           const passIndex = Math.floor(t.activeTimer / interval)
           const limits = this.getInferoCenterLimits()
           if (passIndex < swoopCount) {
@@ -3347,9 +3351,9 @@ export class Enemy {
                 width: 104,
                 height: Math.max(0, nextTargetY),
                 elapsed: 0,
-                holdDuration: 0.42,
-                windup: 0.62,
-                active: 0.48,
+                holdDuration: 0.28,
+                windup: 0.48,
+                active: 0.68,
                 hasIgnited: false,
                 hasDamagedPlayer: false,
                 number: passIndex + 1

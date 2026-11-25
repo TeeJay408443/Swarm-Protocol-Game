@@ -81,6 +81,7 @@ export interface EnemyProjectile {
   splitColors?: [string, string]
   isCosmicStar?: boolean
   isBlazingSpear?: boolean
+  isInferoFireball?: boolean
   trailTimer?: number
   trailParticles?: Array<{
     x: number
@@ -134,6 +135,7 @@ export type BossAttackKind =
   | 'astral_orbital_grid'
   | 'astral_targeted_lasers'
   | 'inferno_spear_volley'
+  | 'infero_spinning_lattice'
 
 export type Wave15BossIdentity =
   | 'omega_overlord'
@@ -204,6 +206,7 @@ export interface BossTelegraphAttack {
   projectileCount?: number
   inferoLaunchX?: number
   inferoLaunchY?: number
+  laserParticleSeed?: number
   gridPulseCount?: number
   gridPulseIndex?: number
   gridPulseTimer?: number
@@ -352,9 +355,16 @@ export class Enemy {
   private astralGridCooldownRemaining: number = 0
   private inferoHoverTarget: Vector2 | null = null
   private inferoHoverRetargetTimer: number = 0
+  private visibleWorldBounds: { left: number; right: number; top: number; bottom: number } | null = null
 
   get isInferoChampion(): boolean {
     return this.enemyId === 'boss_a3_20'
+  }
+
+  setVisibleWorldBounds(
+    bounds: { left: number; right: number; top: number; bottom: number } | null
+  ): void {
+    this.visibleWorldBounds = bounds ? { ...bounds } : null
   }
 
   get isWormBoss(): boolean {
@@ -964,6 +974,7 @@ export class Enemy {
             t.kind === 'astral_orbital_grid' ||
             t.kind === 'astral_targeted_lasers' ||
             t.kind === 'inferno_spear_volley' ||
+            t.kind === 'infero_spinning_lattice' ||
             t.kind === 'cosmic_portal_lunge' ||
             t.kind === 'cosmic_orb_barrage'
         )
@@ -1128,14 +1139,23 @@ export class Enemy {
 
     const targetCenter = this.target.getCenter()
     const currentCenter = this.getCenter()
-    const spearAttack = this.telegraphs.find((attack) => attack.kind === 'inferno_spear_volley')
+    const positioningAttack = this.telegraphs.find(
+      (attack) =>
+        (attack.kind === 'inferno_spear_volley' ||
+          attack.kind === 'infero_spinning_lattice') &&
+        attack.inferoLaunchX !== undefined &&
+        attack.inferoLaunchY !== undefined
+    )
     let desiredCenter: Vector2
-    if (spearAttack?.inferoLaunchX !== undefined && spearAttack.inferoLaunchY !== undefined) {
-      this.inferoHoverTarget = { x: spearAttack.inferoLaunchX, y: spearAttack.inferoLaunchY }
+    if (positioningAttack?.inferoLaunchX !== undefined && positioningAttack.inferoLaunchY !== undefined) {
+      this.inferoHoverTarget = {
+        x: positioningAttack.inferoLaunchX,
+        y: positioningAttack.inferoLaunchY
+      }
       this.inferoHoverRetargetTimer = Math.max(0, this.inferoHoverRetargetTimer - deltaTime)
       desiredCenter = {
-        x: spearAttack.inferoLaunchX + Math.sin(this.animTime * 1.3) * 12,
-        y: spearAttack.inferoLaunchY + Math.sin(this.animTime * 1.8) * 18
+        x: positioningAttack.inferoLaunchX + Math.sin(this.animTime * 1.3) * 12,
+        y: positioningAttack.inferoLaunchY + Math.sin(this.animTime * 1.8) * 18
       }
     } else {
       this.inferoHoverRetargetTimer -= deltaTime
@@ -1147,9 +1167,16 @@ export class Enemy {
       ) {
         const angle = Math.random() * Math.PI * 2
         const distance = 450 + Math.random() * 240
+        const centerLimits = this.getInferoCenterLimits()
         this.inferoHoverTarget = {
-          x: Math.max(130, Math.min(1870, targetCenter.x + Math.cos(angle) * distance)),
-          y: Math.max(130, Math.min(1870, targetCenter.y + Math.sin(angle) * distance))
+          x: Math.max(
+            centerLimits.x.min,
+            Math.min(centerLimits.x.max, targetCenter.x + Math.cos(angle) * distance)
+          ),
+          y: Math.max(
+            centerLimits.y.min,
+            Math.min(centerLimits.y.max, targetCenter.y + Math.sin(angle) * distance)
+          )
         }
         this.inferoHoverRetargetTimer = 4.2 + Math.random() * 1.8
       }
@@ -1159,10 +1186,7 @@ export class Enemy {
         y: this.inferoHoverTarget.y + Math.sin(this.animTime * 1.8) * 18
       }
     }
-    const marginX = this.width / 2 + 36
-    const marginY = this.height / 2 + 36
-    desiredCenter.x = Math.max(marginX, Math.min(2000 - marginX, desiredCenter.x))
-    desiredCenter.y = Math.max(marginY, Math.min(2000 - marginY, desiredCenter.y))
+    desiredCenter = this.clampInferoCenter(desiredCenter)
 
     const dx = desiredCenter.x - currentCenter.x
     const dy = desiredCenter.y - currentCenter.y
@@ -1186,6 +1210,51 @@ export class Enemy {
       this.y = nextCenter.y - this.height / 2
       this.clampToBounds()
       this.keepInferoSafeDistanceFromPlayer()
+      const safeCenter = this.clampInferoCenter(this.getCenter())
+      this.x = safeCenter.x - this.width / 2
+      this.y = safeCenter.y - this.height / 2
+    }
+  }
+
+  private getInferoCenterLimits(): {
+    x: { min: number; max: number }
+    y: { min: number; max: number }
+  } {
+    const view = this.getInferoViewportBounds()
+    const axisLimits = (
+      visibleMin: number,
+      visibleMax: number,
+      arenaMax: number,
+      size: number
+    ) => {
+      const margin = size / 2 + 32
+      const min = Math.max(margin, visibleMin + margin)
+      const max = Math.min(arenaMax - margin, visibleMax - margin)
+      if (min <= max) return { min, max }
+      const center = Math.max(margin, Math.min(arenaMax - margin, (visibleMin + visibleMax) / 2))
+      return { min: center, max: center }
+    }
+
+    return {
+      x: axisLimits(view.left, view.right, 2000, this.width),
+      y: axisLimits(view.top, view.bottom, 2000, this.height)
+    }
+  }
+
+  private getInferoViewportBounds(): { left: number; right: number; top: number; bottom: number } {
+    const view = this.visibleWorldBounds ?? { left: 0, right: 2000, top: 0, bottom: 2000 }
+    const left = Math.max(0, Math.min(2000, view.left))
+    const right = Math.max(left, Math.min(2000, view.right))
+    const top = Math.max(0, Math.min(2000, view.top))
+    const bottom = Math.max(top, Math.min(2000, view.bottom))
+    return { left, right, top, bottom }
+  }
+
+  private clampInferoCenter(center: Vector2): Vector2 {
+    const limits = this.getInferoCenterLimits()
+    return {
+      x: Math.max(limits.x.min, Math.min(limits.x.max, center.x)),
+      y: Math.max(limits.y.min, Math.min(limits.y.max, center.y))
     }
   }
 
@@ -1210,10 +1279,11 @@ export class Enemy {
     )
     if (currentDistance >= minimumDistance) return
 
-    const minX = this.width / 2 + 24
-    const maxX = 2000 - this.width / 2 - 24
-    const minY = this.height / 2 + 24
-    const maxY = 2000 - this.height / 2 - 24
+    const limits = this.getInferoCenterLimits()
+    const minX = limits.x.min
+    const maxX = limits.x.max
+    const minY = limits.y.min
+    const maxY = limits.y.max
     let best: { x: number; y: number; distance: number; travel: number } | null = null
 
     for (let index = 0; index < 24; index++) {
@@ -1553,7 +1623,7 @@ export class Enemy {
    * Boss (Aegis Commander Drone) alternates 8-way radial burst with 3-shot aimed volley
    */
   private shoot(): void {
-    if (!this.target || !this.canShoot) return
+    if (!this.target || !this.canShoot || this.isInferoChampion) return
     
     const startPos = this.getCenter()
     const direction = Vector2.normalize(
@@ -2044,28 +2114,69 @@ export class Enemy {
 
     let telegraph: BossTelegraphAttack
 
-    if (kind === 'inferno_spear_volley' && this.isInferoChampion) {
+    if (kind === 'infero_spinning_lattice' && this.isInferoChampion) {
+      const view = this.getInferoViewportBounds()
+      const centerLimits = this.getInferoCenterLimits()
+      const inferoLaunchX = (centerLimits.x.min + centerLimits.x.max) / 2
+      const inferoLaunchY = Math.max(
+        centerLimits.y.min,
+        Math.min(centerLimits.y.max, (centerLimits.y.min + centerLimits.y.max) / 2 - 150)
+      )
+      const laserLength = Math.max(
+        900,
+        Math.hypot(view.right - view.left, view.bottom - view.top) * 1.35
+      )
+      const angle = Math.random() * Math.PI * 2
+      telegraph = {
+        id,
+        kind,
+        x: inferoLaunchX,
+        y: inferoLaunchY,
+        inferoLaunchX,
+        inferoLaunchY,
+        angle,
+        turnRate: this.bossPhase >= 3 ? 1.65 : this.bossPhase === 2 ? 1.4 : 1.15,
+        beamCount: 2,
+        length: laserLength,
+        radius: 18,
+        gridLines: getInferoSpinningLaserLines(
+          { x: inferoLaunchX, y: inferoLaunchY },
+          angle,
+          laserLength
+        ),
+        laserParticleSeed: this.specialAttackCounter * 17,
+        chargeTimer: 0,
+        chargeDuration: 1.65,
+        activeTimer: 0,
+        activeDuration: 4.8,
+        damage: Math.round(24 * Math.max(1, this.damageScale)),
+        pulseTimer: 0,
+        pulseCount: 0,
+        warningLabel: 'FURNACE CROSS // TWO SPINNING LANCES',
+        hasTriggered: false,
+        hasDamagedPlayer: false
+      }
+      this.inferoHoverTarget = { x: inferoLaunchX, y: inferoLaunchY }
+      this.inferoHoverRetargetTimer = telegraph.chargeDuration + telegraph.activeDuration + 1.2
+    } else if (kind === 'inferno_spear_volley' && this.isInferoChampion) {
       const sideMode: ClosingSideLaserMode = Math.random() < 0.5 ? 'left' : 'right'
       const projectileCount = 15 + Math.floor(Math.random() * 6)
-      const edgeX = Math.max(
-        70,
-        Math.min(1930, targetCenter.x + (sideMode === 'left' ? -780 : 780))
-      )
-      const oppositeEdgeX = Math.max(
-        70,
-        Math.min(1930, targetCenter.x + (sideMode === 'left' ? 780 : -780))
-      )
-      const inferoLaunchX = Math.max(
-        this.width / 2 + 30,
-        Math.min(2000 - this.width / 2 - 30, targetCenter.x + (sideMode === 'left' ? -610 : 610))
-      )
+      const view = this.getInferoViewportBounds()
+      const centerLimits = this.getInferoCenterLimits()
+      const edgeX = sideMode === 'left' ? view.left + 12 : view.right - 12
+      const oppositeEdgeX = sideMode === 'left' ? view.right - 12 : view.left + 12
+      const inferoLaunchX =
+        sideMode === 'left' ? centerLimits.x.min + 34 : centerLimits.x.max - 34
       const inferoLaunchY = Math.max(
-        this.height / 2 + 30,
-        Math.min(2000 - this.height / 2 - 30, targetCenter.y + (Math.random() - 0.5) * 250)
+        centerLimits.y.min,
+        Math.min(centerLimits.y.max, targetCenter.y + (Math.random() - 0.5) * 250)
       )
       const horizontalDistance = Math.abs(oppositeEdgeX - edgeX)
       const projectileLanes = Array.from({ length: projectileCount }, () => {
-        const startY = Math.max(80, Math.min(1920, targetCenter.y + (Math.random() - 0.5) * 640))
+        const startY = Math.max(
+          view.top + 40,
+          Math.min(view.bottom - 40, view.top + 40 + Math.random() * Math.max(0, view.bottom - view.top - 80))
+        )
         const verticalDrift = (Math.random() - 0.5) * 70
         const direction = Vector2.normalize({
           x: oppositeEdgeX - edgeX,
@@ -2712,11 +2823,7 @@ export class Enemy {
     if (this.isInferoChampion) {
       const inferoWarningLabels: Partial<Record<BossAttackKind, string>> = {
         tracking_strikes: 'CINDER TRACK // MOVE BEFORE THE IMPACT',
-        rotating_cross_lasers: 'FURNACE CROSS // FIND THE OPEN LANE',
-        pursuit_beam: 'RADIANT LANCE // BREAK THE LINE',
-        void_meteor_salvo: 'FALLING EMBERS // CLEAR THE MARKS',
-        singularity_grid: 'ASCENDANT GRID // SHIFT THROUGH THE GAPS',
-        bullet_hell: 'FLAME STORM // WEAVE THROUGH THE EMBERS'
+        infero_spinning_lattice: 'FURNACE CROSS // DODGE THE SPINNING LANCES'
       }
       telegraph.warningLabel =
         kind === 'inferno_spear_volley'
@@ -2769,6 +2876,35 @@ export class Enemy {
     })
   }
 
+  private launchInferoSpinningGridVolley(
+    attack: BossTelegraphAttack,
+    bossCenter: Vector2,
+    pulseIndex: number
+  ): void {
+    const spokeCount = this.bossPhase >= 3 ? 7 : 6
+    const baseAngle = (attack.angle ?? 0) + pulseIndex * 0.31
+    for (let index = 0; index < spokeCount; index++) {
+      const angle = baseAngle + (index / spokeCount) * Math.PI * 2
+      this.projectiles.push({
+        x: bossCenter.x,
+        y: bossCenter.y,
+        width: 13,
+        height: 13,
+        speed: this.bossPhase >= 3 ? 310 : 275,
+        direction: { x: Math.cos(angle), y: Math.sin(angle) },
+        damage: Math.round(16 * Math.max(1, this.damageScale)),
+        color: index % 2 === 0 ? '#FB923C' : '#FDE047',
+        lifetime: 0,
+        maxLifetime: 6,
+        homingTurnRate: 0.46,
+        homingRemaining: 2.4,
+        isInferoFireball: true,
+        trailTimer: 0,
+        trailParticles: []
+      })
+    }
+  }
+
   /**
    * Advances telegraph windup timers, tracking mechanics, bullet hell curtains, and active sweeps
    */
@@ -2779,7 +2915,24 @@ export class Enemy {
     for (let i = this.telegraphs.length - 1; i >= 0; i--) {
       const t = this.telegraphs[i]
 
-      if (t.kind === 'astral_targeted_lasers') {
+      if (t.kind === 'infero_spinning_lattice') {
+        t.x = bossCenter.x
+        t.y = bossCenter.y
+        if (!t.hasTriggered) {
+          t.angle = (t.angle ?? 0) + (t.turnRate ?? 1.15) * deltaTime * 0.34
+          t.gridLines = getInferoSpinningLaserLines(
+            bossCenter,
+            t.angle,
+            t.length ?? 1500
+          )
+        } else if (t.hasDamagedPlayer) {
+          t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
+          if (t.hitCooldown >= 0.48) {
+            t.hitCooldown = 0
+            t.hasDamagedPlayer = false
+          }
+        }
+      } else if (t.kind === 'astral_targeted_lasers') {
         if (!t.hasTriggered && targetCenter) {
           t.x = bossCenter.x
           t.y = bossCenter.y
@@ -2906,6 +3059,14 @@ export class Enemy {
           if (t.kind === 'inferno_spear_volley') {
             t.pulseTimer = 0
             t.pulseCount = 0
+          } else if (t.kind === 'infero_spinning_lattice') {
+            t.pulseTimer = 0
+            t.pulseCount = 0
+            t.gridLines = getInferoSpinningLaserLines(
+              bossCenter,
+              t.angle ?? 0,
+              t.length ?? 1500
+            )
           } else if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
             // Warp worm head cleanly into the dimensional rift and unleash blazing jaw lunge
             this.x = t.portalX - this.width / 2
@@ -2975,6 +3136,22 @@ export class Enemy {
               shotsFired + 1 < (t.projectileCount ?? 0)
                 ? `BLAZING SPEAR ${shotsFired + 2}/${t.projectileCount}`
                 : 'FINAL BLAZING SPEAR'
+          }
+        } else if (t.kind === 'infero_spinning_lattice') {
+          t.x = bossCenter.x
+          t.y = bossCenter.y
+          t.angle = (t.angle ?? 0) + (t.turnRate ?? 1.15) * deltaTime
+          t.gridLines = getInferoSpinningLaserLines(
+            bossCenter,
+            t.angle,
+            t.length ?? 1500
+          )
+          t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
+          if ((t.pulseTimer ?? 0) >= 0.54) {
+            t.pulseTimer = (t.pulseTimer ?? 0) - 0.54
+            const pulseIndex = t.pulseCount ?? 0
+            this.launchInferoSpinningGridVolley(t, bossCenter, pulseIndex)
+            t.pulseCount = pulseIndex + 1
           }
         } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
@@ -3652,6 +3829,77 @@ export class Enemy {
             labelY
           )
         }
+        ctx.restore()
+      } else if (t.kind === 'infero_spinning_lattice' && t.gridLines) {
+        const lines = t.gridLines
+        const warningAlpha = 0.25 + chargeProgress * 0.55
+        ctx.save()
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        for (let beamIndex = 0; beamIndex < lines.length; beamIndex++) {
+          const line = lines[beamIndex]
+          const start = camera.worldToScreen(line.x1, line.y1)
+          const end = camera.worldToScreen(line.x2, line.y2)
+          const activeAlpha = t.hasTriggered ? 0.9 : warningAlpha
+          const beamWidth = t.hasTriggered ? 15 : 3 + chargeProgress * 3
+
+          ctx.setLineDash(t.hasTriggered ? [] : [18, 11])
+          ctx.strokeStyle = `rgba(249, 115, 22, ${t.hasTriggered ? 0.32 : warningAlpha * 0.55})`
+          ctx.lineWidth = t.hasTriggered ? 32 : 10
+          ctx.shadowColor = '#F97316'
+          ctx.shadowBlur = t.hasTriggered ? 24 : 12
+          ctx.beginPath()
+          ctx.moveTo(start.x, start.y)
+          ctx.lineTo(end.x, end.y)
+          ctx.stroke()
+
+          ctx.setLineDash(t.hasTriggered ? [] : [18, 11])
+          ctx.strokeStyle = `rgba(251, 146, 60, ${activeAlpha})`
+          ctx.lineWidth = beamWidth
+          ctx.shadowBlur = t.hasTriggered ? 18 : 0
+          ctx.beginPath()
+          ctx.moveTo(start.x, start.y)
+          ctx.lineTo(end.x, end.y)
+          ctx.stroke()
+
+          if (t.hasTriggered) {
+            ctx.setLineDash([])
+            ctx.strokeStyle = `rgba(254, 240, 138, ${0.9 + Math.sin(this.animTime * 18 + beamIndex) * 0.1})`
+            ctx.lineWidth = 4
+            ctx.shadowColor = '#FEF08A'
+            ctx.shadowBlur = 14
+            ctx.beginPath()
+            ctx.moveTo(start.x, start.y)
+            ctx.lineTo(end.x, end.y)
+            ctx.stroke()
+
+            for (let mote = 0; mote < 9; mote++) {
+              const progress = (this.animTime * 0.72 + mote * 0.137 + beamIndex * 0.31) % 1
+              const moteX = start.x + (end.x - start.x) * progress
+              const moteY = start.y + (end.y - start.y) * progress
+              const moteRadius = 2.2 + Math.sin(this.animTime * 14 + mote) * 1.1
+              ctx.fillStyle = mote % 2 === 0 ? '#FEF08A' : '#FB923C'
+              ctx.shadowColor = '#F97316'
+              ctx.shadowBlur = 13
+              ctx.beginPath()
+              ctx.arc(moteX, moteY, Math.max(1.2, moteRadius), 0, Math.PI * 2)
+              ctx.fill()
+            }
+          }
+        }
+        ctx.setLineDash([])
+        ctx.shadowBlur = 0
+        const center = camera.worldToScreen(t.x, t.y)
+        ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
+        ctx.fillRect(center.x - 176, center.y - 58, 352, 25)
+        ctx.fillStyle = t.hasTriggered ? '#FEF08A' : '#FDBA74'
+        ctx.font = 'bold 12px monospace'
+        ctx.textAlign = 'center'
+        ctx.fillText(
+          `${t.warningLabel ?? 'SPINNING FURNACE LATTICE'}${t.hasTriggered ? '' : ` • ${(t.chargeDuration - t.chargeTimer).toFixed(1)}s`}`,
+          center.x,
+          center.y - 41
+        )
         ctx.restore()
       } else if (t.kind === 'closing_side_lasers' && t.bounds) {
         const b = t.bounds
@@ -6090,32 +6338,32 @@ export function getAstralScourgePhaseTwoAttackKind(
   return 'cosmic_portal_lunge'
 }
 
+export function getInferoSpinningLaserLines(
+  center: Vector2,
+  angle: number,
+  length: number
+): CosmicLaserWallLine[] {
+  const halfLength = Math.max(0, length) / 2
+  return [0, 1].map((beamIndex) => {
+    const beamAngle = angle + beamIndex * (Math.PI / 2)
+    const dx = Math.cos(beamAngle) * halfLength
+    const dy = Math.sin(beamAngle) * halfLength
+    return {
+      x1: center.x - dx,
+      y1: center.y - dy,
+      x2: center.x + dx,
+      y2: center.y + dy,
+      width: 22,
+      color: '#F97316'
+    }
+  })
+}
+
 export function getInferoChampionAttackKind(phase: number, cycleIndex: number): BossAttackKind {
   const cycles: Record<number, BossAttackKind[]> = {
-    1: [
-      'inferno_spear_volley',
-      'tracking_strikes',
-      'rotating_cross_lasers',
-      'pursuit_beam',
-      'void_meteor_salvo'
-    ],
-    2: [
-      'inferno_spear_volley',
-      'rotating_cross_lasers',
-      'tracking_strikes',
-      'singularity_grid',
-      'void_meteor_salvo',
-      'pursuit_beam'
-    ],
-    3: [
-      'singularity_grid',
-      'inferno_spear_volley',
-      'pursuit_beam',
-      'bullet_hell',
-      'tracking_strikes',
-      'void_meteor_salvo',
-      'rotating_cross_lasers'
-    ]
+    1: ['inferno_spear_volley', 'tracking_strikes', 'infero_spinning_lattice'],
+    2: ['tracking_strikes', 'infero_spinning_lattice', 'inferno_spear_volley'],
+    3: ['infero_spinning_lattice', 'inferno_spear_volley', 'tracking_strikes']
   }
   const safePhase = Math.max(1, Math.min(3, Math.floor(phase)))
   const cycle = cycles[safePhase]
@@ -6200,6 +6448,30 @@ export function checkBossTelegraphHit(
         if (Math.hypot(targetCircle.x - blast.x, targetCircle.y - blast.y) <= blast.radius + targetCircle.radius * 0.65) {
           return true
         }
+      }
+    }
+    return false
+  }
+
+  if (telegraph.kind === 'infero_spinning_lattice' && telegraph.gridLines) {
+    for (const line of telegraph.gridLines) {
+      const dx = line.x2 - line.x1
+      const dy = line.y2 - line.y1
+      const lengthSquared = dx * dx + dy * dy
+      if (lengthSquared <= 0.0001) continue
+      const projection = Math.max(
+        0,
+        Math.min(
+          1,
+          ((targetCircle.x - line.x1) * dx + (targetCircle.y - line.y1) * dy) /
+            lengthSquared
+        )
+      )
+      const closestX = line.x1 + projection * dx
+      const closestY = line.y1 + projection * dy
+      const hitDistance = line.width / 2 + targetCircle.radius * 0.65
+      if (Math.hypot(targetCircle.x - closestX, targetCircle.y - closestY) <= hitDistance) {
+        return true
       }
     }
     return false

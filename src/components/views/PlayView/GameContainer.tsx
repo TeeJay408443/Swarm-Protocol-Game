@@ -6215,6 +6215,9 @@ const GameContainer: React.FC<GameContainerProps> = ({
               }
             }
 
+            if (enemy.isInferoChampion) {
+              enemy.setVisibleWorldBounds(cameraRef.current?.getWorldBounds() ?? null)
+            }
             enemy.update(deltaTime, player)
             if (enemy.pendingAstralPhaseTwoCutscene) {
               startAstralScourgePhaseTwoCutscene(enemy)

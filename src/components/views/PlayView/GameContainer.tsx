@@ -2889,8 +2889,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
       }
 
       if (
-        knockbackFrom && !enemy.isStationaryBoss && !enemy.isInferoDesperationPhase &&
-        !(enemy.isInferoChampion && enemy.isSpawning)
+        knockbackFrom && !enemy.isKnockbackImmune && !enemy.isInferoDesperationPhase
       ) {
         const ec = enemy.getCenter()
         const dx = ec.x - knockbackFrom.x
@@ -3095,8 +3094,10 @@ const GameContainer: React.FC<GameContainerProps> = ({
             const dist = Math.hypot(ec.x - pc.x, ec.y - pc.y)
             if (dist < blastRadius && dist > 0) {
               const pushDist = 65 + shieldLv * 14
-              enemy.x += ((ec.x - pc.x) / dist) * pushDist
-              enemy.y += ((ec.y - pc.y) / dist) * pushDist
+              if (!enemy.isKnockbackImmune) {
+                enemy.x += ((ec.x - pc.x) / dist) * pushDist
+                enemy.y += ((ec.y - pc.y) / dist) * pushDist
+              }
               if (shieldLv >= 2) {
                 damageEnemy(enemy, shieldLv * 15, pc)
               }
@@ -5240,7 +5241,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               if (dist <= player.width / 2 + enemy.width / 2 + 16) {
                 dashHitEnemiesRef.current.add(enemy)
                 const pushLen = dist || 1
-                if (!enemy.isStationaryBoss) {
+                if (!enemy.isKnockbackImmune) {
                   enemy.x += ((ec.x - dashPc.x) / pushLen) * 38
                   enemy.y += ((ec.y - dashPc.y) / pushLen) * 38
                 }
@@ -5829,7 +5830,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               const dx = vortex.x - ec.x
               const dy = vortex.y - ec.y
               const dist = Math.hypot(dx, dy)
-              if (dist > 8 && dist <= pullRadius) {
+              if (!enemy.isKnockbackImmune && dist > 8 && dist <= pullRadius) {
                 const pullStrength = vortex.isLv5 ? 190 : 125
                 enemy.x += (dx / dist) * pullStrength * deltaTime
                 enemy.y += (dy / dist) * pullStrength * deltaTime
@@ -6048,7 +6049,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
               const dx = tor.x - ec.x
               const dy = tor.y - ec.y
               const dist = Math.hypot(dx, dy)
-              if (dist > 10 && dist <= pullRadius) {
+              if (!enemy.isKnockbackImmune && dist > 10 && dist <= pullRadius) {
                 const pull = (tor.isLv5 ? 165 : 110) * deltaTime
                 enemy.x += (dx / dist) * pull
                 enemy.y += (dy / dist) * pull

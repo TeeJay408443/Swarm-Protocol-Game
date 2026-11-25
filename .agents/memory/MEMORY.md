@@ -1,4 +1,4 @@
-- [Enemy damage survivability](combat-balance.md) — shared 30% reduction includes bosses and replaces, rather than stacks with, the earlier normal-enemy reduction.
+- [Enemy survival balance](combat-balance.md) — shared 30% damage reduction; gentler wave growth; cinematic bosses ignore knockback and pulls.
 - [Manager callbacks](manager-callbacks.md) — keep callback storage fields distinct from public registration method names to prevent runtime method shadowing.
 - [Area 2 boss roster](area-2-boss-roster.md) — Area 2 intentionally has four dedicated bosses, including the Wave 20 Astral Scourge.
 - [Astral Scourge phases](astral-scourge-phases.md) — the Wave 20 boss has a damaging tail, then returns after defeat with its specified second health phase.

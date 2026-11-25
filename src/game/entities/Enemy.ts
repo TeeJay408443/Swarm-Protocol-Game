@@ -376,6 +376,11 @@ export class Enemy {
   isStationaryBoss: boolean = false
   isFinalBoss: boolean = false
   isWave15SpecialBoss: boolean = false
+  /** Main cinematic bosses cannot be displaced by player knockback or enemy collisions. */
+  get isKnockbackImmune(): boolean {
+    return this.isStationaryBoss || this.isFinalBoss || this.isWave15SpecialBoss ||
+      this.isDevourerOfGods || this.isAstralScourge || this.isInferoChampion
+  }
   anchorPos: Vector2 | null = null
   arenaBounds: BossArenaBounds | null = null
   
@@ -8807,7 +8812,7 @@ export function resolveEnemyCollisions(
       const acx = a.x + a.width / 2
       const acy = a.y + a.height / 2
       const rA = Math.max(8, a.width / 2)
-      const invMassA = a.isStationaryBoss || (a.isInferoChampion && a.isSpawning)
+      const invMassA = a.isKnockbackImmune
         ? 0 : a.isBoss ? 0.2 : a.isMiniBoss ? 0.35 : 1.0
       const gx = Math.floor(acx / cellSize)
       const gy = Math.floor(acy / cellSize)
@@ -8847,7 +8852,7 @@ export function resolveEnemyCollisions(
               overlap = minDist - dist
             }
 
-            const invMassB = b.isStationaryBoss || (b.isInferoChampion && b.isSpawning)
+            const invMassB = b.isKnockbackImmune
               ? 0 : b.isBoss ? 0.2 : b.isMiniBoss ? 0.35 : 1.0
             const totalInvMass = invMassA + invMassB
             if (totalInvMass <= 0) continue
@@ -8866,7 +8871,7 @@ export function resolveEnemyCollisions(
 
   for (let i = 0; i < n; i++) {
     const e = active[i]
-    if (e.isStationaryBoss || (e.isInferoChampion && e.isSpawning)) continue
+    if (e.isKnockbackImmune) continue
     e.x = Math.max(padding, Math.min(e.x, arenaSize - e.width - padding))
     e.y = Math.max(padding, Math.min(e.y, arenaSize - e.height - padding))
   }

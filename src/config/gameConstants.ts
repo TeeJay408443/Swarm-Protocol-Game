@@ -49,8 +49,8 @@ export const WAVE_CONFIG = {
   // Wave difficulty scaling
   ENEMY_SPAWN_RATE_BASE: 1.8, // Enemies per second at wave 1
   ENEMY_SPAWN_RATE_SCALING: 0.65, // Additional enemies per second per wave
-  ENEMY_HP_SCALING: 1.1, // HP multiplier per wave
-  ENEMY_SPEED_SCALING: 1.02, // Speed multiplier per wave
+  ENEMY_HP_SCALING: 1.08, // HP multiplier per wave
+  ENEMY_SPEED_SCALING: 1.015, // Speed multiplier per wave
   
   // Maximum wave (Wave 15 Final Boss)
   MAX_WAVE: 15,
@@ -126,13 +126,13 @@ export function getEnemyScaling(waveNumber: number, survivalSeconds: number = 0)
   const threatTier = Number((waveFactor + elapsedMinutes * 0.85).toFixed(2))
 
   const hpMultiplier = Number(
-    (Math.pow(1.30, waveFactor) * (1 + elapsedMinutes * 0.45)).toFixed(2)
+    (Math.pow(1.18, waveFactor) * (1 + elapsedMinutes * 0.09)).toFixed(2)
   )
   const speedMultiplier = Number(
-    Math.min(2.75, 1 + waveFactor * 0.07 + elapsedMinutes * 0.08).toFixed(2)
+    Math.min(2.4, 1 + waveFactor * 0.045 + elapsedMinutes * 0.06).toFixed(2)
   )
   const damageMultiplier = Number(
-    (1 + waveFactor * 0.24 + elapsedMinutes * 0.32).toFixed(2)
+    (1 + waveFactor * 0.12 + elapsedMinutes * 0.09).toFixed(2)
   )
 
   return {

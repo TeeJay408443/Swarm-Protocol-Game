@@ -517,6 +517,27 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(late.hpMultiplier > mid.hpMultiplier)
     assert.ok(late.speedMultiplier > mid.speedMultiplier)
     assert.ok(late.damageMultiplier > mid.damageMultiplier)
+    assert.ok(late.hpMultiplier < 20, 'health growth stays below the previous steep curve')
+    assert.ok(late.damageMultiplier < 3, 'damage growth stays gradual over early waves')
+  })
+
+  it('keeps cinematic main bosses, including Astral Scourge, immune to knockback', () => {
+    const regular = new Enemy()
+    const finalBoss = new Enemy({ isFinalBoss: true })
+    const wave15Boss = new Enemy({ isWave15SpecialBoss: true })
+    const scourgeTemplate = AREA_TWO_BOSSES.find((enemy) => enemy.id === 'boss_a2_20')!
+    const scourge = new Enemy({ enemyData: scourgeTemplate, isFinalBoss: true })
+    assert.equal(regular.isKnockbackImmune, false)
+    assert.equal(finalBoss.isKnockbackImmune, true)
+    assert.equal(wave15Boss.isKnockbackImmune, true)
+    assert.equal(scourge.isAstralScourge, true)
+    assert.equal(scourge.isKnockbackImmune, true)
+
+    const bossPosition = { x: scourge.x, y: scourge.y }
+    const add = new Enemy({ x: scourge.x, y: scourge.y })
+    resolveEnemyCollisions([scourge, add])
+    assert.deepEqual({ x: scourge.x, y: scourge.y }, bossPosition)
+    assert.notDeepEqual({ x: add.x, y: add.y }, bossPosition, 'collision force moves the regular enemy instead')
   })
 
   it('activates Companion Robot and Temporal Echo summon attacks', () => {
@@ -688,8 +709,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const w2 = getEnemyScaling(2, 33)
     const w5 = getEnemyScaling(5, 132)
     assert.equal(w1.hpMultiplier, 1)
-    assert.ok(w2.hpMultiplier > w1.hpMultiplier && w2.hpMultiplier >= 1.3 && w2.damageMultiplier > 1.2)
-    assert.ok(w5.hpMultiplier > w2.hpMultiplier * 2.1)
+    assert.ok(w2.hpMultiplier > w1.hpMultiplier && w2.hpMultiplier >= 1.2 && w2.damageMultiplier > 1.15)
+    assert.ok(w5.hpMultiplier > w2.hpMultiplier * 1.4)
 
     // Sentinel Turret (upg_20) Lv 1 & Lv 5 Overdrive attack behavior
     const hero = heroes.find(h => h.id === 'hero_03')!

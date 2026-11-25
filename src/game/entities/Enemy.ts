@@ -4363,6 +4363,220 @@ export class Enemy {
     }
   }
 
+  private drawAreaThreeEnemySprite(
+    ctx: CanvasRenderingContext2D,
+    r: number,
+    isFlashing: boolean
+  ): void {
+    const basalt = isFlashing ? '#FFFFFF' : '#292524'
+    const glowing = '#FB923C'
+    ctx.save()
+
+    switch (this.enemyId) {
+      case 'ene_a3_01': {
+        // Basalt Bulwark: broad shield shell with branching magma seams.
+        ctx.fillStyle = basalt
+        ctx.strokeStyle = '#A8A29E'
+        ctx.lineWidth = 2.5
+        ctx.beginPath()
+        ctx.moveTo(r * 0.92, 0)
+        ctx.lineTo(r * 0.56, -r * 0.8)
+        ctx.lineTo(-r * 0.24, -r * 0.96)
+        ctx.lineTo(-r * 0.92, -r * 0.42)
+        ctx.lineTo(-r * 0.92, r * 0.42)
+        ctx.lineTo(-r * 0.24, r * 0.96)
+        ctx.lineTo(r * 0.56, r * 0.8)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.strokeStyle = glowing
+        ctx.lineWidth = 2.5
+        ctx.beginPath()
+        ctx.moveTo(-r * 0.46, -r * 0.54)
+        ctx.lineTo(-r * 0.08, -r * 0.15)
+        ctx.lineTo(-r * 0.37, r * 0.16)
+        ctx.moveTo(r * 0.08, -r * 0.58)
+        ctx.lineTo(r * 0.35, -r * 0.16)
+        ctx.lineTo(r * 0.08, r * 0.27)
+        ctx.lineTo(r * 0.4, r * 0.54)
+        ctx.stroke()
+        ctx.fillStyle = '#FDE047'
+        ctx.beginPath()
+        ctx.arc(r * 0.25, 0, r * 0.13, 0, Math.PI * 2)
+        ctx.fill()
+        break
+      }
+      case 'ene_a3_02': {
+        // Cinder Skater: narrow flying shard with a twin-flame exhaust.
+        const flicker = Math.sin(this.animTime * 30) * r * 0.12
+        ctx.strokeStyle = '#F97316'
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        ctx.moveTo(-r * 0.55, -r * 0.28)
+        ctx.lineTo(-r * 1.45 - flicker, -r * 0.58)
+        ctx.moveTo(-r * 0.55, r * 0.28)
+        ctx.lineTo(-r * 1.35 + flicker, r * 0.58)
+        ctx.stroke()
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#7C2D12'
+        ctx.strokeStyle = '#FDBA74'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(r * 1.15, 0)
+        ctx.lineTo(-r * 0.38, -r * 0.68)
+        ctx.lineTo(-r * 0.16, 0)
+        ctx.lineTo(-r * 0.38, r * 0.68)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#FEF08A'
+        ctx.beginPath()
+        ctx.arc(r * 0.35, 0, r * 0.14, 0, Math.PI * 2)
+        ctx.fill()
+        break
+      }
+      case 'ene_a3_03': {
+        // Furnace Marksman: kiln-mask and long precision barrel.
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#3F1D15'
+        ctx.strokeStyle = '#F97316'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(r * 0.52, 0)
+        ctx.lineTo(r * 0.14, -r * 0.62)
+        ctx.lineTo(-r * 0.5, -r * 0.44)
+        ctx.lineTo(-r * 0.64, 0)
+        ctx.lineTo(-r * 0.5, r * 0.44)
+        ctx.lineTo(r * 0.14, r * 0.62)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#292524'
+        ctx.fillRect(r * 0.2, -r * 0.16, r * 1.9, r * 0.32)
+        ctx.strokeStyle = '#FDBA74'
+        ctx.lineWidth = 2
+        ctx.strokeRect(r * 0.2, -r * 0.16, r * 1.9, r * 0.32)
+        ctx.fillStyle = '#FEF08A'
+        ctx.beginPath()
+        ctx.arc(r * 0.06, 0, r * 0.18, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#F97316'
+        ctx.fillRect(r * 1.78, -r * 0.08, r * 0.48, r * 0.16)
+        break
+      }
+      case 'ene_a3_04': {
+        // Searing Runesmith: floating rune-kiln with three orbiting hot sigils.
+        const rotation = this.animTime * 1.9
+        ctx.strokeStyle = '#FACC15'
+        ctx.lineWidth = 1.8
+        ctx.beginPath()
+        ctx.arc(0, 0, r * 1.06, rotation, rotation + Math.PI * 1.55)
+        ctx.stroke()
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#451A03'
+        ctx.strokeStyle = '#FB923C'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2 + rotation * 0.35
+          const radius = r * (i % 2 === 0 ? 0.76 : 0.62)
+          const x = Math.cos(angle) * radius
+          const y = Math.sin(angle) * radius
+          if (i === 0) ctx.moveTo(x, y)
+          else ctx.lineTo(x, y)
+        }
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#FDE047'
+        ctx.shadowColor = '#F97316'
+        ctx.shadowBlur = 10
+        ctx.beginPath()
+        ctx.arc(0, 0, r * 0.24, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.shadowBlur = 0
+        for (let i = 0; i < 3; i++) {
+          const angle = rotation + i * ((Math.PI * 2) / 3)
+          ctx.fillStyle = i % 2 === 0 ? '#FDBA74' : '#FEF08A'
+          ctx.beginPath()
+          ctx.arc(Math.cos(angle) * r * 1.24, Math.sin(angle) * r * 1.24, r * 0.13, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        break
+      }
+      case 'ene_a3_05': {
+        // Crucible Brute: thick arms frame a furnace-core chest.
+        const stomp = Math.abs(Math.sin(this.animTime * 5)) * r * 0.06
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#292524'
+        ctx.strokeStyle = '#A8A29E'
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        ctx.moveTo(-r * 0.5, -r * 0.44)
+        ctx.lineTo(r * 0.34, -r * 0.52)
+        ctx.lineTo(r * 0.7, -r * 0.15)
+        ctx.lineTo(r * 0.55, r * 0.5)
+        ctx.lineTo(-r * 0.48, r * 0.5)
+        ctx.lineTo(-r * 0.72, r * 0.04)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#1C1917'
+        ctx.strokeStyle = '#F97316'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.ellipse(0, 0, r * 0.35, r * 0.4, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#FDE047'
+        ctx.beginPath()
+        ctx.arc(r * 0.04, 0, r * (0.2 + stomp), 0, Math.PI * 2)
+        ctx.fill()
+        for (const side of [-1, 1]) {
+          ctx.fillStyle = '#57534E'
+          ctx.beginPath()
+          ctx.roundRect(side * r * 0.72 - r * 0.2, -r * 0.24, r * 0.4, r * 0.7, r * 0.12)
+          ctx.fill()
+          ctx.strokeStyle = '#FDBA74'
+          ctx.stroke()
+        }
+        break
+      }
+      case 'ene_a3_06': {
+        // Furnace Leviathan: segmented ember-serpent curled behind a horned head.
+        for (let i = 4; i >= 1; i--) {
+          const x = -r * (0.34 + i * 0.39)
+          const y = Math.sin(this.animTime * 2.8 - i * 0.72) * r * 0.34
+          const size = r * (0.48 - i * 0.045)
+          ctx.fillStyle = i % 2 === 0 ? '#7C2D12' : '#292524'
+          ctx.strokeStyle = i % 2 === 0 ? '#FB923C' : '#FACC15'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.ellipse(x, y, size, size * 0.72, 0, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.stroke()
+        }
+        ctx.fillStyle = isFlashing ? '#FFFFFF' : '#431407'
+        ctx.strokeStyle = '#FDBA74'
+        ctx.lineWidth = 2.5
+        ctx.beginPath()
+        ctx.moveTo(r * 0.9, 0)
+        ctx.lineTo(r * 0.28, -r * 0.58)
+        ctx.lineTo(-r * 0.36, -r * 0.34)
+        ctx.lineTo(-r * 0.43, r * 0.34)
+        ctx.lineTo(r * 0.28, r * 0.58)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#FEF08A'
+        ctx.beginPath()
+        ctx.arc(r * 0.32, -r * 0.12, r * 0.11, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.beginPath()
+        ctx.arc(r * 0.32, r * 0.12, r * 0.11, 0, Math.PI * 2)
+        ctx.fill()
+        break
+      }
+    }
+    ctx.restore()
+  }
+
   /**
    * Draw detailed enemy sprites on canvas
    */
@@ -4723,15 +4937,14 @@ export class Enemy {
         }
 
         if (this.enemyId === 'ene_a2_05') {
-          const isLeviathan = this.enemyId === 'ene_a3_06'
-          const coreColor = isLeviathan ? '#FDBA74' : '#FDE047'
+          const coreColor = '#FDE047'
           const pulse = 0.92 + Math.sin(this.animTime * 6) * 0.05
           ctx.fillStyle = isFlashing ? '#FFFFFF' : '#431407'
-          ctx.strokeStyle = isLeviathan ? '#FB923C' : '#F97316'
+          ctx.strokeStyle = '#F97316'
           ctx.lineWidth = 3
           ctx.beginPath()
           for (let i = 0; i < 10; i++) {
-            const angle = (i / 10) * Math.PI * 2 + this.animTime * (isLeviathan ? 0.45 : 0.12)
+            const angle = (i / 10) * Math.PI * 2 + this.animTime * 0.12
             const radius = r * (i % 2 === 0 ? pulse : 0.76)
             const x = Math.cos(angle) * radius
             const y = Math.sin(angle) * radius
@@ -4741,32 +4954,14 @@ export class Enemy {
           ctx.closePath()
           ctx.fill()
           ctx.stroke()
-          if (isLeviathan) {
-            for (let i = 0; i < 3; i++) {
-              const angle = this.animTime * 1.4 + i * (Math.PI * 2 / 3)
-              ctx.fillStyle = i % 2 === 0 ? '#FB923C' : '#FACC15'
-              ctx.beginPath()
-              ctx.ellipse(
-                Math.cos(angle) * r * 0.62,
-                Math.sin(angle) * r * 0.62,
-                r * 0.36,
-                r * 0.12,
-                angle,
-                0,
-                Math.PI * 2
-              )
-              ctx.fill()
-            }
-          } else {
-            ctx.strokeStyle = '#FDBA74'
-            ctx.lineWidth = 4
-            ctx.beginPath()
-            ctx.moveTo(-r * 0.72, -r * 0.36)
-            ctx.lineTo(r * 0.72, -r * 0.36)
-            ctx.moveTo(-r * 0.72, r * 0.36)
-            ctx.lineTo(r * 0.72, r * 0.36)
-            ctx.stroke()
-          }
+          ctx.strokeStyle = '#FDBA74'
+          ctx.lineWidth = 4
+          ctx.beginPath()
+          ctx.moveTo(-r * 0.72, -r * 0.36)
+          ctx.lineTo(r * 0.72, -r * 0.36)
+          ctx.moveTo(-r * 0.72, r * 0.36)
+          ctx.lineTo(r * 0.72, r * 0.36)
+          ctx.stroke()
           ctx.fillStyle = coreColor
           ctx.beginPath()
           ctx.arc(0, 0, r * 0.29, 0, Math.PI * 2)
@@ -4894,6 +5089,30 @@ export class Enemy {
             ctx.ellipse(-r * 0.19, -r * 0.53, r * 0.08, r * 0.045, -0.12, 0, Math.PI * 2)
             ctx.ellipse(r * 0.19, -r * 0.53, r * 0.08, r * 0.045, 0.12, 0, Math.PI * 2)
             ctx.fill()
+
+            if (this.telegraphs.some((telegraph) => telegraph.kind === 'inferno_spear_volley')) {
+              ctx.save()
+              ctx.translate(r * 0.38, r * 0.18)
+              ctx.rotate(0.12)
+              ctx.shadowColor = '#F97316'
+              ctx.shadowBlur = 15
+              ctx.strokeStyle = '#FDE68A'
+              ctx.lineWidth = Math.max(3, r * 0.055)
+              ctx.beginPath()
+              ctx.moveTo(-r * 0.18, 0)
+              ctx.lineTo(r * 1.9, 0)
+              ctx.stroke()
+              ctx.fillStyle = '#FB923C'
+              ctx.beginPath()
+              ctx.moveTo(r * 2.36, 0)
+              ctx.lineTo(r * 1.82, -r * 0.18)
+              ctx.lineTo(r * 1.94, 0)
+              ctx.lineTo(r * 1.82, r * 0.18)
+              ctx.closePath()
+              ctx.fill()
+              ctx.shadowBlur = 0
+              ctx.restore()
+            }
             break
           }
 

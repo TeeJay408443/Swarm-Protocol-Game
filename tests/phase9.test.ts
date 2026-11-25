@@ -1454,12 +1454,30 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getAreaBossTemplateForWave('molten_starforge', 20).name, 'Infero Champion')
     assert.equal(MOLTEN_STARFORGE_FINAL_BOSS_ID, 'boss_a3_20')
     assert.equal(getAreaFinalBossHp('molten_starforge'), 1200000)
+    const areaThreeEnemyIds = AREA_THREE_ENEMIES.map((enemy) => enemy.id)
+    assert.equal(new Set(areaThreeEnemyIds).size, AREA_THREE_ENEMIES.length)
+    assert.ok(areaThreeEnemyIds.every((id) => id.startsWith('ene_a3_')))
+    assert.ok(areaThreeEnemyIds.every((id) => !AREA_TWO_ENEMIES.some((enemy) => enemy.id === id)))
+    assert.ok(areaThreeEnemyIds.every((id) => !enemies.some((enemy) => enemy.id === id)))
+    for (let wave = 1; wave <= AREA_THREE_MAX_WAVE; wave++) {
+      for (const roll of [0, 0.2, 0.5, 0.8, 0.999]) {
+        const selected = selectAreaEnemyTemplateForWave('molten_starforge', wave, {
+          roll,
+          subRoll: 0.75,
+          canSpawnMiniBoss: true
+        })
+        assert.ok(
+          areaThreeEnemyIds.includes(selected.template.id),
+          `Wave ${wave} must use a unique Starforge enemy, got ${selected.template.id}`
+        )
+      }
+    }
     const inferoCutscene = getAreaFinalBossCutsceneTheme('molten_starforge')
     assert.equal(inferoCutscene.durationSeconds, 8.2)
     assert.equal(inferoCutscene.warningCriticalText, 'THE FIRST FIRE TAKES FLIGHT')
-    assert.equal(getInferoChampionAttackKind(1, 0), 'tracking_strikes')
-    assert.equal(getInferoChampionAttackKind(2, 2), 'singularity_grid')
-    assert.equal(getInferoChampionAttackKind(3, 2), 'bullet_hell')
+    assert.equal(getInferoChampionAttackKind(1, 0), 'inferno_spear_volley')
+    assert.equal(getInferoChampionAttackKind(2, 3), 'singularity_grid')
+    assert.equal(getInferoChampionAttackKind(3, 3), 'bullet_hell')
     assert.equal(getAreaThreeBossBuff(15).damageReduction, 0.42)
     assert.equal(shouldSpawnRegularEnemiesInWave(15, false, false, 'molten_starforge'), false)
     assert.equal(shouldSpawnRegularEnemiesInWave(20, false, false, 'molten_starforge'), false)
@@ -1475,6 +1493,37 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(getWave15CutsceneTheme('molten_starforge').kind === 'w15_starforge')
     assert.equal(getWave15BossAttackKind('primordial_starforge', 1, 0), 'pursuit_beam')
     assert.equal(getWave15BossAttackKind('primordial_starforge', 3, 0), 'singularity_grid')
+  })
+
+  it('telegraphs the blazing spear lanes and fires repeated projectiles from the sides', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1320,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.shootCooldown = 100
+    boss.specialCooldown = 100
+    boss.isSpawning = false
+    boss.cutsceneDelayTimer = 0
+
+    const attack = boss.spawnTelegraphedAttack('inferno_spear_volley')!
+    assert.equal(attack.warningLabel, 'BLAZING SPEAR // SIDE VOLLEY')
+    assert.equal(attack.projectileLanes?.length, 3)
+    assert.ok(attack.gridLines?.length === 3)
+    assert.equal(attack.hasTriggered, false)
+
+    boss.update(1.46, player)
+    assert.equal(attack.hasTriggered, true)
+    assert.equal(boss.projectiles.length, 3)
+    assert.ok(boss.projectiles.every((projectile) => projectile.color === '#FB923C' || projectile.color === '#FDE047'))
+
+    boss.update(0.35, player)
+    assert.equal(boss.projectiles.length, 6)
   })
 
   it('keeps Infero Champion circling outside body-contact range during its entrance and fight', () => {

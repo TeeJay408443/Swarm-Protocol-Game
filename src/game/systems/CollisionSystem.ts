@@ -9,6 +9,7 @@ import { Enemy } from '../entities/Enemy'
 import { Projectile } from '../entities/Projectile'
 import { Coin } from '../entities/Coin'
 import { Collision, Rectangle, Circle } from '../utils/collision'
+import { GAME_ARENA_SIZE } from '../constants'
 
 export interface CollisionEvent {
   type: 'player-enemy' | 'player-projectile' | 'player-coin' | 
@@ -44,8 +45,8 @@ export class CollisionSystem {
   private worldBounds: Rectangle = {
     x: 0,
     y: 0,
-    width: 2000,
-    height: 2000
+    width: GAME_ARENA_SIZE,
+    height: GAME_ARENA_SIZE
   }
   
   /** Performance optimization */

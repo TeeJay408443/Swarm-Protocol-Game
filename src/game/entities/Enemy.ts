@@ -6,6 +6,7 @@
 import { Vector2 } from '../utils/vector'
 import { Camera } from '../engine/Camera'
 import { GAME_CONFIG } from '../../config/gameConstants'
+import { GAME_ARENA_SIZE } from '../constants'
 import {
   ASTRAL_SCOURGE_PHASE_ONE_HP,
   ASTRAL_SCOURGE_PHASE_TWO_CUTSCENE_SECONDS,
@@ -1237,17 +1238,22 @@ export class Enemy {
     }
 
     return {
-      x: axisLimits(view.left, view.right, 2000, this.width),
-      y: axisLimits(view.top, view.bottom, 2000, this.height)
+      x: axisLimits(view.left, view.right, GAME_ARENA_SIZE, this.width),
+      y: axisLimits(view.top, view.bottom, GAME_ARENA_SIZE, this.height)
     }
   }
 
   private getInferoViewportBounds(): { left: number; right: number; top: number; bottom: number } {
-    const view = this.visibleWorldBounds ?? { left: 0, right: 2000, top: 0, bottom: 2000 }
-    const left = Math.max(0, Math.min(2000, view.left))
-    const right = Math.max(left, Math.min(2000, view.right))
-    const top = Math.max(0, Math.min(2000, view.top))
-    const bottom = Math.max(top, Math.min(2000, view.bottom))
+    const view = this.visibleWorldBounds ?? {
+      left: 0,
+      right: GAME_ARENA_SIZE,
+      top: 0,
+      bottom: GAME_ARENA_SIZE
+    }
+    const left = Math.max(0, Math.min(GAME_ARENA_SIZE, view.left))
+    const right = Math.max(left, Math.min(GAME_ARENA_SIZE, view.right))
+    const top = Math.max(0, Math.min(GAME_ARENA_SIZE, view.top))
+    const bottom = Math.max(top, Math.min(GAME_ARENA_SIZE, view.bottom))
     return { left, right, top, bottom }
   }
 
@@ -1257,6 +1263,16 @@ export class Enemy {
       x: Math.max(limits.x.min, Math.min(limits.x.max, center.x)),
       y: Math.max(limits.y.min, Math.min(limits.y.max, center.y))
     }
+  }
+
+  private getInferoArenaCenter(): Vector2 {
+    if (this.arenaBounds) {
+      return {
+        x: this.arenaBounds.left + this.arenaBounds.width / 2,
+        y: this.arenaBounds.top + this.arenaBounds.height / 2
+      }
+    }
+    return { x: GAME_ARENA_SIZE / 2, y: GAME_ARENA_SIZE / 2 }
   }
 
   private getInferoMinimumPlayerDistance(): number {
@@ -1928,8 +1944,8 @@ export class Enemy {
     if (!targetPos) return null
 
     this.aoeCounter++
-    const clampedX = Math.max(64, Math.min(2000 - 64, targetPos.x))
-    const clampedY = Math.max(64, Math.min(2000 - 64, targetPos.y))
+    const clampedX = Math.max(64, Math.min(GAME_ARENA_SIZE - 64, targetPos.x))
+    const clampedY = Math.max(64, Math.min(GAME_ARENA_SIZE - 64, targetPos.y))
     const radius = this.isBoss ? 96 : 84
     const flightDuration = this.isBoss ? 1.35 : 1.45
 
@@ -2120,12 +2136,9 @@ export class Enemy {
 
     if (kind === 'infero_spinning_lattice' && this.isInferoChampion) {
       const view = this.getInferoViewportBounds()
-      const centerLimits = this.getInferoCenterLimits()
-      const inferoLaunchX = (centerLimits.x.min + centerLimits.x.max) / 2
-      const inferoLaunchY = Math.max(
-        centerLimits.y.min,
-        Math.min(centerLimits.y.max, (centerLimits.y.min + centerLimits.y.max) / 2 - 150)
-      )
+      const arenaCenter = this.getInferoArenaCenter()
+      const inferoLaunchX = arenaCenter.x
+      const inferoLaunchY = arenaCenter.y
       const laserLength = Math.max(
         900,
         Math.hypot(view.right - view.left, view.bottom - view.top) * 1.35
@@ -2510,8 +2523,14 @@ export class Enemy {
       }
     } else if (kind === 'singularity_grid') {
       // Phase 3 / DoG Cosmic Laser Wall Matrix: 2 vertical + 2 horizontal full-arena laser strips forming 9 safe cells
-      const defaultLeft = Math.max(24, Math.min(2000 - 1280 - 24, targetCenter.x - 640))
-      const defaultTop = Math.max(24, Math.min(2000 - 720 - 24, targetCenter.y - 360))
+      const defaultLeft = Math.max(
+        24,
+        Math.min(GAME_ARENA_SIZE - 1280 - 24, targetCenter.x - 640)
+      )
+      const defaultTop = Math.max(
+        24,
+        Math.min(GAME_ARENA_SIZE - 720 - 24, targetCenter.y - 360)
+      )
       const bounds: BossArenaBounds = this.arenaBounds ?? {
         left: defaultLeft,
         top: defaultTop,
@@ -3409,8 +3428,8 @@ export class Enemy {
    */
   private clampToBounds(): void {
     const padding = 24
-    this.x = Math.max(padding, Math.min(this.x, 2000 - this.width - padding))
-    this.y = Math.max(padding, Math.min(this.y, 2000 - this.height - padding))
+    this.x = Math.max(padding, Math.min(this.x, GAME_ARENA_SIZE - this.width - padding))
+    this.y = Math.max(padding, Math.min(this.y, GAME_ARENA_SIZE - this.height - padding))
   }
 
   /**
@@ -6435,7 +6454,7 @@ export function getInferoSpinningGridProjectilePaths(
   pulseIndex: number,
   spokeCount: number,
   speed: number,
-  duration = 1.25
+  duration = 2
 ): Vector2[][] {
   const step = 0.08
   return Array.from({ length: spokeCount }, (_, index) => {
@@ -6707,7 +6726,7 @@ export function checkBossTelegraphHit(
  */
 export function resolveEnemyCollisions(
   enemies: Enemy[],
-  arenaSize = 2000,
+  arenaSize = GAME_ARENA_SIZE,
   iterations = 2
 ): void {
   const active: Enemy[] = []

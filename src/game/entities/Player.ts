@@ -8,6 +8,7 @@ import { Camera } from '../engine/Camera'
 import { GAME_CONFIG } from '../../config/gameConstants'
 import { HeroesRow } from '../../types/database'
 import { drawWorldWeaponSprite, getWeaponVisualBehavior } from '../weaponVisuals'
+import { GAME_ARENA_SIZE } from '../constants'
 
 export interface PlayerOptions {
   x?: number
@@ -172,8 +173,8 @@ export class Player {
     
     // Apply movement
     this.velocity = Vector2.multiply(movement, this.speed)
-    this.x = Math.max(0, Math.min(2000 - this.width, this.x + this.velocity.x * deltaTime))
-    this.y = Math.max(0, Math.min(2000 - this.height, this.y + this.velocity.y * deltaTime))
+    this.x = Math.max(0, Math.min(GAME_ARENA_SIZE - this.width, this.x + this.velocity.x * deltaTime))
+    this.y = Math.max(0, Math.min(GAME_ARENA_SIZE - this.height, this.y + this.velocity.y * deltaTime))
     
     // Update cooldowns
     if (this.attackCooldown > 0) {

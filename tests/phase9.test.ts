@@ -138,6 +138,7 @@ import { Collision } from '../src/game/utils/collision'
 import { ScoreManager } from '../src/game/ScoreManager'
 import { XPManager } from '../src/game/XPManager'
 import { WaveManager } from '../src/game/WaveManager'
+import { GAME_ARENA_SIZE } from '../src/game/constants'
 import { isVisiblePlayerWeaponId, Player } from '../src/game/entities/Player'
 import {
   BossArenaBounds,
@@ -1564,6 +1565,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(boss.projectiles.length, 0, 'generic projectile fans must be disabled')
     const attack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
     assert.equal(attack.beamCount, 2)
+    assert.equal(attack.inferoLaunchX, GAME_ARENA_SIZE / 2)
+    assert.equal(attack.inferoLaunchY, GAME_ARENA_SIZE / 2)
     assert.equal(attack.gridLines?.length, 2)
     assert.ok(attack.gridLines?.every((laser) => laser.x1 === attack.x && laser.y1 === attack.y))
     const predictedPaths = getInferoSpinningGridProjectilePaths(
@@ -1571,6 +1574,13 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     assert.equal(predictedPaths.length, 6, 'every fireball needs a visible trajectory indicator')
     assert.ok(predictedPaths.every((path) => path.length > 10 && path[0].x === attack.x && path[0].y === attack.y))
+    assert.ok(
+      Math.hypot(
+        predictedPaths[0][predictedPaths[0].length - 1].x - attack.x,
+        predictedPaths[0][predictedPaths[0].length - 1].y - attack.y
+      ) > 500,
+      'projectile trajectory indicators should extend far enough to read'
+    )
     assert.equal(checkBossTelegraphHit(attack, { x: attack.x, y: attack.y, radius: 12 }), false)
     for (let frame = 0; frame < 240 && !attack.hasTriggered; frame++) boss.update(0.05, player)
     assert.equal(attack.hasTriggered, true)

@@ -7,6 +7,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { Camera } from '../../../game/engine/Camera'
+import { GAME_ARENA_SIZE as ARENA_SIZE } from '../../../game/constants'
 import { InputManager } from '../../../game/engine/InputManager'
 import { isVisiblePlayerWeaponId, Player } from '../../../game/entities/Player'
 import {
@@ -860,8 +861,6 @@ interface DashAfterimage {
   timer: number
   duration: number
 }
-
-const ARENA_SIZE = 2000
 
 const GameContainer: React.FC<GameContainerProps> = ({
   onBack,
@@ -5242,6 +5241,18 @@ const GameContainer: React.FC<GameContainerProps> = ({
             })
             camera.updateWithLerp(camFrame.focusX, camFrame.focusY, 0.24)
             cutsceneZoom = camFrame.zoom
+          } else if (
+            enemiesRef.current.some(
+              (e) =>
+                e.isInferoChampion &&
+                e.isAlive &&
+                e.telegraphs.some((telegraph) => telegraph.kind === 'infero_spinning_lattice')
+            )
+          ) {
+            const inferoArenaCenter = { x: ARENA_SIZE / 2, y: ARENA_SIZE / 2 }
+            const focusX = (updatedCenter.x + inferoArenaCenter.x) / 2
+            const focusY = (updatedCenter.y + inferoArenaCenter.y) / 2
+            camera.updateWithLerp(focusX, focusY, 0.12)
           } else if (bossArenaRef.current) {
             const ba = bossArenaRef.current
             camera.update(ba.left + ba.width / 2, ba.top + ba.height / 2)

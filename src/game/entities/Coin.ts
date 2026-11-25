@@ -6,6 +6,7 @@
 import { Vector2 } from '../utils/vector'
 import { Camera } from '../engine/Camera'
 import { Easing } from '../utils/easing'
+import { GAME_ARENA_SIZE } from '../constants'
 
 export type CoinType = 'Bronze' | 'Silver' | 'Gold' | 'Platinum'
 
@@ -63,9 +64,9 @@ export class Coin {
   
   /** Bounds for spawning */
   private minX: number = 0
-  private maxX: number = 2000
+  private maxX: number = GAME_ARENA_SIZE
   private minY: number = 0
-  private maxY: number = 2000
+  private maxY: number = GAME_ARENA_SIZE
 
   constructor(options: CoinOptions = {}) {
     this.x = options.x || 0

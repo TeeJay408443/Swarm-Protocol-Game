@@ -9,6 +9,7 @@ import { Coin } from '../entities/Coin'
 import { WaveManager } from '../WaveManager'
 import { enemies as seedEnemies } from '../../db/seedData'
 import { EnemiesRow } from '../../types/database'
+import { GAME_ARENA_SIZE } from '../constants'
 
 export interface SpawnPoint {
   x: number
@@ -83,8 +84,8 @@ export class SpawnSystem {
     this.worldBounds = {
       minX: 0,
       minY: 0,
-      maxX: 2000,
-      maxY: 2000
+      maxX: GAME_ARENA_SIZE,
+      maxY: GAME_ARENA_SIZE
     }
     
     // Initialize settings

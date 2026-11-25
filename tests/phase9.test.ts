@@ -153,7 +153,7 @@ import {
   getAstralOrbitalGridLines,
   getAstralScourgePhaseTwoAttackKind,
   getInferoChampionAttackKind,
-  getInferoSpinningGridProjectilePaths,
+  getInferoSpinningVolleyLines,
   getAstralTargetedLaserLines,
   getWave15BossAttackKind,
   getRotatingCrossLaserSegments,
@@ -1458,8 +1458,9 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     assert.equal(getAreaBossTemplateForWave('molten_starforge', 20).name, 'Infero Champion')
     assert.equal(MOLTEN_STARFORGE_FINAL_BOSS_ID, 'boss_a3_20')
-    assert.equal(getAreaFinalBossHp('molten_starforge'), 1200000)
-    assert.equal(getWave15BossCombatProfile('molten_starforge').damageReduction, 0.4)
+    assert.equal(getAreaFinalBossHp('molten_starforge'), 700000)
+    assert.equal(getWave15BossCombatProfile('molten_starforge').totalPhases, 2)
+    assert.equal(getWave15BossCombatProfile('molten_starforge').damageReduction, 0.22)
     const areaThreeEnemyIds = AREA_THREE_ENEMIES.map((enemy) => enemy.id)
     assert.equal(new Set(areaThreeEnemyIds).size, AREA_THREE_ENEMIES.length)
     assert.ok(areaThreeEnemyIds.every((id) => id.startsWith('ene_a3_')))
@@ -1483,8 +1484,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(inferoCutscene.warningCriticalText, 'THE FIRST FIRE TAKES FLIGHT')
     assert.equal(getInferoChampionAttackKind(1, 0), 'inferno_spear_volley')
     assert.equal(getInferoChampionAttackKind(2, 3), 'inferno_spear_volley')
-    assert.equal(getInferoChampionAttackKind(3, 3), 'infero_underflame_swoops')
-    for (const phase of [1, 2, 3]) {
+    assert.equal(getInferoChampionAttackKind(3, 3), getInferoChampionAttackKind(2, 3))
+    for (const phase of [1, 2]) {
       const cycle = Array.from({ length: 7 }, (_, index) =>
         getInferoChampionAttackKind(phase, index)
       )
@@ -1541,7 +1542,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const initialBossX = boss.getCenter().x
     const attack = boss.spawnTelegraphedAttack('inferno_spear_volley')!
     assert.ok(attack.warningLabel?.startsWith('BLAZING SPEAR BARRAGE //'))
-    assert.ok(attack.projectileCount !== undefined && attack.projectileCount >= 15 && attack.projectileCount <= 20)
+    assert.ok(attack.projectileCount !== undefined && attack.projectileCount >= 18 && attack.projectileCount <= 22)
     assert.equal(attack.projectileLanes?.length, attack.projectileCount)
     assert.equal(attack.gridLines?.length, attack.projectileCount)
     assert.equal(attack.hasTriggered, false)
@@ -1703,7 +1704,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     }
   })
 
-  it('keeps Infero visible when camera bounds change and uses rotating, damaging lasers with curved fire grids', () => {
+  it('keeps Infero visible and fires four warned, outward-moving laser volleys from a fireball', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
     const boss = new Enemy({
@@ -1719,44 +1720,40 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.update(0.05, player)
     assert.equal(boss.projectiles.length, 0, 'generic projectile fans must be disabled')
     const attack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
-    assert.equal(attack.beamCount, 2)
+    assert.ok(attack.beamCount! >= 8 && attack.beamCount! <= 10)
+    assert.equal(attack.gridPulseCount, 4)
     assert.equal(attack.inferoLaunchX, GAME_ARENA_SIZE / 2)
     assert.equal(attack.inferoLaunchY, GAME_ARENA_SIZE / 2)
-    assert.equal(attack.gridLines?.length, 2)
+    assert.equal(attack.gridLines?.length, attack.beamCount)
     assert.ok(attack.gridLines?.every((laser) => laser.x1 === attack.x && laser.y1 === attack.y))
-    const predictedPaths = getInferoSpinningGridProjectilePaths(
-      { x: attack.x, y: attack.y }, attack.angle!, 0, 6, 275
+    const movedLines = getInferoSpinningVolleyLines(
+      { x: attack.x, y: attack.y },
+      attack.projectileLanes!,
+      160,
+      attack.length!
     )
-    assert.equal(predictedPaths.length, 6, 'every fireball needs a visible trajectory indicator')
-    assert.ok(predictedPaths.every((path) => path.length > 10 && path[0].x === attack.x && path[0].y === attack.y))
-    assert.ok(
-      Math.hypot(
-        predictedPaths[0][predictedPaths[0].length - 1].x - attack.x,
-        predictedPaths[0][predictedPaths[0].length - 1].y - attack.y
-      ) > 500,
-      'projectile trajectory indicators should extend far enough to read'
-    )
+    assert.equal(movedLines.length, attack.beamCount)
+    assert.ok(movedLines.some((line, index) =>
+      Math.hypot(line.x1 - attack.gridLines![index].x1, line.y1 - attack.gridLines![index].y1) > 150
+    ), 'laser paths should advance outward from the boss')
     assert.equal(checkBossTelegraphHit(attack, { x: attack.x, y: attack.y, radius: 12 }), false)
     for (let frame = 0; frame < 240 && !attack.hasTriggered; frame++) boss.update(0.05, player)
     assert.equal(attack.hasTriggered, true)
     assert.ok(Math.abs(boss.getCenter().x - attack.inferoLaunchX!) < 50)
-    const startAngle = attack.angle!
-    boss.update(0.1, player)
-    assert.ok(attack.angle! > startAngle)
+    assert.equal(attack.gridPulseFiring, false, 'the first volley should begin with a warning')
+    for (let frame = 0; frame < 20 && !attack.gridPulseFiring; frame++) boss.update(0.05, player)
+    assert.equal(attack.gridPulseFiring, true)
     const line = attack.gridLines![0]
     assert.equal(checkBossTelegraphHit(attack, {
       x: (line.x1 + line.x2) / 2, y: (line.y1 + line.y2) / 2, radius: 12
     }), true)
-    assert.equal(checkBossTelegraphHit(attack, {
-      x: attack.x + Math.cos(attack.angle! + Math.PI / 4) * 150,
-      y: attack.y + Math.sin(attack.angle! + Math.PI / 4) * 150, radius: 12
-    }), false)
-    for (let frame = 0; frame < 14; frame++) boss.update(0.05, player)
-    const fireballs = boss.projectiles.filter((projectile) => projectile.isInferoFireball)
-    assert.ok(fireballs.length >= 6)
-    assert.ok(fireballs.some((projectile) => projectile.curveTurnRate! > 0))
-    assert.ok(fireballs.some((projectile) => projectile.curveTurnRate! < 0))
-    assert.ok(fireballs.some((projectile) => projectile.trailParticles!.length > 0))
+    const firstShotIndex = attack.gridPulseIndex
+    for (let frame = 0; frame < 220 && boss.telegraphs.includes(attack); frame++) {
+      boss.update(0.05, player)
+    }
+    assert.ok((attack.gridPulseIndex ?? 0) >= 3, 'the move should fire all four laser shots')
+    assert.equal(attack.gridPulseCount, 4)
+    assert.notEqual(attack.gridPulseIndex, firstShotIndex)
     for (const nextView of [view, { left: 400, right: 1200, top: 350, bottom: 1150 }]) {
       boss.setVisibleWorldBounds(nextView)
       for (let frame = 0; frame < 120; frame++) {
@@ -1767,6 +1764,67 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
         assert.ok(center.y - boss.height / 2 >= nextView.top)
         assert.ok(center.y + boss.height / 2 <= nextView.bottom)
       }
+    }
+  })
+
+  it('keeps Infero to two phases, softens its durability, and buffs the phase-two attacks', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.maxHealth = 1000
+    boss.health = 510
+    boss.damageReduction = 0
+    boss.damageScale = 1
+    boss.takeDamage(20)
+    assert.equal(boss.bossPhase, 2)
+    assert.equal(boss.isEnraged, true)
+    assert.equal(boss.health, 500)
+    boss.health = 300
+    boss.takeDamage(1)
+    assert.equal(boss.bossPhase, 2, 'Infero must not enter a third phase below one-third health')
+
+    const spearVolley = boss.spawnTelegraphedAttack('inferno_spear_volley')!
+    assert.ok(spearVolley.projectileCount! >= 21 && spearVolley.projectileCount! <= 25)
+    const spinAttack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
+    assert.ok(spinAttack.beamCount! >= 9 && spinAttack.beamCount! <= 10)
+    assert.equal(spinAttack.gridPulseCount, 5)
+    assert.equal(spinAttack.gridLines?.length, spinAttack.beamCount)
+    assert.ok(spinAttack.damage > spearVolley.damage * 0.75)
+    const lanceAttack = boss.spawnTelegraphedAttack('infero_rebound_lances')!
+    assert.equal(lanceAttack.lanceRoundCount, 3)
+    assert.equal(lanceAttack.projectileCount, 12)
+    const underflameAttack = boss.spawnTelegraphedAttack('infero_underflame_swoops')!
+    assert.ok(underflameAttack.swoopCount! >= 4 && underflameAttack.swoopCount! <= 5)
+
+    const phaseOneBoss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    phaseOneBoss.isSpawning = false
+    phaseOneBoss.damageScale = 1
+    for (const kind of [
+      'inferno_spear_volley',
+      'infero_aimed_ram',
+      'tracking_strikes',
+      'infero_spinning_lattice',
+      'infero_underflame_swoops',
+      'infero_rebound_lances'
+    ] as const) {
+      const phaseOneDamage = phaseOneBoss.spawnTelegraphedAttack(kind)!.damage
+      const phaseTwoDamage = boss.spawnTelegraphedAttack(kind)!.damage
+      assert.ok(phaseTwoDamage > phaseOneDamage, `${kind} should hit harder in Phase 2`)
     }
   })
 

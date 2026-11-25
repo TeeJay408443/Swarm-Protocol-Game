@@ -6746,7 +6746,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                 health: liveBoss.health,
                 maxHealth: liveBoss.maxHealth,
                 phase: liveBoss.bossPhase,
-                totalPhases: liveBoss.isAstralScourge
+                totalPhases: liveBoss.isAstralScourge || liveBoss.isInferoChampion
                   ? 2
                   : liveBoss.isFinalBoss || liveBoss.isWave15SpecialBoss
                     ? 3

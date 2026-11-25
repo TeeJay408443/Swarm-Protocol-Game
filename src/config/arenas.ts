@@ -329,11 +329,11 @@ export const AREA_THREE_BOSSES: EnemiesRow[] = [
     id: MOLTEN_STARFORGE_FINAL_BOSS_ID,
     name: 'Infero Champion',
     category: 'Boss',
-    hp: 1200000,
+    hp: 700000,
     speed: 0.32,
     coin_value: 900,
     description:
-      'Wave 20 final boss: a winged molten-rock champion crowned in living fire, shifting through three increasingly volatile phases.'
+      'Wave 20 final boss: a winged molten-rock champion crowned in living fire, escalating into a faster two-phase inferno.'
   }
 ]
 
@@ -374,7 +374,7 @@ export function getAreaFinalBossHp(areaId: ArenaId): number {
     return 240000
   }
   if (areaId === 'molten_starforge') {
-    return 1200000
+    return 700000
   }
   return getWave15FinalBossHp(areaId)
 }
@@ -397,7 +397,7 @@ export interface Wave15BossCombatProfile {
   shootCooldownScale: number
   specialCooldownScale: number
   coinMultiplier: number
-  totalPhases: 3
+  totalPhases: number
 }
 
 /**
@@ -589,13 +589,13 @@ export function getWave15BossCombatProfile(areaId: ArenaId): Wave15BossCombatPro
   }
   if (areaId === 'molten_starforge') {
     return {
-      hpMultiplier: 4.1,
+      hpMultiplier: 2.8,
       damageMultiplier: 1.82,
-      damageReduction: 0.4,
+      damageReduction: 0.22,
       shootCooldownScale: 0.62,
       specialCooldownScale: 0.64,
       coinMultiplier: 2.4,
-      totalPhases: 3
+      totalPhases: 2
     }
   }
 

@@ -281,6 +281,7 @@ export interface BossTelegraphAttack {
   gridPulseFireDuration?: number
   gridPulseGapDuration?: number
   gridPulseFiring?: boolean
+  gridPulseTravelSpeed?: number
   gridOffsets?: number[]
   isDiagonalGrid?: boolean
   beamCount?: number
@@ -683,7 +684,7 @@ export class Enemy {
               this.movementPattern = 'orbit'
               this.baseSpeed = 320
               this.speed = 320
-              this.damageReduction = 0.4
+              this.damageReduction = 0.22
               this.enableEnrage = true
             }
           } else if (this.enemyId === 'boss_secret_dog') {
@@ -2255,7 +2256,11 @@ export class Enemy {
     if (kind === 'infero_underflame_swoops' && this.isInferoChampion) {
       const limits = this.getInferoCenterLimits()
       const view = this.getInferoViewportBounds()
-      const swoopCount = 3 + Math.floor(Math.random() * 2)
+      const swoopCount = 3 + Math.floor(Math.random() * 2) + (this.bossPhase >= 2 ? 1 : 0)
+      const swoopInterval =
+        this.bossPhase >= 2
+          ? Math.max(1.75, INFERO_UNDERFLAME_INTERVAL_SECONDS * 0.82)
+          : INFERO_UNDERFLAME_INTERVAL_SECONDS
       const targetX = Math.max(limits.x.min, Math.min(limits.x.max, targetCenter.x))
       const swoopY = Math.max(
         limits.y.min,
@@ -2293,7 +2298,7 @@ export class Enemy {
         swoopTargetY: swoopY,
         swoopY,
         swoopDuration: INFERO_UNDERFLAME_SWOOP_SECONDS,
-        swoopInterval: INFERO_UNDERFLAME_INTERVAL_SECONDS,
+        swoopInterval,
         fireColumns: [column],
         radius: 52,
         chargeTimer: 0,
@@ -2302,7 +2307,7 @@ export class Enemy {
             Math.max(1, this.baseSpeed * 2.4) + 0.2,
         activeTimer: 0,
         activeDuration:
-          (swoopCount - 1) * INFERO_UNDERFLAME_INTERVAL_SECONDS +
+          (swoopCount - 1) * swoopInterval +
           INFERO_UNDERFLAME_SWOOP_SECONDS +
           INFERO_FIRE_COLUMN_HOLD_SECONDS +
           INFERO_FIRE_COLUMN_WARNING_SECONDS +
@@ -2316,15 +2321,18 @@ export class Enemy {
       this.inferoHoverTarget = { x: targetX, y: swoopY }
       this.inferoHoverRetargetTimer = telegraph.chargeDuration + telegraph.activeDuration
     } else if (kind === 'infero_spinning_lattice' && this.isInferoChampion) {
-      const view = this.getInferoViewportBounds()
       const arenaCenter = this.getInferoArenaCenter()
       const inferoLaunchX = arenaCenter.x
       const inferoLaunchY = arenaCenter.y
-      const laserLength = Math.max(
-        900,
-        Math.hypot(view.right - view.left, view.bottom - view.top) * 1.35
-      )
-      const angle = Math.random() * Math.PI * 2
+      const phaseTwo = this.bossPhase >= 2
+      const shotCount = phaseTwo ? 5 : 4
+      const laserCount = phaseTwo
+        ? 9 + Math.floor(Math.random() * 2)
+        : 8 + Math.floor(Math.random() * 3)
+      const warningDuration = phaseTwo ? 0.46 : 0.58
+      const laserTravelDuration = phaseTwo ? 0.34 : 0.4
+      const laserHoldDuration = phaseTwo ? 0.36 : 0.48
+      const pulseCycle = warningDuration + laserTravelDuration + laserHoldDuration
       telegraph = {
         id,
         kind,
@@ -2332,16 +2340,18 @@ export class Enemy {
         y: inferoLaunchY,
         inferoLaunchX,
         inferoLaunchY,
-        angle,
-        turnRate: this.bossPhase >= 3 ? 0.62 : this.bossPhase === 2 ? 0.52 : 0.42,
-        beamCount: 2,
-        length: laserLength,
+        beamCount: laserCount,
+        length: phaseTwo ? 205 : 185,
+        projectileLanes: [],
         radius: 18,
-        gridLines: getInferoSpinningLaserLines(
-          { x: inferoLaunchX, y: inferoLaunchY },
-          angle,
-          laserLength
-        ),
+        gridLines: [],
+        gridPulseCount: shotCount,
+        gridPulseIndex: 0,
+        gridPulseWarningDuration: warningDuration,
+        gridPulseFireDuration: laserTravelDuration,
+        gridPulseGapDuration: laserHoldDuration,
+        gridPulseFiring: false,
+        gridPulseTravelSpeed: phaseTwo ? 570 : 480,
         chargeTimer: 0,
         chargeDuration: Math.max(
           1.65,
@@ -2349,14 +2359,13 @@ export class Enemy {
             Math.max(1, this.baseSpeed) + 0.4
         ),
         activeTimer: 0,
-        activeDuration: 4.8,
+        activeDuration: shotCount * pulseCycle,
         damage: Math.round(24 * Math.max(1, this.damageScale)),
-        pulseTimer: 0,
-        pulseCount: 0,
-        warningLabel: 'FURNACE CROSS // TWO SPINNING LANCES',
+        warningLabel: `FURNACE CORE // ${shotCount} LASER BURSTS`,
         hasTriggered: false,
         hasDamagedPlayer: false
       }
+      this.randomizeInferoSpinningLaserVolley(telegraph, { x: inferoLaunchX, y: inferoLaunchY })
       this.inferoHoverTarget = { x: inferoLaunchX, y: inferoLaunchY }
       this.inferoHoverRetargetTimer = telegraph.chargeDuration + telegraph.activeDuration + 1.2
     } else if (kind === 'infero_aimed_ram' && this.isInferoChampion) {
@@ -2385,8 +2394,11 @@ export class Enemy {
       const ramTargetX = bossCenter.x + direction.x * travelDistance
       const ramTargetY = bossCenter.y + direction.y * travelDistance
       const ramDuration = Math.max(
-        0.48,
-        Math.min(1.05, travelDistance / Math.max(1, this.baseSpeed * 8))
+        this.bossPhase >= 2 ? 0.38 : 0.48,
+        Math.min(
+          1.05,
+          travelDistance / Math.max(1, this.baseSpeed * (this.bossPhase >= 2 ? 9.5 : 8))
+        )
       )
       telegraph = {
         id,
@@ -2405,7 +2417,7 @@ export class Enemy {
         ramDuration,
         radius: 62,
         chargeTimer: 0,
-        chargeDuration: 0.9,
+        chargeDuration: this.bossPhase >= 2 ? 0.72 : 0.9,
         activeTimer: 0,
         activeDuration: ramDuration,
         damage: Math.round(42 * Math.max(1, this.damageScale)),
@@ -2414,8 +2426,9 @@ export class Enemy {
         hasDamagedPlayer: false
       }
     } else if (kind === 'infero_rebound_lances' && this.isInferoChampion) {
-      const lanceCount = 10
-      const desiredRoundCount = 2 + Math.floor(Math.random() * 2)
+      const phaseTwo = this.bossPhase >= 2
+      const lanceCount = phaseTwo ? 12 : 10
+      const desiredRoundCount = phaseTwo ? 3 : 2 + Math.floor(Math.random() * 2)
       const limits = this.getInferoCenterLimits()
       const arenaCenter = this.getInferoArenaCenter()
       const targetAtStart = this.target?.getCenter() ?? bossCenter
@@ -2505,7 +2518,8 @@ export class Enemy {
       }
     } else if (kind === 'inferno_spear_volley' && this.isInferoChampion) {
       const sideMode: ClosingSideLaserMode = Math.random() < 0.5 ? 'left' : 'right'
-      const projectileCount = 15 + Math.floor(Math.random() * 6)
+      const projectileCount =
+        18 + Math.floor(Math.random() * 5) + (this.bossPhase >= 2 ? 3 : 0)
       const view = this.getInferoViewportBounds()
       const centerLimits = this.getInferoCenterLimits()
       const edgeX = sideMode === 'left' ? view.left + 12 : view.right - 12
@@ -2979,7 +2993,7 @@ export class Enemy {
         chargeTimer: 0,
         chargeDuration: 0.05,
         activeTimer: 0,
-        activeDuration: 3.15,
+        activeDuration: this.isInferoChampion && this.bossPhase >= 2 ? 3.2 : 3.15,
         damage: Math.round(28 * Math.max(1, this.damageScale * 0.7)),
         hasTriggered: false,
         hasDamagedPlayer: false
@@ -3176,7 +3190,7 @@ export class Enemy {
     if (this.isInferoChampion) {
       const inferoWarningLabels: Partial<Record<BossAttackKind, string>> = {
         tracking_strikes: 'CINDER TRACK // MOVE BEFORE THE IMPACT',
-        infero_spinning_lattice: 'FURNACE CROSS // DODGE THE SPINNING LANCES',
+        infero_spinning_lattice: 'FURNACE CORE // DODGE THE OUTWARD LASERS',
         infero_underflame_swoops: 'UNDERFLAME DIVE // WATCH FOR THE FIRE COLUMN',
         infero_aimed_ram: 'INFERNO RAM // DODGE THE LOCKED LINE',
         infero_rebound_lances: 'EMBER LANCE FAN // WATCH FOR THE RE-THROW'
@@ -3185,6 +3199,10 @@ export class Enemy {
         kind === 'inferno_spear_volley'
           ? `BLAZING SPEAR BARRAGE // ${telegraph.projectileCount ?? 15} SPEARS`
           : inferoWarningLabels[kind] ?? 'INFERO CHAMPION // AERIAL STRIKE'
+    }
+
+    if (this.isInferoChampion && this.bossPhase >= 2) {
+      telegraph.damage = Math.round(telegraph.damage * 1.18)
     }
 
     this.telegraphs.push(telegraph)
@@ -3220,7 +3238,7 @@ export class Enemy {
       y: lane.y,
       width: 34,
       height: 12,
-      speed: this.bossPhase >= 3 ? 590 : 535,
+      speed: this.bossPhase >= 2 ? 625 : 535,
       direction,
       damage: attack.damage,
       color: pulseIndex % 2 === 0 ? '#FB923C' : '#FDE047',
@@ -3232,13 +3250,41 @@ export class Enemy {
     })
   }
 
+  private randomizeInferoSpinningLaserVolley(
+    attack: BossTelegraphAttack,
+    origin: Vector2
+  ): void {
+    const count = attack.beamCount ?? 8
+    const firstAngle = Math.random() * Math.PI * 2
+    const lanes = Array.from({ length: count }, (_, index) => {
+      const angle =
+        firstAngle +
+        (index / count) * Math.PI * 2 +
+        (Math.random() - 0.5) * (Math.PI / count)
+      return {
+        x: origin.x,
+        y: origin.y,
+        directionX: Math.cos(angle),
+        directionY: Math.sin(angle),
+        delay: 0
+      }
+    })
+    attack.projectileLanes = lanes
+    attack.gridLines = getInferoSpinningVolleyLines(
+      origin,
+      lanes,
+      0,
+      attack.length ?? 185
+    )
+  }
+
   private launchInferoReboundLances(
     attack: BossTelegraphAttack,
     bossCenter: Vector2
   ): void {
     const lanceCount = attack.projectileCount ?? 10
     const firstAngle = Math.random() * Math.PI * 2
-    const outboundSpeed = 760
+    const outboundSpeed = this.bossPhase >= 2 ? 850 : 760
     attack.lanceVolleyCount = (attack.lanceVolleyCount ?? 0) + 1
     for (let index = 0; index < lanceCount; index++) {
       const angle = firstAngle + (index / lanceCount) * Math.PI * 2
@@ -3260,7 +3306,7 @@ export class Enemy {
         inferoLancePauseDuration: 0.2 + index * 0.045,
         inferoLanceAimDuration: 0.52 + (index % 4) * 0.06,
         inferoLanceOutboundSpeed: outboundSpeed,
-        inferoLanceLaunchSpeed: 735,
+        inferoLanceLaunchSpeed: this.bossPhase >= 2 ? 820 : 735,
         trailTimer: 0,
         trailParticles: []
       })
@@ -3325,34 +3371,6 @@ export class Enemy {
     projectile.inferoLancePhaseTimer = phaseTimer
   }
 
-  private launchInferoSpinningGridVolley(
-    attack: BossTelegraphAttack,
-    bossCenter: Vector2,
-    pulseIndex: number
-  ): void {
-    const spokeCount = this.bossPhase >= 3 ? 7 : 6
-    const baseAngle = (attack.angle ?? 0) + pulseIndex * 0.31
-    for (let index = 0; index < spokeCount; index++) {
-      const angle = baseAngle + (index / spokeCount) * Math.PI * 2
-      this.projectiles.push({
-        x: bossCenter.x,
-        y: bossCenter.y,
-        width: 13,
-        height: 13,
-        speed: this.bossPhase >= 3 ? 310 : 275,
-        direction: { x: Math.cos(angle), y: Math.sin(angle) },
-        damage: Math.round(16 * Math.max(1, this.damageScale)),
-        color: index % 2 === 0 ? '#FB923C' : '#FDE047',
-        lifetime: 0,
-        maxLifetime: 6,
-        curveTurnRate: index % 2 === 0 ? 0.38 : -0.38,
-        isInferoFireball: true,
-        trailTimer: 0,
-        trailParticles: []
-      })
-    }
-  }
-
   /**
    * Advances telegraph windup timers, tracking mechanics, bullet hell curtains, and active sweeps
    */
@@ -3389,14 +3407,14 @@ export class Enemy {
           firstColumn.height = Math.max(0, view.bottom - view.top)
         }
       } else if (t.kind === 'infero_spinning_lattice') {
-        t.x = bossCenter.x
-        t.y = bossCenter.y
+        t.x = t.inferoLaunchX ?? bossCenter.x
+        t.y = t.inferoLaunchY ?? bossCenter.y
         if (!t.hasTriggered) {
-          t.angle = (t.angle ?? 0) + (t.turnRate ?? 1.15) * deltaTime * 0.34
-          t.gridLines = getInferoSpinningLaserLines(
-            bossCenter,
-            t.angle,
-            t.length ?? 1500
+          t.gridLines = getInferoSpinningVolleyLines(
+            { x: t.x, y: t.y },
+            t.projectileLanes ?? [],
+            0,
+            t.length ?? 185
           )
         } else if (t.hasDamagedPlayer) {
           t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
@@ -3560,13 +3578,9 @@ export class Enemy {
               column.hasDamagedPlayer = false
             }
           } else if (t.kind === 'infero_spinning_lattice') {
-            t.pulseTimer = 0
-            t.pulseCount = 0
-            t.gridLines = getInferoSpinningLaserLines(
-              bossCenter,
-              t.angle ?? 0,
-              t.length ?? 1500
-            )
+            t.gridPulseIndex = 0
+            t.gridPulseFiring = false
+            this.randomizeInferoSpinningLaserVolley(t, this.getCenter())
           } else if (t.kind === 'cosmic_portal_lunge' && t.portalX !== undefined && t.portalY !== undefined) {
             // Warp worm head cleanly into the dimensional rift and unleash blazing jaw lunge
             this.x = t.portalX - this.width / 2
@@ -3821,19 +3835,38 @@ export class Enemy {
         } else if (t.kind === 'infero_spinning_lattice') {
           t.x = bossCenter.x
           t.y = bossCenter.y
-          t.angle = (t.angle ?? 0) + (t.turnRate ?? 1.15) * deltaTime
-          t.gridLines = getInferoSpinningLaserLines(
-            bossCenter,
-            t.angle,
-            t.length ?? 1500
+          const pulseCount = t.gridPulseCount ?? 4
+          const warningDuration = t.gridPulseWarningDuration ?? 0.58
+          const travelDuration = t.gridPulseFireDuration ?? 0.4
+          const holdDuration = t.gridPulseGapDuration ?? 0.48
+          const cycleDuration = warningDuration + travelDuration + holdDuration
+          const pulseIndex = Math.min(
+            pulseCount - 1,
+            Math.floor(t.activeTimer / Math.max(0.001, cycleDuration))
           )
-          t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
-          if ((t.pulseTimer ?? 0) >= 0.54) {
-            t.pulseTimer = (t.pulseTimer ?? 0) - 0.54
-            const pulseIndex = t.pulseCount ?? 0
-            this.launchInferoSpinningGridVolley(t, bossCenter, pulseIndex)
-            t.pulseCount = pulseIndex + 1
+          if (pulseIndex !== (t.gridPulseIndex ?? 0)) {
+            t.gridPulseIndex = pulseIndex
+            this.randomizeInferoSpinningLaserVolley(t, bossCenter)
           }
+          const pulseElapsed = Math.max(0, t.activeTimer - pulseIndex * cycleDuration)
+          const isFiring =
+            pulseElapsed >= warningDuration &&
+            pulseElapsed < warningDuration + travelDuration + holdDuration
+          const travelElapsed = Math.max(
+            0,
+            Math.min(travelDuration, pulseElapsed - warningDuration)
+          )
+          const offsetDistance = isFiring
+            ? (t.gridPulseTravelSpeed ?? 480) * travelElapsed
+            : 0
+          t.gridPulseFiring = isFiring
+          t.gridLines = getInferoSpinningVolleyLines(
+            bossCenter,
+            t.projectileLanes ?? [],
+            offsetDistance,
+            t.length ?? 185
+          )
+          t.warningLabel = `FURNACE CORE // SHOT ${pulseIndex + 1}/${pulseCount}`
         } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
           const firstWarningDuration = t.gridPulseFirstWarningDuration ?? 0.24
@@ -3901,9 +3934,14 @@ export class Enemy {
           }
         } else if (t.kind === 'tracking_strikes' && t.trackingBlasts) {
           t.spawnTimer = (t.spawnTimer ?? 0) + deltaTime
-          const maxSpawns = 5
-          if ((t.spawnsDone ?? 1) < maxSpawns && t.spawnTimer >= 0.5 && targetCenter) {
-            t.spawnTimer -= 0.5
+          const maxSpawns = this.isInferoChampion && this.bossPhase >= 2 ? 6 : 5
+          const spawnInterval = this.isInferoChampion && this.bossPhase >= 2 ? 0.42 : 0.5
+          if (
+            (t.spawnsDone ?? 1) < maxSpawns &&
+            t.spawnTimer >= spawnInterval &&
+            targetCenter
+          ) {
+            t.spawnTimer -= spawnInterval
             t.spawnsDone = (t.spawnsDone ?? 1) + 1
             t.trackingBlasts.push({
               x: targetCenter.x,
@@ -4181,9 +4219,9 @@ export class Enemy {
       return false
     }
 
-    // Area Final Boss 3-Phase Progression (Phase 2 @ 66% HP, Phase 3 @ 33% HP)
+    // Area final-boss phase gates; Infero deliberately has only two phases.
     if ((this.isFinalBoss || this.isWave15SpecialBoss) && !this.isAstralScourge) {
-      const phase2Threshold = Math.floor(this.maxHealth * 0.66)
+      const phase2Threshold = Math.floor(this.maxHealth * (this.isInferoChampion ? 0.5 : 0.66))
       const phase3Threshold = Math.floor(this.maxHealth * 0.33)
 
       if (this.bossPhase < 2 && prevHealth > phase2Threshold && this.health <= phase2Threshold) {
@@ -4191,7 +4229,15 @@ export class Enemy {
         this.bossPhase = 2
         this.phaseTransitionTimer = 0.85
         this.pendingPhaseAnnouncement = 2
-        if (this.isWormBoss) {
+        if (this.isInferoChampion) {
+          this.isEnraged = true
+          this.speed = this.baseSpeed * 1.16
+          this.damage = Math.round(this.damage * 1.12)
+          this.damageScale *= 1.12
+          this.shootCooldownMax = Math.max(0.62, this.shootCooldownMax * 0.82)
+          this.aoeCooldownMax = Math.max(0.95, this.aoeCooldownMax * 0.82)
+          this.specialCooldownMax = Math.max(1.25, this.specialCooldownMax * 0.72)
+        } else if (this.isWormBoss) {
           this.speed = this.baseSpeed * 1.15
         }
         this.shootCooldownMax = Math.max(0.85, this.shootCooldownMax * 0.86)
@@ -4217,7 +4263,12 @@ export class Enemy {
         return false
       }
 
-      if (this.bossPhase < 3 && prevHealth > phase3Threshold && this.health <= phase3Threshold) {
+      if (
+        !this.isInferoChampion &&
+        this.bossPhase < 3 &&
+        prevHealth > phase3Threshold &&
+        this.health <= phase3Threshold
+      ) {
         this.health = Math.max(1, phase3Threshold)
         this.bossPhase = 3
         this.isEnraged = true
@@ -4737,51 +4788,95 @@ export class Enemy {
       } else if (t.kind === 'infero_spinning_lattice' && t.gridLines) {
         const lines = t.gridLines
         const warningAlpha = 0.25 + chargeProgress * 0.55
+        const isLaserShotActive = Boolean(t.hasTriggered && t.gridPulseFiring)
         ctx.save()
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
+
+        const fireballCenter = camera.worldToScreen(this.getCenter().x, this.getCenter().y)
+        const fireballRadius = (this.width * 0.72 + 20) * camera.zoom
+        const fireballGlow = ctx.createRadialGradient(
+          fireballCenter.x,
+          fireballCenter.y,
+          fireballRadius * 0.22,
+          fireballCenter.x,
+          fireballCenter.y,
+          fireballRadius
+        )
+        fireballGlow.addColorStop(0, 'rgba(255, 247, 237, 0.78)')
+        fireballGlow.addColorStop(0.3, 'rgba(253, 224, 71, 0.45)')
+        fireballGlow.addColorStop(0.72, 'rgba(249, 115, 22, 0.28)')
+        fireballGlow.addColorStop(1, 'rgba(234, 88, 12, 0)')
+        ctx.fillStyle = fireballGlow
+        ctx.beginPath()
+        ctx.arc(fireballCenter.x, fireballCenter.y, fireballRadius, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = '#FDE047'
+        ctx.lineWidth = 3
+        ctx.shadowColor = '#F97316'
+        ctx.shadowBlur = 22
+        ctx.beginPath()
+        ctx.arc(
+          fireballCenter.x,
+          fireballCenter.y,
+          fireballRadius * (0.78 + Math.sin(this.animTime * 7) * 0.04),
+          0,
+          Math.PI * 2
+        )
+        ctx.stroke()
+        for (let flame = 0; flame < 9; flame++) {
+          const angle = this.animTime * (flame % 2 === 0 ? 1.4 : -1.1) + flame * Math.PI * 2 / 9
+          const flameX = fireballCenter.x + Math.cos(angle) * fireballRadius * 0.68
+          const flameY = fireballCenter.y + Math.sin(angle) * fireballRadius * 0.68
+          ctx.fillStyle = flame % 2 === 0 ? '#FFF7ED' : '#FDE047'
+          ctx.shadowBlur = 14
+          ctx.beginPath()
+          ctx.arc(flameX, flameY, 4 + (flame % 3) * 1.5, 0, Math.PI * 2)
+          ctx.fill()
+        }
+
         for (let beamIndex = 0; beamIndex < lines.length; beamIndex++) {
           const line = lines[beamIndex]
           const start = camera.worldToScreen(line.x1, line.y1)
           const end = camera.worldToScreen(line.x2, line.y2)
-          const activeAlpha = t.hasTriggered ? 0.9 : warningAlpha
-          const beamWidth = t.hasTriggered ? 15 : 3 + chargeProgress * 3
+          const activeAlpha = isLaserShotActive ? 0.95 : warningAlpha
+          const beamWidth = isLaserShotActive ? 10 : 3 + chargeProgress * 2
 
-          ctx.setLineDash(t.hasTriggered ? [] : [18, 11])
-          ctx.strokeStyle = `rgba(249, 115, 22, ${t.hasTriggered ? 0.32 : warningAlpha * 0.55})`
-          ctx.lineWidth = t.hasTriggered ? 32 : 10
+          ctx.setLineDash(isLaserShotActive ? [] : [10, 8])
+          ctx.strokeStyle = `rgba(249, 115, 22, ${isLaserShotActive ? 0.42 : warningAlpha * 0.55})`
+          ctx.lineWidth = isLaserShotActive ? 22 : 8
           ctx.shadowColor = '#F97316'
-          ctx.shadowBlur = t.hasTriggered ? 24 : 12
+          ctx.shadowBlur = isLaserShotActive ? 20 : 12
           ctx.beginPath()
           ctx.moveTo(start.x, start.y)
           ctx.lineTo(end.x, end.y)
           ctx.stroke()
 
-          ctx.setLineDash(t.hasTriggered ? [] : [18, 11])
+          ctx.setLineDash(isLaserShotActive ? [] : [10, 8])
           ctx.strokeStyle = `rgba(251, 146, 60, ${activeAlpha})`
           ctx.lineWidth = beamWidth
-          ctx.shadowBlur = t.hasTriggered ? 18 : 0
+          ctx.shadowBlur = isLaserShotActive ? 18 : 0
           ctx.beginPath()
           ctx.moveTo(start.x, start.y)
           ctx.lineTo(end.x, end.y)
           ctx.stroke()
 
-          if (t.hasTriggered) {
+          if (isLaserShotActive) {
             ctx.setLineDash([])
             ctx.strokeStyle = `rgba(254, 240, 138, ${0.9 + Math.sin(this.animTime * 18 + beamIndex) * 0.1})`
-            ctx.lineWidth = 4
+            ctx.lineWidth = 3
             ctx.shadowColor = '#FEF08A'
-            ctx.shadowBlur = 14
+            ctx.shadowBlur = 11
             ctx.beginPath()
             ctx.moveTo(start.x, start.y)
             ctx.lineTo(end.x, end.y)
             ctx.stroke()
 
-            for (let mote = 0; mote < 9; mote++) {
-              const progress = (this.animTime * 0.72 + mote * 0.137 + beamIndex * 0.31) % 1
+            for (let mote = 0; mote < 3; mote++) {
+              const progress = (this.animTime * 0.82 + mote * 0.3 + beamIndex * 0.31) % 1
               const moteX = start.x + (end.x - start.x) * progress
               const moteY = start.y + (end.y - start.y) * progress
-              const moteRadius = 2.2 + Math.sin(this.animTime * 14 + mote) * 1.1
+              const moteRadius = 1.8 + Math.sin(this.animTime * 14 + mote) * 0.8
               ctx.fillStyle = mote % 2 === 0 ? '#FEF08A' : '#FB923C'
               ctx.shadowColor = '#F97316'
               ctx.shadowBlur = 13
@@ -4795,49 +4890,24 @@ export class Enemy {
         ctx.shadowBlur = 0
         const center = camera.worldToScreen(t.x, t.y)
         if (t.hasTriggered && t.activeTimer < t.activeDuration) {
-          const spokeCount = this.bossPhase >= 3 ? 7 : 6
-          const projectileSpeed = this.bossPhase >= 3 ? 310 : 275
-          const paths = getInferoSpinningGridProjectilePaths(
-            { x: t.x, y: t.y },
-            t.angle ?? 0,
-            t.pulseCount ?? 0,
-            spokeCount,
-            projectileSpeed
-          )
-          const secondsToVolley = Math.max(0, 0.54 - (t.pulseTimer ?? 0))
-          ctx.globalAlpha = 0.76
-          ctx.setLineDash([5, 7])
-          ctx.lineWidth = 2
-          ctx.strokeStyle = '#FDE68A'
-          ctx.shadowColor = '#FB923C'
-          ctx.shadowBlur = 7
-          for (const path of paths) {
-            if (path.length < 2) continue
-            const first = camera.worldToScreen(path[0].x, path[0].y)
-            ctx.beginPath()
-            ctx.moveTo(first.x, first.y)
-            for (let pointIndex = 1; pointIndex < path.length; pointIndex++) {
-              const point = camera.worldToScreen(path[pointIndex].x, path[pointIndex].y)
-              ctx.lineTo(point.x, point.y)
-            }
-            ctx.stroke()
-            const endpoint = camera.worldToScreen(path[path.length - 1].x, path[path.length - 1].y)
-            ctx.setLineDash([])
-            ctx.fillStyle = '#FEF3C7'
-            ctx.beginPath()
-            ctx.arc(endpoint.x, endpoint.y, 3.2, 0, Math.PI * 2)
-            ctx.fill()
-            ctx.setLineDash([5, 7])
-          }
-          ctx.setLineDash([])
-          ctx.shadowBlur = 0
-          ctx.globalAlpha = 1
           ctx.fillStyle = 'rgba(28, 25, 23, 0.84)'
-          ctx.fillRect(center.x - 147, center.y + 38, 294, 20)
+          ctx.fillRect(center.x - 135, center.y + 38, 270, 20)
           ctx.fillStyle = '#FDE68A'
           ctx.font = 'bold 10px monospace'
           ctx.textAlign = 'center'
-          ctx.fillText(`CURVED FIRE PATHS • NEXT VOLLEY ${secondsToVolley.toFixed(1)}s`, center.x, center.y + 52)
+          const warningDuration = t.gridPulseWarningDuration ?? 0.58
+          const travelDuration = t.gridPulseFireDuration ?? 0.4
+          const holdDuration = t.gridPulseGapDuration ?? 0.48
+          const pulseCycle = warningDuration + travelDuration + holdDuration
+          const pulseElapsed = t.activeTimer % pulseCycle
+          const remaining = t.gridPulseFiring
+            ? Math.max(0, travelDuration - Math.max(0, pulseElapsed - warningDuration))
+            : Math.max(0, warningDuration - pulseElapsed)
+          ctx.fillText(
+            `${t.gridPulseFiring ? 'LASERS ADVANCING' : 'NEXT LASER BURST'} • ${remaining.toFixed(1)}s`,
+            center.x,
+            center.y + 52
+          )
         }
         ctx.fillStyle = 'rgba(28, 25, 23, 0.9)'
         ctx.fillRect(center.x - 176, center.y - 58, 352, 25)
@@ -7370,6 +7440,28 @@ export function getInferoSpinningLaserLines(
   })
 }
 
+export function getInferoSpinningVolleyLines(
+  center: Vector2,
+  lanes: NonNullable<BossTelegraphAttack['projectileLanes']>,
+  offsetDistance: number,
+  segmentLength: number
+): CosmicLaserWallLine[] {
+  const offset = Math.max(0, offsetDistance)
+  const length = Math.max(0, segmentLength)
+  return lanes.map((lane) => {
+    const startX = center.x + lane.directionX * offset
+    const startY = center.y + lane.directionY * offset
+    return {
+      x1: startX,
+      y1: startY,
+      x2: startX + lane.directionX * length,
+      y2: startY + lane.directionY * length,
+      width: 12,
+      color: '#FB923C'
+    }
+  })
+}
+
 export function getInferoSpinningGridProjectilePaths(
   center: Vector2,
   angle: number,
@@ -7398,35 +7490,26 @@ export function getInferoSpinningGridProjectilePaths(
 
 export function getInferoChampionAttackKind(phase: number, cycleIndex: number): BossAttackKind {
   const cycles: Record<number, BossAttackKind[]> = {
-      1: [
-        'inferno_spear_volley',
-        'infero_aimed_ram',
-        'tracking_strikes',
-        'infero_spinning_lattice',
-        'infero_underflame_swoops',
-        'infero_rebound_lances',
-        'infero_aimed_ram'
-      ],
-      2: [
-        'tracking_strikes',
-        'infero_spinning_lattice',
-        'infero_aimed_ram',
-        'inferno_spear_volley',
-        'infero_underflame_swoops',
-        'infero_rebound_lances',
-        'infero_aimed_ram'
-      ],
-      3: [
-        'infero_spinning_lattice',
-        'inferno_spear_volley',
-        'infero_aimed_ram',
-        'infero_underflame_swoops',
-        'tracking_strikes',
-        'infero_rebound_lances',
-        'infero_aimed_ram'
-      ]
+    1: [
+      'inferno_spear_volley',
+      'infero_aimed_ram',
+      'tracking_strikes',
+      'infero_spinning_lattice',
+      'infero_underflame_swoops',
+      'infero_rebound_lances',
+      'infero_aimed_ram'
+    ],
+    2: [
+      'tracking_strikes',
+      'infero_spinning_lattice',
+      'infero_aimed_ram',
+      'inferno_spear_volley',
+      'infero_underflame_swoops',
+      'infero_rebound_lances',
+      'infero_aimed_ram'
+    ]
   }
-  const safePhase = Math.max(1, Math.min(3, Math.floor(phase)))
+  const safePhase = Math.max(1, Math.min(2, Math.floor(phase)))
   const cycle = cycles[safePhase]
   const safeIndex = ((Math.floor(cycleIndex) % cycle.length) + cycle.length) % cycle.length
   return cycle[safeIndex]
@@ -7522,7 +7605,13 @@ export function checkBossTelegraphHit(
   }
 
   if (telegraph.kind === 'infero_spinning_lattice' && telegraph.gridLines) {
-    if (!telegraph.hasTriggered || telegraph.activeTimer >= telegraph.activeDuration) return false
+    if (
+      !telegraph.hasTriggered ||
+      !telegraph.gridPulseFiring ||
+      telegraph.activeTimer >= telegraph.activeDuration
+    ) {
+      return false
+    }
     for (const line of telegraph.gridLines) {
       const dx = line.x2 - line.x1
       const dy = line.y2 - line.y1

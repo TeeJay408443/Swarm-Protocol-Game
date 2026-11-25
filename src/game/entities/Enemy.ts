@@ -267,6 +267,7 @@ export interface BossTelegraphAttack {
   orbitDuration?: number
   sideSpearCount?: number
   sideSpearInterval?: number
+  sunCoolingDown?: boolean
   swoopCount?: number
   swoopIndex?: number
   swoopEndX?: number
@@ -3539,7 +3540,7 @@ export class Enemy {
   private createInferoSolarCoreTelegraph(): BossTelegraphAttack {
     const center = this.getInferoArenaCenter()
     const view = this.getInferoViewportBounds()
-    const volleyCount = 4 + Math.floor(Math.random() * 2)
+    const volleyCount = 2 + Math.floor(Math.random() * 2)
     const rotationDuration = 0.62
     const extensionDuration = 0.24
     const fireDuration = 0.46
@@ -4328,7 +4329,18 @@ export class Enemy {
             this.updateInferoFurnaceVolley(t, bossCenter)
           }
         } else if (t.kind === 'infero_solar_core') {
-          this.updateInferoFurnaceVolley(t, { x: t.x, y: t.y })
+          if (t.sunCoolingDown) {
+            t.gridPulseFiring = false
+            t.gridLines = []
+            t.warningLabel = 'SUN CORE // REIGNITING'
+            if (t.activeTimer >= t.activeDuration) {
+              const currentId = t.id
+              const nextVolley = this.createInferoSolarCoreTelegraph()
+              Object.assign(t, nextVolley, { id: currentId, sunCoolingDown: false })
+            }
+          } else {
+            this.updateInferoFurnaceVolley(t, { x: t.x, y: t.y })
+          }
         } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
           const firstWarningDuration = t.gridPulseFirstWarningDuration ?? 0.24
@@ -4469,6 +4481,15 @@ export class Enemy {
         }
 
         if (t.activeTimer >= t.activeDuration) {
+          if (t.kind === 'infero_solar_core' && this.inferoSunEmerged) {
+            t.sunCoolingDown = true
+            t.activeTimer = 0
+            t.activeDuration = 0.9
+            t.gridPulseFiring = false
+            t.gridLines = []
+            t.warningLabel = 'SUN CORE // REIGNITING'
+            continue
+          }
           if (
             t.kind === 'astral_orbital_grid' &&
             t.hasTriggered &&
@@ -5003,7 +5024,10 @@ export class Enemy {
     if (!this.isAlive || this.telegraphs.length === 0) return
 
     for (const t of this.telegraphs) {
-      const chargeProgress = Math.max(0, Math.min(1, t.chargeTimer / t.chargeDuration))
+      const chargeProgress =
+        t.chargeDuration > 0
+          ? Math.max(0, Math.min(1, t.chargeTimer / t.chargeDuration))
+          : Number(t.hasTriggered)
       const impactProgress = t.hasTriggered
         ? Math.max(0, Math.min(1, t.activeTimer / t.activeDuration))
         : 0
@@ -5434,96 +5458,95 @@ export class Enemy {
           const fireballRadius =
             (isPersistentSun ? Math.max(142, this.width * 1.35 + 35) : this.width * 0.72 + 20) *
             camera.zoom
-          const sunHalo = ctx.createRadialGradient(
-            fireballCenter.x,
-            fireballCenter.y,
-            fireballRadius * 0.45,
-            fireballCenter.x,
-            fireballCenter.y,
-            fireballRadius * 1.42
-          )
-          sunHalo.addColorStop(0, isPersistentSun ? 'rgba(255, 247, 237, 0.66)' : 'rgba(255, 247, 237, 0.2)')
-          sunHalo.addColorStop(0.42, 'rgba(253, 224, 71, 0.35)')
-          sunHalo.addColorStop(1, 'rgba(249, 115, 22, 0)')
-          ctx.globalCompositeOperation = 'lighter'
-          ctx.fillStyle = sunHalo
-          ctx.beginPath()
-          ctx.arc(fireballCenter.x, fireballCenter.y, fireballRadius * 1.42, 0, Math.PI * 2)
-          ctx.fill()
-          const fireballGlow = ctx.createRadialGradient(
-            fireballCenter.x,
-            fireballCenter.y,
-            fireballRadius * 0.22,
-            fireballCenter.x,
-            fireballCenter.y,
-            fireballRadius
-          )
-          fireballGlow.addColorStop(0, 'rgba(255, 255, 255, 0.98)')
-          fireballGlow.addColorStop(0.22, 'rgba(255, 247, 205, 0.92)')
-          fireballGlow.addColorStop(0.48, 'rgba(253, 224, 71, 0.72)')
-          fireballGlow.addColorStop(0.78, 'rgba(249, 115, 22, 0.43)')
-          fireballGlow.addColorStop(1, 'rgba(234, 88, 12, 0)')
-          ctx.fillStyle = fireballGlow
-          ctx.beginPath()
-          ctx.arc(fireballCenter.x, fireballCenter.y, fireballRadius, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.strokeStyle = '#FFF7ED'
-          ctx.lineWidth = isPersistentSun ? 5 : 3
-          ctx.shadowColor = '#FDE047'
-          ctx.shadowBlur = isPersistentSun ? 34 : 22
-          ctx.beginPath()
-          ctx.arc(
-            fireballCenter.x,
-            fireballCenter.y,
-            fireballRadius * (0.78 + Math.sin(this.animTime * 7) * (isPersistentSun ? 0.07 : 0.04)),
-            0,
-            Math.PI * 2
-          )
-          ctx.stroke()
-          for (let flame = 0; flame < (isPersistentSun ? 16 : 9); flame++) {
-            const angle = this.animTime * (flame % 2 === 0 ? 1.4 : -1.1) + flame * Math.PI * 2 / 9
-            const flameOrbit = fireballRadius * (isPersistentSun ? 0.7 + (flame % 3) * 0.055 : 0.68)
-            const flameX = fireballCenter.x + Math.cos(angle) * flameOrbit
-            const flameY = fireballCenter.y + Math.sin(angle) * flameOrbit
-            ctx.fillStyle =
-              flame % 4 === 0 ? '#FFFFFF' : flame % 2 === 0 ? '#FFF7ED' : '#FDE047'
-            ctx.shadowColor = '#F97316'
-            ctx.shadowBlur = isPersistentSun ? 22 : 14
+          const glowExtent = fireballRadius * 1.42
+          const coreVisible =
+            !isPersistentSun ||
+            (fireballCenter.x >= -glowExtent &&
+              fireballCenter.x <= ctx.canvas.width + glowExtent &&
+              fireballCenter.y >= -glowExtent &&
+              fireballCenter.y <= ctx.canvas.height + glowExtent)
+          if (coreVisible) {
+            const fireballGlow = ctx.createRadialGradient(
+              fireballCenter.x,
+              fireballCenter.y,
+              fireballRadius * 0.12,
+              fireballCenter.x,
+              fireballCenter.y,
+              glowExtent
+            )
+            fireballGlow.addColorStop(0, 'rgba(255, 255, 255, 0.98)')
+            fireballGlow.addColorStop(0.2, 'rgba(255, 247, 205, 0.9)')
+            fireballGlow.addColorStop(0.46, 'rgba(253, 224, 71, 0.68)')
+            fireballGlow.addColorStop(0.74, 'rgba(249, 115, 22, 0.38)')
+            fireballGlow.addColorStop(1, 'rgba(234, 88, 12, 0)')
+            ctx.globalCompositeOperation = 'lighter'
+            ctx.fillStyle = fireballGlow
+            ctx.beginPath()
+            ctx.arc(fireballCenter.x, fireballCenter.y, glowExtent, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.globalCompositeOperation = 'source-over'
+            ctx.strokeStyle = '#FFF7ED'
+            ctx.lineWidth = isPersistentSun ? 4 : 3
+            ctx.shadowColor = '#FDE047'
+            ctx.shadowBlur = isPersistentSun ? 18 : 14
             ctx.beginPath()
             ctx.arc(
-              flameX,
-              flameY,
-              (isPersistentSun ? 5 : 4) + (flame % 3) * (isPersistentSun ? 2 : 1.5),
+              fireballCenter.x,
+              fireballCenter.y,
+              fireballRadius * (0.78 + Math.sin(this.animTime * 7) * (isPersistentSun ? 0.07 : 0.04)),
               0,
               Math.PI * 2
             )
-            ctx.fill()
-          }
-          if (isPersistentSun) {
-            for (let spark = 0; spark < 28; spark++) {
-              const angle = spark * 2.39996 + this.animTime * (spark % 2 === 0 ? 0.82 : -0.58)
-              const travel = (this.animTime * 0.72 + spark * 0.173) % 1
-              const orbit = fireballRadius * (0.82 + travel * 0.56)
-              const sparkX = fireballCenter.x + Math.cos(angle) * orbit
-              const sparkY = fireballCenter.y + Math.sin(angle) * orbit
-              const tailLength = (7 + (spark % 5) * 3) * camera.zoom
-              const color =
-                spark % 5 === 0 ? '#FFFFFF' : spark % 2 === 0 ? '#FEF08A' : '#FB923C'
-              ctx.strokeStyle = color
-              ctx.lineWidth = (spark % 3 === 0 ? 2.8 : 1.7) * camera.zoom
-              ctx.shadowColor = color
-              ctx.shadowBlur = 12
+            ctx.stroke()
+            const flameCount = isPersistentSun ? 8 : 9
+            for (let flame = 0; flame < flameCount; flame++) {
+              const angle =
+                this.animTime * (flame % 2 === 0 ? 1.4 : -1.1) +
+                (flame / flameCount) * Math.PI * 2
+              const flameOrbit =
+                fireballRadius * (isPersistentSun ? 0.73 + (flame % 3) * 0.055 : 0.68)
+              const flameX = fireballCenter.x + Math.cos(angle) * flameOrbit
+              const flameY = fireballCenter.y + Math.sin(angle) * flameOrbit
+              ctx.fillStyle =
+                flame % 4 === 0 ? '#FFFFFF' : flame % 2 === 0 ? '#FFF7ED' : '#FDE047'
+              ctx.shadowColor = '#F97316'
+              ctx.shadowBlur = isPersistentSun ? 12 : 14
               ctx.beginPath()
-              ctx.moveTo(sparkX, sparkY)
-              ctx.lineTo(
-                sparkX - Math.cos(angle) * tailLength,
-                sparkY - Math.sin(angle) * tailLength
+              ctx.arc(
+                flameX,
+                flameY,
+                (isPersistentSun ? 5 : 4) + (flame % 3) * (isPersistentSun ? 2 : 1.5),
+                0,
+                Math.PI * 2
               )
-              ctx.stroke()
-              ctx.fillStyle = '#FFF7ED'
-              ctx.beginPath()
-              ctx.arc(sparkX, sparkY, (2 + (spark % 3) * 0.8) * camera.zoom, 0, Math.PI * 2)
               ctx.fill()
+            }
+            if (isPersistentSun) {
+              for (let spark = 0; spark < 10; spark++) {
+                const angle = spark * 2.39996 + this.animTime * (spark % 2 === 0 ? 0.82 : -0.58)
+                const travel = (this.animTime * 0.72 + spark * 0.173) % 1
+                const orbit = fireballRadius * (0.82 + travel * 0.56)
+                const sparkX = fireballCenter.x + Math.cos(angle) * orbit
+                const sparkY = fireballCenter.y + Math.sin(angle) * orbit
+                const tailLength = (7 + (spark % 5) * 3) * camera.zoom
+                const color =
+                  spark % 5 === 0 ? '#FFFFFF' : spark % 2 === 0 ? '#FEF08A' : '#FB923C'
+                ctx.strokeStyle = color
+                ctx.lineWidth = (spark % 3 === 0 ? 2.4 : 1.6) * camera.zoom
+                ctx.shadowColor = color
+                ctx.shadowBlur = 6
+                ctx.beginPath()
+                ctx.moveTo(sparkX, sparkY)
+                ctx.lineTo(
+                  sparkX - Math.cos(angle) * tailLength,
+                  sparkY - Math.sin(angle) * tailLength
+                )
+                ctx.stroke()
+                ctx.fillStyle = '#FFF7ED'
+                ctx.beginPath()
+                ctx.arc(sparkX, sparkY, (2 + (spark % 3) * 0.8) * camera.zoom, 0, Math.PI * 2)
+                ctx.fill()
+              }
             }
           }
           ctx.globalCompositeOperation = 'source-over'
@@ -5625,6 +5648,14 @@ export class Enemy {
           ctx.font = 'bold 10px monospace'
           ctx.textAlign = 'center'
           ctx.fillText(`CURVED FIRE PATHS • NEXT VOLLEY ${secondsToVolley.toFixed(1)}s`, center.x, center.y + 52)
+        } else if (t.kind === 'infero_solar_core' && t.sunCoolingDown) {
+          const timeToReignite = Math.max(0, t.activeDuration - t.activeTimer)
+          ctx.fillStyle = 'rgba(28, 25, 23, 0.84)'
+          ctx.fillRect(center.x - 126, center.y + 38, 252, 20)
+          ctx.fillStyle = '#FDE68A'
+          ctx.font = 'bold 10px monospace'
+          ctx.textAlign = 'center'
+          ctx.fillText(`SUN CORE REIGNITING • ${timeToReignite.toFixed(1)}s`, center.x, center.y + 52)
         } else if (t.spinMode === 'furnace_volley' && t.hasTriggered && t.activeTimer < t.activeDuration) {
           const rotationDuration = t.gridPulseWarningDuration ?? 0.5
           const extensionDuration = t.gridPulseExtensionDuration ?? 0.24

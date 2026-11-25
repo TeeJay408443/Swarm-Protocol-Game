@@ -2032,7 +2032,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(boss.telegraphs.includes(furnaceAttack), false)
     const sun = boss.telegraphs.find((attack) => attack.kind === 'infero_solar_core')
     assert.ok(sun, 'the sun core should remain after the boss exits it')
-    assert.ok(sun!.gridPulseCount === 4 || sun!.gridPulseCount === 5)
+    assert.ok(sun!.gridPulseCount === 2 || sun!.gridPulseCount === 3)
     assert.equal(sun!.spinMode, 'furnace_volley')
     assert.equal(sun!.gridPulseGapDuration, 0.2)
     assert.equal(sun!.x, GAME_ARENA_SIZE / 2)
@@ -2046,6 +2046,19 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(sun!.x, GAME_ARENA_SIZE / 2, 'the sun stays anchored at arena center')
     assert.equal(sun!.y, GAME_ARENA_SIZE / 2)
     assert.equal(sun!.gridPulseFiring, true, 'the sun continues firing independently of the boss')
+
+    for (let frame = 0; frame < 140 && !sun!.sunCoolingDown; frame++) {
+      boss.update(0.05, player)
+    }
+    assert.equal(sun!.sunCoolingDown, true, 'the sun enters a short breather after its volley')
+    assert.ok(boss.telegraphs.includes(sun!), 'the sun stays visible in the arena during its breather')
+    for (let frame = 0; frame < 30 && sun!.sunCoolingDown; frame++) {
+      boss.update(0.05, player)
+    }
+    assert.equal(sun!.sunCoolingDown, false, 'the sun repeats its attack after the short cooldown')
+    assert.equal(sun!.gridPulseIndex, 0, 'the repeating sun attack resets its beam pattern')
+    for (let frame = 0; frame < 22; frame++) boss.update(0.05, player)
+    assert.equal(sun!.gridPulseFiring, true, 'the next sun volley fires without another boss spin')
 
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_rebound_lances')

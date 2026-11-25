@@ -1796,7 +1796,13 @@ const GameContainer: React.FC<GameContainerProps> = ({
 
       enemiesRef.current.push(enemy)
       if (forceBoss && !dogBossActiveRef.current) {
-        playMusicRef.current(enemy.isAstralScourge ? 'astral_scourge' : 'boss')
+        playMusicRef.current(
+          enemy.isInferoChampion
+            ? 'infero_champion'
+            : enemy.isAstralScourge
+              ? 'astral_scourge'
+              : 'boss'
+        )
       }
     },
     []
@@ -6353,6 +6359,7 @@ const GameContainer: React.FC<GameContainerProps> = ({
                   telegraph.kind === 'infero_spinning_lattice' ||
                   telegraph.kind === 'infero_underflame_swoops' ||
                   telegraph.kind === 'infero_aimed_ram' ||
+                  telegraph.kind === 'infero_rebound_lances' ||
                   telegraph.kind === 'cosmic_portal_lunge' ||
                   telegraph.kind === 'cosmic_orb_barrage'
 
@@ -6380,6 +6387,8 @@ const GameContainer: React.FC<GameContainerProps> = ({
                       damagePlayer(telegraph.damage, { x: column.x, y: column.y })
                     }
                   }
+                } else if (telegraph.kind === 'infero_rebound_lances') {
+                  // The two-stage lance projectiles own their collision checks.
                 } else if (telegraph.kind === 'tracking_strikes' && telegraph.trackingBlasts) {
                   // Evaluate each sequential target-lock blast independently when it detonates
                   for (const blast of telegraph.trackingBlasts) {

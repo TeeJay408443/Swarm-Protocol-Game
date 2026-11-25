@@ -180,6 +180,8 @@ import AudioService, {
   DEVOURER_BEAT_DROP_SECONDS,
   DEVOURER_YOUTUBE_URL,
   DEVOURER_YOUTUBE_VIDEO_ID,
+  INFERO_CHAMPION_YOUTUBE_URL,
+  INFERO_CHAMPION_YOUTUBE_VIDEO_ID,
   MUSIC_TRACK_METADATA,
   parseYouTubeVideoId
 } from '../src/services/AudioService'
@@ -1483,7 +1485,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(getInferoChampionAttackKind(2, 3), 'inferno_spear_volley')
     assert.equal(getInferoChampionAttackKind(3, 3), 'infero_underflame_swoops')
     for (const phase of [1, 2, 3]) {
-      const cycle = Array.from({ length: 6 }, (_, index) =>
+      const cycle = Array.from({ length: 7 }, (_, index) =>
         getInferoChampionAttackKind(phase, index)
       )
       assert.deepEqual(
@@ -1493,7 +1495,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
           'inferno_spear_volley',
           'infero_spinning_lattice',
           'infero_underflame_swoops',
-          'infero_aimed_ram'
+          'infero_aimed_ram',
+          'infero_rebound_lances'
         ])
       )
       assert.equal(cycle.filter((kind) => kind === 'infero_aimed_ram').length, 2)
@@ -1611,6 +1614,93 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(Math.hypot(finalBossCenter.x - targetX, finalBossCenter.y - targetY) < 2)
     assert.ok(finalBossCenter.x >= 0 && finalBossCenter.x <= GAME_ARENA_SIZE)
     assert.ok(finalBossCenter.y >= 0 && finalBossCenter.y <= GAME_ARENA_SIZE)
+  })
+
+  it('throws radial Infero lances, stops them, then indicates and launches their aimed return', () => {
+    const hero = heroes.find((entry) => entry.id === 'hero_01')!
+    const player = new Player({ x: 900, y: 900, hero })
+    const boss = new Enemy({
+      x: 1200,
+      y: 900,
+      enemyData: AREA_THREE_BOSSES[3],
+      target: player,
+      isBoss: true,
+      isFinalBoss: true
+    })
+    boss.isSpawning = false
+    boss.cutsceneDelayTimer = 0
+    boss.shootCooldown = 100
+    boss.specialCooldown = 100
+    boss.setVisibleWorldBounds({ left: 0, right: 2400, top: 0, bottom: 1800 })
+
+    const attack = boss.spawnTelegraphedAttack('infero_rebound_lances')!
+    assert.ok(attack.lanceRoundCount === 2 || attack.lanceRoundCount === 3)
+    assert.equal(attack.lanceWaypoints?.length, attack.lanceRoundCount)
+    assert.ok(attack.lanceWaypoints!.every((point, index, points) =>
+      points.slice(index + 1).every((other) =>
+        Math.hypot(point.x - other.x, point.y - other.y) > 100
+      )
+    ), 'each lance volley should use a distinct arena location')
+    for (let frame = 0; frame < 80 && !attack.hasTriggered; frame++) boss.update(0.05, player)
+    assert.equal(attack.hasTriggered, true)
+    assert.equal(boss.projectiles.length, 10)
+    assert.ok(boss.projectiles.every((projectile) => projectile.inferoLancePhase === 'outbound'))
+
+    for (let frame = 0; frame < 34; frame++) boss.update(0.05, player)
+    const stoppedLance = boss.projectiles.find(
+      (projectile) => projectile.inferoLancePhase === 'paused' || projectile.inferoLancePhase === 'aiming'
+    )
+    assert.ok(stoppedLance)
+    assert.ok(
+      Math.hypot(stoppedLance!.x - attack.lanceWaypoints![0].x, stoppedLance!.y - attack.lanceWaypoints![0].y) >
+        300,
+      'the radial lances should travel a substantial distance before stopping'
+    )
+    const aimingLance = boss.projectiles.find(
+      (projectile) => projectile.inferoLancePhase === 'aiming'
+    )
+    assert.ok(aimingLance, 'stopped lances should present a clear aimed indicator')
+    assert.equal(aimingLance!.speed, 0)
+    const lockedTarget = {
+      x: aimingLance!.inferoLanceTargetX,
+      y: aimingLance!.inferoLanceTargetY
+    }
+    const lockedDirection = { ...aimingLance!.direction }
+    assert.deepEqual(lockedTarget, player.getCenter())
+
+    player.x += 260
+    player.y -= 180
+    boss.update(0.05, player)
+    assert.deepEqual(
+      { x: aimingLance!.inferoLanceTargetX, y: aimingLance!.inferoLanceTargetY },
+      lockedTarget,
+      'the indicator stays aligned with its locked target during the windup'
+    )
+    assert.deepEqual(aimingLance!.direction, lockedDirection)
+
+    for (let frame = 0; frame < 30 && aimingLance!.inferoLancePhase !== 'launched'; frame++) {
+      boss.update(0.05, player)
+    }
+    assert.equal(aimingLance!.inferoLancePhase, 'launched')
+    assert.ok(aimingLance!.speed >= 700)
+    assert.deepEqual(aimingLance!.direction, lockedDirection)
+
+    for (let round = 1; round < attack.lanceRoundCount!; round++) {
+      for (
+        let frame = 0;
+        frame < 100 && (attack.lanceVolleyCount ?? 0) < round + 1;
+        frame++
+      ) {
+        boss.update(0.05, player)
+      }
+      assert.equal(attack.lanceVolleyCount, round + 1)
+      const roundCenter = boss.getCenter()
+      const waypoint = attack.lanceWaypoints![round]
+      assert.ok(
+        Math.hypot(roundCenter.x - waypoint.x, roundCenter.y - waypoint.y) < 4,
+        `Infero should reach the next arena location before round ${round + 1}`
+      )
+    }
   })
 
   it('keeps Infero visible when camera bounds change and uses rotating, damaging lasers with curved fire grids', () => {
@@ -3992,6 +4082,15 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(parseYouTubeVideoId(ASTRAL_SCOURGE_YOUTUBE_URL), ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID)
     audio.playMusic('astral_scourge')
     assert.equal(audio.getCurrentMusicTrack(), 'astral_scourge')
+    assert.equal(audio.isExternalYouTubeActive(), true)
+    audio.stopMusic()
+    assert.ok(audio.getMusicTypes().includes('infero_champion'))
+    assert.equal(MUSIC_TRACK_METADATA.infero_champion.title, 'Infero Champion')
+    assert.equal(MUSIC_TRACK_METADATA.infero_champion.youtubeVideoId, INFERO_CHAMPION_YOUTUBE_VIDEO_ID)
+    assert.equal(MUSIC_TRACK_METADATA.infero_champion.youtubeUrl, INFERO_CHAMPION_YOUTUBE_URL)
+    assert.equal(parseYouTubeVideoId(INFERO_CHAMPION_YOUTUBE_URL), INFERO_CHAMPION_YOUTUBE_VIDEO_ID)
+    audio.playMusic('infero_champion')
+    assert.equal(audio.getCurrentMusicTrack(), 'infero_champion')
     assert.equal(audio.isExternalYouTubeActive(), true)
     audio.stopMusic()
     audio.destroy()

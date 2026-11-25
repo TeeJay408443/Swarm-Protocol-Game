@@ -9,7 +9,13 @@
 import { Howl, Howler } from 'howler'
 
 export type SoundType = 'shoot' | 'hit' | 'coin' | 'levelup' | 'gameover' | 'wave' | 'click' | 'error'
-export type MusicTrackName = 'main' | 'gameplay' | 'boss' | 'universal_collapse' | 'astral_scourge'
+export type MusicTrackName =
+  | 'main'
+  | 'gameplay'
+  | 'boss'
+  | 'universal_collapse'
+  | 'astral_scourge'
+  | 'infero_champion'
 
 export interface AudioSettings {
   masterVolume: number
@@ -31,6 +37,9 @@ export const DEVOURER_BEAT_DROP_SECONDS = 11.6
 export const ASTRAL_SCOURGE_YOUTUBE_URL =
   'https://www.youtube.com/watch?v=W70Q1R-inLc&list=PLsuCmTriuYXdOYZVaKyex5lIy3lT9K_PW&index=18'
 export const ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID = 'W70Q1R-inLc'
+export const INFERO_CHAMPION_YOUTUBE_URL =
+  'https://www.youtube.com/watch?v=ysBWFTxxoak&list=PLsuCmTriuYXdOYZVaKyex5lIy3lT9K_PW&index=31'
+export const INFERO_CHAMPION_YOUTUBE_VIDEO_ID = 'ysBWFTxxoak'
 
 export function parseYouTubeVideoId(urlOrId: string): string | null {
   const trimmed = urlOrId.trim()
@@ -119,6 +128,12 @@ export const MUSIC_TRACK_METADATA: Record<MusicTrackName, MusicTrackMetadata> = 
     title: 'Astral Scourge',
     youtubeVideoId: ASTRAL_SCOURGE_YOUTUBE_VIDEO_ID,
     youtubeUrl: ASTRAL_SCOURGE_YOUTUBE_URL
+  },
+  infero_champion: {
+    id: 'infero_champion',
+    title: 'Infero Champion',
+    youtubeVideoId: INFERO_CHAMPION_YOUTUBE_VIDEO_ID,
+    youtubeUrl: INFERO_CHAMPION_YOUTUBE_URL
   },
   universal_collapse: {
     id: 'universal_collapse',
@@ -682,7 +697,14 @@ export class AudioService {
   }
 
   getMusicTypes(): MusicTrackName[] {
-    return ['main', 'gameplay', 'boss', 'universal_collapse', 'astral_scourge']
+    return [
+      'main',
+      'gameplay',
+      'boss',
+      'universal_collapse',
+      'astral_scourge',
+      'infero_champion'
+    ]
   }
 
   destroy(): void {

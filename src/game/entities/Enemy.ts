@@ -267,7 +267,6 @@ export interface BossTelegraphAttack {
   orbitDuration?: number
   sideSpearCount?: number
   sideSpearInterval?: number
-  sunCoolingDown?: boolean
   swoopCount?: number
   swoopIndex?: number
   swoopEndX?: number
@@ -2193,6 +2192,7 @@ export class Enemy {
           'infero_rebound_lances',
           'infero_aimed_ram',
           'infero_orbiting_lances',
+          'infero_spinning_lattice',
           'infero_spear_cascade'
         ]
         kind = emergedCycle[this.inferoSunAttackIndex++ % emergedCycle.length]
@@ -2705,12 +2705,13 @@ export class Enemy {
         view.top + 56,
         Math.min(view.bottom - 56, targetCenter.y + (Math.random() - 0.5) * 220)
       )
-      const sideSpearCount = 4
+      const sideSpearCount = 6
       const spearSpeed = 820
       const horizontalDistance = Math.abs(endX - startX)
+      const spearTravelDistance = Math.abs(endX - inferoLaunchX)
       const sideSpearInterval = Math.max(
-        0.2,
-        Math.min(0.48, horizontalDistance / (spearSpeed * (sideSpearCount + 1)))
+        0.08,
+        Math.min(0.28, spearTravelDistance / (spearSpeed * (sideSpearCount + 1)))
       )
       const projectileLanes = [{
         x: startX,
@@ -3444,37 +3445,21 @@ export class Enemy {
 
   private launchInferoSpearSideShards(parent: EnemyProjectile): void {
     const forwardAngle = Math.atan2(parent.direction.y, parent.direction.x)
-    const view = this.getInferoViewportBounds()
-    const rayLength = Math.max(480, (view.bottom - view.top) * 0.8)
     for (const side of [-1, 1]) {
       const angle = forwardAngle + side * (Math.PI / 2)
       const direction = { x: Math.cos(angle), y: Math.sin(angle) }
-      const targetX = Math.max(
-        view.left + 12,
-        Math.min(view.right - 12, parent.x + direction.x * rayLength)
-      )
-      const targetY = Math.max(
-        view.top + 12,
-        Math.min(view.bottom - 12, parent.y + direction.y * rayLength)
-      )
       this.projectiles.push({
         x: parent.x,
         y: parent.y,
         width: 26,
         height: 10,
-        speed: 0,
+        speed: 570,
         direction,
         damage: Math.max(14, Math.round(parent.damage * 0.65)),
         color: side < 0 ? '#FB923C' : '#FDE047',
         lifetime: 0,
         maxLifetime: 6,
         isBlazingSpear: true,
-        inferoLancePhase: 'aiming',
-        inferoLancePhaseTimer: 0,
-        inferoLanceAimDuration: 0.38,
-        inferoLanceLaunchSpeed: 570,
-        inferoLanceTargetX: targetX,
-        inferoLanceTargetY: targetY,
         trailTimer: 0,
         trailParticles: []
       })
@@ -4329,18 +4314,7 @@ export class Enemy {
             this.updateInferoFurnaceVolley(t, bossCenter)
           }
         } else if (t.kind === 'infero_solar_core') {
-          if (t.sunCoolingDown) {
-            t.gridPulseFiring = false
-            t.gridLines = []
-            t.warningLabel = 'SUN CORE // REIGNITING'
-            if (t.activeTimer >= t.activeDuration) {
-              const currentId = t.id
-              const nextVolley = this.createInferoSolarCoreTelegraph()
-              Object.assign(t, nextVolley, { id: currentId, sunCoolingDown: false })
-            }
-          } else {
-            this.updateInferoFurnaceVolley(t, { x: t.x, y: t.y })
-          }
+          this.updateInferoFurnaceVolley(t, { x: t.x, y: t.y })
         } else if (t.kind === 'astral_orbital_grid') {
           const pulseCount = t.gridPulseCount ?? 1
           const firstWarningDuration = t.gridPulseFirstWarningDuration ?? 0.24
@@ -4481,15 +4455,6 @@ export class Enemy {
         }
 
         if (t.activeTimer >= t.activeDuration) {
-          if (t.kind === 'infero_solar_core' && this.inferoSunEmerged) {
-            t.sunCoolingDown = true
-            t.activeTimer = 0
-            t.activeDuration = 0.9
-            t.gridPulseFiring = false
-            t.gridLines = []
-            t.warningLabel = 'SUN CORE // REIGNITING'
-            continue
-          }
           if (
             t.kind === 'astral_orbital_grid' &&
             t.hasTriggered &&
@@ -4503,12 +4468,13 @@ export class Enemy {
             this.isInferoChampion &&
             this.bossPhase >= 2 &&
             t.kind === 'infero_spinning_lattice' &&
-            t.spinMode === 'furnace_volley' &&
-            !this.inferoSunEmerged
+            t.spinMode === 'furnace_volley'
           this.telegraphs.splice(i, 1)
           if (shouldInferoEmerge) {
-            this.inferoSunEmerged = true
-            this.inferoSunAttackIndex = 0
+            if (!this.inferoSunEmerged) {
+              this.inferoSunEmerged = true
+              this.inferoSunAttackIndex = 0
+            }
             this.inferoHoverTarget = null
             this.inferoHoverRetargetTimer = 0
             this.telegraphs.push(this.createInferoSolarCoreTelegraph())
@@ -5056,27 +5022,6 @@ export class Enemy {
         ctx.lineTo(end.x, end.y)
         ctx.stroke()
 
-        const shardCount = t.sideSpearCount ?? 4
-        for (let index = 0; index < shardCount; index++) {
-          const progress = (index + 1) / (shardCount + 1)
-          const markerX = start.x + (end.x - start.x) * progress
-          const markerY = start.y + (end.y - start.y) * progress
-          const halfGuide = 92 * camera.zoom
-          ctx.globalAlpha = warningAlpha * 0.78
-          ctx.strokeStyle = '#FDBA74'
-          ctx.lineWidth = 1.7
-          ctx.setLineDash([7, 7])
-          ctx.beginPath()
-          ctx.moveTo(markerX, markerY - halfGuide)
-          ctx.lineTo(markerX, markerY + halfGuide)
-          ctx.stroke()
-          ctx.setLineDash([])
-          ctx.fillStyle = '#FEF08A'
-          ctx.beginPath()
-          ctx.arc(markerX, markerY, 5 * camera.zoom, 0, Math.PI * 2)
-          ctx.fill()
-        }
-
         if (!t.hasTriggered) {
           const bossPoint = camera.worldToScreen(
             t.inferoLaunchX ?? t.x,
@@ -5453,14 +5398,14 @@ export class Enemy {
         ctx.lineJoin = 'round'
 
         if (t.spinMode === 'furnace_volley') {
-          const isPersistentSun = t.kind === 'infero_solar_core'
+          const isSolarCore = t.kind === 'infero_solar_core'
           const fireballCenter = camera.worldToScreen(t.x, t.y)
           const fireballRadius =
-            (isPersistentSun ? Math.max(142, this.width * 1.35 + 35) : this.width * 0.72 + 20) *
+            (isSolarCore ? Math.max(142, this.width * 1.35 + 35) : this.width * 0.72 + 20) *
             camera.zoom
           const glowExtent = fireballRadius * 1.42
           const coreVisible =
-            !isPersistentSun ||
+            !isSolarCore ||
             (fireballCenter.x >= -glowExtent &&
               fireballCenter.x <= ctx.canvas.width + glowExtent &&
               fireballCenter.y >= -glowExtent &&
@@ -5486,42 +5431,42 @@ export class Enemy {
             ctx.fill()
             ctx.globalCompositeOperation = 'source-over'
             ctx.strokeStyle = '#FFF7ED'
-            ctx.lineWidth = isPersistentSun ? 4 : 3
+            ctx.lineWidth = isSolarCore ? 4 : 3
             ctx.shadowColor = '#FDE047'
-            ctx.shadowBlur = isPersistentSun ? 18 : 14
+            ctx.shadowBlur = isSolarCore ? 18 : 14
             ctx.beginPath()
             ctx.arc(
               fireballCenter.x,
               fireballCenter.y,
-              fireballRadius * (0.78 + Math.sin(this.animTime * 7) * (isPersistentSun ? 0.07 : 0.04)),
+              fireballRadius * (0.78 + Math.sin(this.animTime * 7) * (isSolarCore ? 0.07 : 0.04)),
               0,
               Math.PI * 2
             )
             ctx.stroke()
-            const flameCount = isPersistentSun ? 8 : 9
+            const flameCount = isSolarCore ? 8 : 9
             for (let flame = 0; flame < flameCount; flame++) {
               const angle =
                 this.animTime * (flame % 2 === 0 ? 1.4 : -1.1) +
                 (flame / flameCount) * Math.PI * 2
               const flameOrbit =
-                fireballRadius * (isPersistentSun ? 0.73 + (flame % 3) * 0.055 : 0.68)
+                fireballRadius * (isSolarCore ? 0.73 + (flame % 3) * 0.055 : 0.68)
               const flameX = fireballCenter.x + Math.cos(angle) * flameOrbit
               const flameY = fireballCenter.y + Math.sin(angle) * flameOrbit
               ctx.fillStyle =
                 flame % 4 === 0 ? '#FFFFFF' : flame % 2 === 0 ? '#FFF7ED' : '#FDE047'
               ctx.shadowColor = '#F97316'
-              ctx.shadowBlur = isPersistentSun ? 12 : 14
+              ctx.shadowBlur = isSolarCore ? 12 : 14
               ctx.beginPath()
               ctx.arc(
                 flameX,
                 flameY,
-                (isPersistentSun ? 5 : 4) + (flame % 3) * (isPersistentSun ? 2 : 1.5),
+                (isSolarCore ? 5 : 4) + (flame % 3) * (isSolarCore ? 2 : 1.5),
                 0,
                 Math.PI * 2
               )
               ctx.fill()
             }
-            if (isPersistentSun) {
+            if (isSolarCore) {
               for (let spark = 0; spark < 10; spark++) {
                 const angle = spark * 2.39996 + this.animTime * (spark % 2 === 0 ? 0.82 : -0.58)
                 const travel = (this.animTime * 0.72 + spark * 0.173) % 1
@@ -5648,14 +5593,6 @@ export class Enemy {
           ctx.font = 'bold 10px monospace'
           ctx.textAlign = 'center'
           ctx.fillText(`CURVED FIRE PATHS • NEXT VOLLEY ${secondsToVolley.toFixed(1)}s`, center.x, center.y + 52)
-        } else if (t.kind === 'infero_solar_core' && t.sunCoolingDown) {
-          const timeToReignite = Math.max(0, t.activeDuration - t.activeTimer)
-          ctx.fillStyle = 'rgba(28, 25, 23, 0.84)'
-          ctx.fillRect(center.x - 126, center.y + 38, 252, 20)
-          ctx.fillStyle = '#FDE68A'
-          ctx.font = 'bold 10px monospace'
-          ctx.textAlign = 'center'
-          ctx.fillText(`SUN CORE REIGNITING • ${timeToReignite.toFixed(1)}s`, center.x, center.y + 52)
         } else if (t.spinMode === 'furnace_volley' && t.hasTriggered && t.activeTimer < t.activeDuration) {
           const rotationDuration = t.gridPulseWarningDuration ?? 0.5
           const extensionDuration = t.gridPulseExtensionDuration ?? 0.24

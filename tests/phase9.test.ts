@@ -1795,7 +1795,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1300 })
 
     const attack = boss.spawnTelegraphedAttack('infero_spear_cascade')!
-    assert.equal(attack.sideSpearCount, 4)
+    assert.equal(attack.sideSpearCount, 6)
     assert.ok(attack.sideSpearInterval! > 0)
     assert.equal(attack.gridLines?.length, 1)
     assert.equal(checkBossTelegraphHit(attack, {
@@ -1812,7 +1812,7 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
     const mainSpear = boss.projectiles.find((projectile) => projectile.width === 84)!
     assert.ok(mainSpear)
-    assert.equal(mainSpear.inferoSpearShardsRemaining, 4)
+    assert.equal(mainSpear.inferoSpearShardsRemaining, 6)
 
     for (let frame = 0; frame < 8 && boss.projectiles.filter((projectile) => projectile.width === 26).length < 2; frame++) {
       boss.update(0.05, player)
@@ -1820,13 +1820,16 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     const firstSideSpears = boss.projectiles.filter((projectile) => projectile.width === 26)
     assert.equal(firstSideSpears.length, 2)
     assert.ok(firstSideSpears.every((projectile) =>
-      projectile.inferoLancePhase === 'aiming' &&
-      projectile.inferoLanceTargetX !== undefined &&
-      projectile.inferoLanceTargetY !== undefined &&
+      projectile.inferoLancePhase === undefined &&
+      projectile.speed === 570 &&
       Math.abs(projectile.direction.y) > 0.99
     ))
-    for (let frame = 0; frame < 10; frame++) boss.update(0.05, player)
-    assert.ok(firstSideSpears.every((projectile) => projectile.inferoLancePhase === 'launched'))
+    for (let frame = 0; frame < 14; frame++) boss.update(0.05, player)
+    assert.equal(
+      boss.projectiles.filter((projectile) => projectile.width === 26).length,
+      12,
+      'six pairs of side spears fire directly without extra aim indicators'
+    )
   })
 
   it('keeps Infero’s original spinning lances and curved fire grid in Phase 1', () => {
@@ -2047,24 +2050,33 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(sun!.y, GAME_ARENA_SIZE / 2)
     assert.equal(sun!.gridPulseFiring, true, 'the sun continues firing independently of the boss')
 
-    for (let frame = 0; frame < 140 && !sun!.sunCoolingDown; frame++) {
+    for (let frame = 0; frame < 200 && boss.telegraphs.includes(sun!); frame++) {
       boss.update(0.05, player)
     }
-    assert.equal(sun!.sunCoolingDown, true, 'the sun enters a short breather after its volley')
-    assert.ok(boss.telegraphs.includes(sun!), 'the sun stays visible in the arena during its breather')
-    for (let frame = 0; frame < 30 && sun!.sunCoolingDown; frame++) {
-      boss.update(0.05, player)
-    }
-    assert.equal(sun!.sunCoolingDown, false, 'the sun repeats its attack after the short cooldown')
-    assert.equal(sun!.gridPulseIndex, 0, 'the repeating sun attack resets its beam pattern')
-    for (let frame = 0; frame < 22; frame++) boss.update(0.05, player)
-    assert.equal(sun!.gridPulseFiring, true, 'the next sun volley fires without another boss spin')
+    assert.equal(
+      boss.telegraphs.includes(sun!),
+      false,
+      'the sun core disappears after its limited volleys'
+    )
 
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_rebound_lances')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_aimed_ram')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_orbiting_lances')
+    const scheduledFurnace = boss.spawnTelegraphedAttack()!
+    assert.equal(scheduledFurnace.kind, 'infero_spinning_lattice')
+    assert.equal(scheduledFurnace.spinMode, 'furnace_volley')
     assert.equal(boss.spawnTelegraphedAttack()!.kind, 'infero_spear_cascade')
+
+    boss.telegraphs.length = 0
+    const repeatFurnace = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
+    for (let frame = 0; frame < 360 && boss.telegraphs.includes(repeatFurnace); frame++) {
+      boss.update(0.05, player)
+    }
+    assert.ok(
+      boss.telegraphs.some((attack) => attack.kind === 'infero_solar_core'),
+      'Infero creates a new sun attack after returning to the furnace'
+    )
   })
 
   it('swoops Infero under the player three or four times with dodgeable fire columns', () => {

@@ -21,6 +21,7 @@ import {
 } from '../../config/arenas'
 import { EnemiesRow } from '../../types/database'
 import { Player } from './Player'
+import { InfernoRamTrail } from './InfernoRamTrail'
 
 export const ASTRAL_SCOURGE_PHASE_TWO_GRID_COOLDOWN_SECONDS = 20
 export const INFERO_DESPERATION_DURATION_SECONDS = 10
@@ -450,6 +451,7 @@ export class Enemy {
   inferoDesperationTimer: number = 0
   inferoDesperationPortalPosition: Vector2 | null = null
   inferoDesperationLockedTarget: Vector2 | null = null
+  readonly inferoDesperationTrail = new InfernoRamTrail()
   private inferoDesperationCycleMode: 'portal' | 'ram' | 'recover' = 'portal'
   private inferoDesperationCycleTimer: number = 0
   private inferoDesperationDirection: Vector2 = { x: 1, y: 0 }
@@ -1382,6 +1384,7 @@ export class Enemy {
   }
 
   private updateInferoDesperationPhase(deltaTime: number): void {
+    this.inferoDesperationTrail.update(deltaTime)
     this.inferoDesperationTimer = Math.min(
       INFERO_DESPERATION_DURATION_SECONDS,
       this.inferoDesperationTimer + deltaTime
@@ -1426,6 +1429,7 @@ export class Enemy {
           this.inferoDesperationDirection.x
         )
         this.inferoDesperationCycleMode = 'ram'
+        this.inferoDesperationTrail.beginDash()
         this.inferoDesperationCycleTimer = 0
         this.velocity = {
           x: this.inferoDesperationDirection.x * INFERO_DESPERATION_RAM_SPEED,
@@ -1436,11 +1440,13 @@ export class Enemy {
     }
 
     if (this.inferoDesperationCycleMode === 'ram') {
+      const previousCenter = this.getCenter()
       this.x += this.velocity.x * deltaTime
       this.y += this.velocity.y * deltaTime
       const clampedCenter = this.clampInferoCenter(this.getCenter())
       this.x = clampedCenter.x - this.width / 2
       this.y = clampedCenter.y - this.height / 2
+      this.inferoDesperationTrail.emit(previousCenter, this.getCenter())
 
       if (this.inferoDesperationCycleTimer >= this.inferoDesperationRamDuration) {
         this.velocity = Vector2.zero()
@@ -2516,7 +2522,7 @@ export class Enemy {
         const shotCount = 2
         const laserCount = 9 + Math.floor(Math.random() * 2)
         const rotationDuration = 0.75
-        const extensionDuration = 0.24
+        const extensionDuration = 0.2 // Stationary lock-on hold after rotation.
         const fireDuration = 0.46
         const gapDuration = 0.36
         telegraph = {
@@ -3665,7 +3671,7 @@ export class Enemy {
     attack.gridLines = getInferoRotatingSpreadLines(
       origin,
       lanes,
-      Math.max(90, this.width * 1.2),
+      attack.length ?? 1500,
       0
     )
   }
@@ -3675,7 +3681,7 @@ export class Enemy {
     const view = this.getInferoViewportBounds()
     const volleyCount = 2 + Math.floor(Math.random() * 2)
     const rotationDuration = 0.62
-    const extensionDuration = 0.24
+    const extensionDuration = 0.2 // Stationary lock-on hold after rotation.
     const fireDuration = 0.46
     const gapDuration = 0.2
     const attack: BossTelegraphAttack = {
@@ -3716,7 +3722,7 @@ export class Enemy {
   private updateInferoFurnaceVolley(attack: BossTelegraphAttack, center: Vector2): void {
     const pulseCount = attack.gridPulseCount ?? 1
     const rotationDuration = attack.gridPulseWarningDuration ?? 0.75
-    const extensionDuration = attack.gridPulseExtensionDuration ?? 0.24
+    const extensionDuration = attack.gridPulseExtensionDuration ?? 0.2
     const fireDuration = attack.gridPulseFireDuration ?? 0.46
     const gapDuration = attack.gridPulseGapDuration ?? 0.36
     const cycleDuration = rotationDuration + extensionDuration + fireDuration + gapDuration
@@ -3730,30 +3736,23 @@ export class Enemy {
     }
     const pulseElapsed = Math.max(0, attack.activeTimer - pulseIndex * cycleDuration)
     const rotationProgress = Math.min(1, pulseElapsed / Math.max(0.001, rotationDuration))
-    const extensionProgress = Math.max(
-      0,
-      Math.min(1, (pulseElapsed - rotationDuration) / Math.max(0.001, extensionDuration))
-    )
     const isFiring =
       pulseElapsed >= rotationDuration + extensionDuration &&
       pulseElapsed < rotationDuration + extensionDuration + fireDuration
-    const shortLength = Math.max(90, this.width * 1.2)
-    const lineLength =
-      shortLength + ((attack.length ?? 1500) - shortLength) * extensionProgress
     const rotationAngle = pulseElapsed < rotationDuration ? rotationProgress * Math.PI * 2 : 0
     attack.gridPulseFiring = isFiring
     attack.gridLines = getInferoRotatingSpreadLines(
       center,
       attack.projectileLanes ?? [],
-      lineLength,
+      attack.length ?? 1500,
       rotationAngle
     )
     const subject = attack.kind === 'infero_solar_core' ? 'SUN CORE' : 'FURNACE CORE'
     attack.warningLabel = isFiring
       ? `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — FIRE`
-      : extensionProgress > 0
-        ? `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — EXTENDING`
-        : `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — ROTATING`
+      : pulseElapsed < rotationDuration
+        ? `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — ROTATING`
+        : `${subject} // VOLLEY ${pulseIndex + 1}/${pulseCount} — LOCKED`
   }
 
   private launchInferoReboundLances(
@@ -3983,11 +3982,11 @@ export class Enemy {
             t.length ?? 1500
           )
         } else if (!t.hasTriggered) {
-          t.gridLines = getInferoSpinningVolleyLines(
+          t.gridLines = getInferoRotatingSpreadLines(
             { x: t.x, y: t.y },
             t.projectileLanes ?? [],
-            0,
-            Math.max(90, this.width * 1.2)
+            t.length ?? 1500,
+            0
           )
         } else if (t.hasDamagedPlayer) {
           t.hitCooldown = (t.hitCooldown ?? 0) + deltaTime
@@ -4460,8 +4459,8 @@ export class Enemy {
           t.y = bossCenter.y
           t.warningLabel = 'CROSS-LANE SPEAR // SIDE SPEARS INBOUND'
         } else if (t.kind === 'infero_spinning_lattice') {
-          t.x = bossCenter.x
-          t.y = bossCenter.y
+          t.x = t.spinMode === 'classic_spin' ? bossCenter.x : t.inferoLaunchX ?? t.x
+          t.y = t.spinMode === 'classic_spin' ? bossCenter.y : t.inferoLaunchY ?? t.y
           if (t.spinMode === 'classic_spin') {
             t.angle = (t.angle ?? 0) + (t.turnRate ?? 0.42) * deltaTime
             t.gridLines = getInferoSpinningLaserLines(
@@ -4477,7 +4476,7 @@ export class Enemy {
               t.pulseCount = pulseIndex + 1
             }
           } else {
-            this.updateInferoFurnaceVolley(t, bossCenter)
+            this.updateInferoFurnaceVolley(t, { x: t.x, y: t.y })
           }
         } else if (t.kind === 'infero_solar_core') {
           this.updateInferoFurnaceVolley(t, { x: t.x, y: t.y })
@@ -5092,6 +5091,7 @@ export class Enemy {
    */
   updateDeath(deltaTime: number): boolean {
     if (!this.isDying) return false
+    this.inferoDesperationTrail.update(deltaTime)
     
     this.deathTimer += deltaTime
     if (this.deathTimer >= this.deathDuration) {
@@ -5582,7 +5582,9 @@ export class Enemy {
         t.gridLines
       ) {
         const lines = t.gridLines
-        const warningAlpha = 0.25 + chargeProgress * 0.55
+        const warningAlpha = t.spinMode === 'furnace_volley'
+          ? 0.6 + chargeProgress * 0.25
+          : 0.25 + chargeProgress * 0.55
         const isLaserShotActive = Boolean(t.hasTriggered && t.gridPulseFiring)
         ctx.save()
         ctx.lineCap = 'round'
@@ -5786,7 +5788,7 @@ export class Enemy {
           ctx.fillText(`CURVED FIRE PATHS • NEXT VOLLEY ${secondsToVolley.toFixed(1)}s`, center.x, center.y + 52)
         } else if (t.spinMode === 'furnace_volley' && t.hasTriggered && t.activeTimer < t.activeDuration) {
           const rotationDuration = t.gridPulseWarningDuration ?? 0.5
-          const extensionDuration = t.gridPulseExtensionDuration ?? 0.24
+          const extensionDuration = t.gridPulseExtensionDuration ?? 0.2
           const fireDuration = t.gridPulseFireDuration ?? 0.46
           const gapDuration = t.gridPulseGapDuration ?? 0.36
           const pulseCycle = rotationDuration + extensionDuration + fireDuration + gapDuration
@@ -5795,7 +5797,7 @@ export class Enemy {
             pulseElapsed < rotationDuration
               ? 'LASERS ROTATING'
               : pulseElapsed < rotationDuration + extensionDuration
-                ? 'LASERS EXTENDING'
+                ? 'LASERS LOCKED'
                 : pulseElapsed < rotationDuration + extensionDuration + fireDuration
                   ? 'FURNACE LASERS LIVE'
                   : 'NEXT LASER SPIN'
@@ -6861,6 +6863,7 @@ export class Enemy {
    */
   draw(ctx: CanvasRenderingContext2D, camera: Camera): void {
     if (this.isAstralScourgeIntermission) return
+    this.inferoDesperationTrail.draw(ctx, camera)
 
     const { x: screenX, y: screenY } = camera.worldToScreen(this.x, this.y)
     const cx = screenX + this.width / 2

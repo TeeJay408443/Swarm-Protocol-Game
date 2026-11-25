@@ -1,6 +1,6 @@
 ---
 name: Inferno desperation finale
-description: Required zero-health survival finale and victory timing for Inferno Champion.
+description: Required survival finale, locked ram aim, and readable sun warnings for Inferno Champion.
 ---
 
 Inferno Champion must remain alive at zero HP for a ten-second desperation finale. Repeatedly open a nearby portal, teleport into it and launch a locked-direction ram simultaneously. Start with a normally visible screen, gradually fade to full white, and only then kill the boss and show victory.
@@ -20,3 +20,9 @@ The boss's correct displayed name is **Inferno Champion**, not Infero Champion.
 **Why:** The user corrected the original typo.
 
 **How to apply:** Use the corrected name in player-facing text; preserve existing internal identifiers to avoid breaking saved items.
+
+The phase-two sun attack must show fully extended indicator lines throughout the warning, including rotation, then hold still for 0.2 seconds before firing.
+
+**Why:** The user requested this reaction window to make the attack more dodgeable.
+
+**How to apply:** Keep both the boss-centered sun and the detached sun consistent; the displayed warning must match the damaging beam path.

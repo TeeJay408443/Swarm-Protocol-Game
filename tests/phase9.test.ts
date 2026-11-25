@@ -5,6 +5,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { InfernoRamTrail } from '../src/game/entities/InfernoRamTrail'
 
 import {
   GAME_CONFIG,
@@ -2042,6 +2043,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.update(0.05, player)
     assert.deepEqual(boss.velocity, launchVelocity, 'the launched ram does not follow the player')
     assert.notDeepEqual(boss.getCenter(), firstPortal)
+    assert.ok(boss.inferoDesperationTrail.points.length > 0, 'rams leave a lingering fire trail')
+    assert.ok(boss.inferoDesperationTrail.embers.length > 0, 'rams shed fiery particles')
     assert.equal(boss.takeDamage(500), false, 'the finale cannot be interrupted by more damage')
     let passedLockedTarget = false
     const direction = {
@@ -2097,7 +2100,25 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.equal(boss.isAlive, true)
   })
 
-  it('rotates Infero’s phase-two laser spokes slowly before extending and firing', () => {
+  it('keeps desperation trail particles bounded and lets them fade without joining teleports', () => {
+    const trail = new InfernoRamTrail()
+    trail.beginDash()
+    trail.emit({ x: 0, y: 0 }, { x: 100, y: 0 })
+    const firstDash = trail.points[0].dash
+    trail.beginDash()
+    trail.emit({ x: 700, y: 700 }, { x: 800, y: 700 })
+    assert.notEqual(trail.points.at(-1)!.dash, firstDash)
+    for (let step = 0; step < 100; step++) {
+      trail.emit({ x: step * 20, y: 0 }, { x: step * 20 + 20, y: 0 })
+    }
+    assert.ok(trail.points.length <= 64)
+    assert.ok(trail.embers.length <= 96)
+    trail.update(0.7)
+    assert.equal(trail.points.length, 0)
+    assert.equal(trail.embers.length, 0)
+  })
+
+  it('shows full-length rotating sun warnings and holds them still for 0.2 seconds before firing', () => {
     const hero = heroes.find((entry) => entry.id === 'hero_01')!
     const player = new Player({ x: 900, y: 900, hero })
     const boss = new Enemy({
@@ -2115,9 +2136,11 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     boss.setVisibleWorldBounds({ left: 600, right: 1400, top: 500, bottom: 1300 })
     const attack = boss.spawnTelegraphedAttack('infero_spinning_lattice')!
     assert.equal(attack.gridPulseWarningDuration, 0.75)
-    assert.equal(attack.gridPulseExtensionDuration, 0.24)
+    assert.equal(attack.gridPulseExtensionDuration, 0.2)
     assert.ok(attack.length! > 900)
-    assert.ok(attack.gridLines!.every((line) => Math.hypot(line.x2 - line.x1, line.y2 - line.y1) < 200))
+    assert.ok(attack.gridLines!.every((line) =>
+      Math.abs(Math.hypot(line.x2 - line.x1, line.y2 - line.y1) - attack.length!) < 0.001
+    ))
 
     for (let frame = 0; frame < 240 && !attack.hasTriggered; frame++) boss.update(0.05, player)
     assert.equal(attack.hasTriggered, true)
@@ -2133,15 +2156,18 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     while (rotationDelta > Math.PI) rotationDelta -= Math.PI * 2
     while (rotationDelta < -Math.PI) rotationDelta += Math.PI * 2
     assert.ok(Math.abs(rotationDelta - (Math.PI * 2) / 3) < 0.25)
-    assert.ok(Math.hypot(rotatedLine.x2 - rotatedLine.x1, rotatedLine.y2 - rotatedLine.y1) < 200)
+    assert.ok(Math.abs(Math.hypot(rotatedLine.x2 - rotatedLine.x1, rotatedLine.y2 - rotatedLine.y1) - startLength) < 0.001)
 
-    boss.update(0.55, player)
-    const extendingLine = attack.gridLines![0]
-    assert.ok(Math.hypot(extendingLine.x2 - extendingLine.x1, extendingLine.y2 - extendingLine.y1) > startLength)
-    assert.equal(attack.gridPulseFiring, false, 'the extending beams remain a safe indicator')
+    boss.update(0.5, player)
+    const lockedLine = { ...attack.gridLines![0] }
+    assert.equal(attack.gridPulseFiring, false, 'damage is disabled when the rotation ends')
+    boss.update(0.19, player)
+    assert.deepEqual(attack.gridLines![0], lockedLine, 'fully extended lines stay fixed during the reaction window')
+    assert.equal(attack.gridPulseFiring, false, 'the full 0.2 second hold must elapse')
+    assert.equal(checkBossTelegraphHit(attack, { x: attack.x, y: attack.y, radius: 12 }), false)
 
-    boss.update(0.2, player)
-    assert.equal(attack.gridPulseFiring, true, 'damage begins after the beams finish extending')
+    boss.update(0.011, player)
+    assert.equal(attack.gridPulseFiring, true, 'damage begins only after the stationary hold')
     const firedLine = attack.gridLines![0]
     assert.ok(Math.hypot(firedLine.x2 - firedLine.x1, firedLine.y2 - firedLine.y1) >= attack.length! * 0.99)
     assert.equal(checkBossTelegraphHit(attack, {
@@ -2179,6 +2205,10 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     assert.ok(sun!.gridPulseCount === 2 || sun!.gridPulseCount === 3)
     assert.equal(sun!.spinMode, 'furnace_volley')
     assert.equal(sun!.gridPulseGapDuration, 0.2)
+    assert.equal(sun!.gridPulseExtensionDuration, 0.2, 'the detached sun uses the same stationary reaction window')
+    assert.ok(sun!.gridLines!.every((line) =>
+      Math.abs(Math.hypot(line.x2 - line.x1, line.y2 - line.y1) - sun!.length!) < 0.001
+    ), 'detached sun warnings are fully extended immediately')
     assert.equal(sun!.x, GAME_ARENA_SIZE / 2)
     assert.equal(sun!.y, GAME_ARENA_SIZE / 2)
 

@@ -199,8 +199,11 @@ export interface BossTelegraphAttack {
     y: number
     directionX: number
     directionY: number
+    delay: number
   }>
   projectileCount?: number
+  inferoLaunchX?: number
+  inferoLaunchY?: number
   gridPulseCount?: number
   gridPulseIndex?: number
   gridPulseTimer?: number
@@ -347,7 +350,8 @@ export class Enemy {
   private astralRamHeading: number | null = null
   private astralRamSpeed: number = 0
   private astralGridCooldownRemaining: number = 0
-  private inferoStandoffSide: -1 | 1 = 1
+  private inferoHoverTarget: Vector2 | null = null
+  private inferoHoverRetargetTimer: number = 0
 
   get isInferoChampion(): boolean {
     return this.enemyId === 'boss_a3_20'
@@ -1126,17 +1130,33 @@ export class Enemy {
     const currentCenter = this.getCenter()
     const spearAttack = this.telegraphs.find((attack) => attack.kind === 'inferno_spear_volley')
     let desiredCenter: Vector2
-    if (spearAttack?.sideMode === 'left' || spearAttack?.sideMode === 'right') {
-      const sideDirection = spearAttack.sideMode === 'left' ? -1 : 1
+    if (spearAttack?.inferoLaunchX !== undefined && spearAttack.inferoLaunchY !== undefined) {
+      this.inferoHoverTarget = { x: spearAttack.inferoLaunchX, y: spearAttack.inferoLaunchY }
+      this.inferoHoverRetargetTimer = Math.max(0, this.inferoHoverRetargetTimer - deltaTime)
       desiredCenter = {
-        x: targetCenter.x + sideDirection * 610,
-        y: targetCenter.y - 56 + Math.sin(this.animTime * 1.7) * 18
+        x: spearAttack.inferoLaunchX + Math.sin(this.animTime * 1.3) * 12,
+        y: spearAttack.inferoLaunchY + Math.sin(this.animTime * 1.8) * 18
       }
     } else {
-      const standoffDistance = this.bossPhase >= 3 ? 535 : this.bossPhase === 2 ? 505 : 475
+      this.inferoHoverRetargetTimer -= deltaTime
+      const playerDistance = Vector2.distance(currentCenter, targetCenter)
+      if (
+        !this.inferoHoverTarget ||
+        this.inferoHoverRetargetTimer <= 0 ||
+        playerDistance > 760
+      ) {
+        const angle = Math.random() * Math.PI * 2
+        const distance = 450 + Math.random() * 240
+        this.inferoHoverTarget = {
+          x: Math.max(130, Math.min(1870, targetCenter.x + Math.cos(angle) * distance)),
+          y: Math.max(130, Math.min(1870, targetCenter.y + Math.sin(angle) * distance))
+        }
+        this.inferoHoverRetargetTimer = 4.2 + Math.random() * 1.8
+      }
+
       desiredCenter = {
-        x: targetCenter.x + this.inferoStandoffSide * standoffDistance,
-        y: targetCenter.y - 56 + Math.sin(this.animTime * 1.7) * 24
+        x: this.inferoHoverTarget.x + Math.sin(this.animTime * 1.3) * 12,
+        y: this.inferoHoverTarget.y + Math.sin(this.animTime * 1.8) * 18
       }
     }
     const marginX = this.width / 2 + 36
@@ -2025,8 +2045,7 @@ export class Enemy {
     let telegraph: BossTelegraphAttack
 
     if (kind === 'inferno_spear_volley' && this.isInferoChampion) {
-      const sideMode: ClosingSideLaserMode = this.specialAttackCounter % 2 === 0 ? 'left' : 'right'
-      this.inferoStandoffSide = sideMode === 'left' ? -1 : 1
+      const sideMode: ClosingSideLaserMode = Math.random() < 0.5 ? 'left' : 'right'
       const projectileCount = 15 + Math.floor(Math.random() * 6)
       const edgeX = Math.max(
         70,
@@ -2036,20 +2055,36 @@ export class Enemy {
         70,
         Math.min(1930, targetCenter.x + (sideMode === 'left' ? 780 : -780))
       )
+      const inferoLaunchX = Math.max(
+        this.width / 2 + 30,
+        Math.min(2000 - this.width / 2 - 30, targetCenter.x + (sideMode === 'left' ? -610 : 610))
+      )
+      const inferoLaunchY = Math.max(
+        this.height / 2 + 30,
+        Math.min(2000 - this.height / 2 - 30, targetCenter.y + (Math.random() - 0.5) * 250)
+      )
       const horizontalDistance = Math.abs(oppositeEdgeX - edgeX)
-      const projectileLanes = Array.from({ length: projectileCount }, (_, index) => {
-        const verticalProgress = projectileCount === 1 ? 0.5 : index / (projectileCount - 1)
-        const startY = Math.max(
-          80,
-          Math.min(1920, targetCenter.y - 300 + verticalProgress * 600)
-        )
-        const verticalDrift = (Math.random() - 0.5) * 34
+      const projectileLanes = Array.from({ length: projectileCount }, () => {
+        const startY = Math.max(80, Math.min(1920, targetCenter.y + (Math.random() - 0.5) * 640))
+        const verticalDrift = (Math.random() - 0.5) * 70
         const direction = Vector2.normalize({
           x: oppositeEdgeX - edgeX,
           y: verticalDrift
         })
-        return { x: edgeX, y: startY, directionX: direction.x, directionY: direction.y }
+        return {
+          x: edgeX,
+          y: startY,
+          directionX: direction.x,
+          directionY: direction.y,
+          delay: 0.14 + Math.random() * 0.24
+        }
       })
+      for (let index = projectileLanes.length - 1; index > 0; index--) {
+        const swapIndex = Math.floor(Math.random() * (index + 1))
+        const swapLane = projectileLanes[index]
+        projectileLanes[index] = projectileLanes[swapIndex]
+        projectileLanes[swapIndex] = swapLane
+      }
       const gridLines = projectileLanes.map((lane) => ({
         x1: lane.x,
         y1: lane.y,
@@ -2058,6 +2093,7 @@ export class Enemy {
         width: 2,
         color: '#FB923C'
       }))
+      const barrageDuration = projectileLanes.reduce((total, lane) => total + lane.delay, 0) + 0.25
       telegraph = {
         id,
         kind,
@@ -2066,12 +2102,14 @@ export class Enemy {
         sideMode,
         radius: 10,
         projectileCount,
+        inferoLaunchX,
+        inferoLaunchY,
         projectileLanes,
         gridLines,
         chargeTimer: 0,
         chargeDuration: 2,
         activeTimer: 0,
-        activeDuration: projectileCount * 0.18 + 0.12,
+        activeDuration: barrageDuration,
         damage: Math.round(24 * Math.max(1, this.damageScale)),
         pulseTimer: 0,
         pulseCount: 0,
@@ -2079,6 +2117,9 @@ export class Enemy {
         hasTriggered: false,
         hasDamagedPlayer: false
       }
+      this.inferoHoverTarget = { x: inferoLaunchX, y: inferoLaunchY }
+      this.inferoHoverRetargetTimer =
+        telegraph.chargeDuration + telegraph.activeDuration + 1.2
     } else if (kind === 'astral_orbital_grid') {
       const randomAngle = Math.random() * Math.PI
       const lineCount = 3 + Math.floor(Math.random() * 2)
@@ -2721,7 +2762,7 @@ export class Enemy {
       damage: attack.damage,
       color: pulseIndex % 2 === 0 ? '#FB923C' : '#FDE047',
       lifetime: 0,
-      maxLifetime: 5,
+      maxLifetime: 8,
       isBlazingSpear: true,
       trailTimer: 0,
       trailParticles: []
@@ -2925,11 +2966,9 @@ export class Enemy {
           t.y = bossCenter.y
           t.pulseTimer = (t.pulseTimer ?? 0) + deltaTime
           const shotsFired = t.pulseCount ?? 0
-          if (
-            shotsFired < (t.projectileCount ?? 0) &&
-            (t.pulseTimer ?? 0) >= 0.18
-          ) {
-            t.pulseTimer = (t.pulseTimer ?? 0) - 0.18
+          const nextSpear = t.projectileLanes?.[shotsFired]
+          if (nextSpear && (t.pulseTimer ?? 0) >= nextSpear.delay) {
+            t.pulseTimer = (t.pulseTimer ?? 0) - nextSpear.delay
             this.launchInferoSpearVolley(t, shotsFired)
             t.pulseCount = shotsFired + 1
             t.warningLabel =

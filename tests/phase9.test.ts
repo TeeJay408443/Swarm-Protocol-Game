@@ -1532,7 +1532,8 @@ describe('Phase 9: Swarm Protocol Core Mechanics & Data Integrity', () => {
     )
 
     for (let spearIndex = 0; spearIndex < attack.projectileCount!; spearIndex++) {
-      boss.update(0.18, player)
+      const shotDelay = attack.projectileLanes![spearIndex].delay
+      boss.update(shotDelay + 0.01, player)
       assert.equal(boss.projectiles.length, spearIndex + 1, 'only one spear should launch per interval')
     }
     assert.ok(boss.projectiles.every((projectile) => projectile.isBlazingSpear))
